@@ -34,7 +34,7 @@ export default function RoutinesView({
         <p className="py-8 text-[15px] italic text-[#a49a82]">No routines match your search.</p>
       )}
 
-      <div className="grid max-w-[900px] grid-cols-2 gap-11">
+      <div className="grid max-w-[900px] grid-cols-1 gap-8 lg:grid-cols-2 lg:gap-11">
         {filteredDaily.length > 0 && (
           <div>
             <div className={`${labelClass} mb-1.5`}>Every day</div>

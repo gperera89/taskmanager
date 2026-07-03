@@ -37,7 +37,7 @@ export default function ProjectsView({
         </p>
       )}
 
-      <div className="grid max-w-[940px] grid-cols-2 gap-5.5">
+      <div className="grid max-w-[940px] grid-cols-1 gap-5.5 lg:grid-cols-2">
         {filtered.map((project) => (
           <ProjectCard key={project.id} project={project} categoryOptions={categoryOptions} />
         ))}
