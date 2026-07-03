@@ -139,7 +139,7 @@ export type TaskbookData = {
   pendingCaptures: VoiceCaptureVM[];
 };
 
-export type AreaKey = "tasks" | "projects" | "routines" | "habits" | "day";
+export type AreaKey = "tasks" | "projects" | "routines" | "habits" | "calendar" | "day";
 
 // Tasks are edited inline on their row (see TasksView) rather than through this modal.
 export type ModalState =

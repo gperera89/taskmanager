@@ -14,6 +14,7 @@ export default function CalendarRail({
   dayDetail,
   upcoming,
   onClickDay,
+  variant = "rail",
 }: {
   monthLabel: string;
   year: number;
@@ -23,6 +24,9 @@ export default function CalendarRail({
   dayDetail: DayDetailVM | undefined;
   upcoming: UpcomingItemVM[];
   onClickDay: (day: number) => void;
+  // "rail" is the always-on desktop side panel; "panel" is the in-content view shown
+  // when Calendar is picked as a carousel tab on portrait/mobile screens.
+  variant?: "rail" | "panel";
 }) {
   let railTitle: string;
   let railItems: { key: string; a: string; b: string; c: string; hasC: boolean }[];
@@ -39,8 +43,15 @@ export default function CalendarRail({
     railItems = upcoming;
   }
 
+  const outerClass =
+    variant === "panel"
+      ? // In-content on mobile; the surrounding content wrapper supplies padding/scroll.
+        "w-full lg:hidden"
+      : // Desktop-only side rail — hidden below the lg breakpoint so it never overlaps content.
+        "hidden w-93 flex-none overflow-y-auto border-l border-[#ddd4c1] bg-[#ece5d6] px-6.5 pb-7.5 pt-6.5 lg:block";
+
   return (
-    <div className="w-93 flex-none overflow-y-auto border-l border-[#ddd4c1] bg-[#ece5d6] px-6.5 pb-7.5 pt-6.5">
+    <div className={outerClass}>
       <div className="mb-3 flex items-center justify-between">
         <div className="font-script text-4xl leading-[0.8] text-[#2a2622]">{monthLabel}</div>
         <div className="flex items-center gap-3.5">

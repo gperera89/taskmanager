@@ -9,6 +9,7 @@ export default function BottomTabs({
   activeProjectCount,
   routineTotalCount,
   habitAtRiskCount,
+  monthLabel,
 }: {
   area: AreaKey;
   onSelect: (area: AreaKey) => void;
@@ -16,26 +17,29 @@ export default function BottomTabs({
   activeProjectCount: number;
   routineTotalCount: number;
   habitAtRiskCount: number;
+  monthLabel: string;
 }) {
-  const tabs: { key: AreaKey; name: string; count: string; last?: boolean }[] = [
-    { key: "tasks", name: "Tasks", count: `${tasksRemainingToday} today` },
-    { key: "projects", name: "Projects", count: `${activeProjectCount} active` },
-    { key: "routines", name: "Routines", count: `${routineTotalCount}` },
-    { key: "habits", name: "Habits", count: habitAtRiskCount > 0 ? `${habitAtRiskCount} at risk` : "on track", last: true },
+  // The Calendar tab only appears on portrait/mobile — on desktop the calendar is an
+  // always-visible side rail, so its divider (on Habits) is dropped at the lg breakpoint.
+  const tabs: { key: AreaKey; name: string; count: string; borderClass: string }[] = [
+    { key: "tasks", name: "Tasks", count: `${tasksRemainingToday} today`, borderClass: "border-r border-[#ddd4c1]" },
+    { key: "projects", name: "Projects", count: `${activeProjectCount} active`, borderClass: "border-r border-[#ddd4c1]" },
+    { key: "routines", name: "Routines", count: `${routineTotalCount}`, borderClass: "border-r border-[#ddd4c1]" },
+    { key: "habits", name: "Habits", count: habitAtRiskCount > 0 ? `${habitAtRiskCount} at risk` : "on track", borderClass: "border-r border-[#ddd4c1] lg:border-r-0" },
+    { key: "calendar", name: "Calendar", count: monthLabel, borderClass: "lg:hidden" },
   ];
 
   return (
     <div className="flex h-[70px] flex-none border-t border-[#ddd4c1] bg-[#e6ded0]">
       {tabs.map((tab) => {
-        const on = area === tab.key || (area === "day" && tab.key === "tasks");
+        const on = area === tab.key || (area === "day" && tab.key === "calendar");
         return (
           <button
             key={tab.key}
             type="button"
             onClick={() => onSelect(tab.key)}
-            className="flex h-full flex-1 cursor-pointer flex-col items-center justify-center gap-0.5"
+            className={`flex h-full flex-1 cursor-pointer flex-col items-center justify-center gap-0.5 ${tab.borderClass}`}
             style={{
-              borderRight: tab.last ? "none" : "1px solid #ddd4c1",
               background: on ? "#e9e1d0" : "transparent",
             }}
           >

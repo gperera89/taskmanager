@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { AreaKey, CapturedKind, HabitCardVM, ModalState, TaskbookData } from "./types";
 import { ModalContext } from "./ModalContext";
 import Header from "./Header";
@@ -14,6 +14,10 @@ import DayView from "./DayView";
 import ItemModal from "./ItemModal";
 import SettingsModal from "./SettingsModal";
 
+// The order of the portrait/mobile carousel. On desktop the calendar is a side rail
+// instead of a swipeable panel, so it is dropped from the content flow there.
+const CAROUSEL_VIEWS: AreaKey[] = ["tasks", "projects", "routines", "habits", "calendar"];
+
 export default function TaskbookApp({ data }: { data: TaskbookData }) {
   const [area, setArea] = useState<AreaKey>("tasks");
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
@@ -21,6 +25,21 @@ export default function TaskbookApp({ data }: { data: TaskbookData }) {
   const [query, setQuery] = useState("");
   const [modal, setModal] = useState<ModalState>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // While we programmatically snap the carousel to a tapped tab, ignore the scroll
+  // events it emits so they don't fight the target we're animating toward.
+  const snappingRef = useRef(false);
+
+  // Mirror the lg breakpoint (1024px) used for the layout: below it we swipe a carousel,
+  // at or above it we show the fixed content + calendar rail.
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 1023px)");
+    const update = () => setIsMobile(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
 
   const modalActions = useMemo(
     () => ({
@@ -30,17 +49,51 @@ export default function TaskbookApp({ data }: { data: TaskbookData }) {
     []
   );
 
+  function scrollToArea(key: AreaKey, behavior: ScrollBehavior = "smooth") {
+    const idx = CAROUSEL_VIEWS.indexOf(key);
+    const el = scrollRef.current;
+    if (idx < 0 || !el) return;
+    snappingRef.current = true;
+    el.scrollTo({ left: el.clientWidth * idx, behavior });
+    window.setTimeout(() => {
+      snappingRef.current = false;
+    }, 400);
+  }
+
   function selectTab(next: AreaKey) {
     setArea(next);
     setDayOpen(false);
+    if (isMobile && CAROUSEL_VIEWS.includes(next)) scrollToArea(next);
   }
+
+  // Keep the highlighted tab in sync with whichever panel the swipe settles on.
+  function onCarouselScroll() {
+    if (snappingRef.current) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    const idx = Math.round(el.scrollLeft / el.clientWidth);
+    const next = CAROUSEL_VIEWS[idx];
+    if (next && next !== area) setArea(next);
+  }
+
+  // On entering mobile (initial mount or rotating to portrait), line the carousel up
+  // with the currently active view without animating. On growing to desktop, the calendar
+  // is the side rail rather than a main view, so fall back to Tasks if it was active.
+  useEffect(() => {
+    if (isMobile) {
+      if (CAROUSEL_VIEWS.includes(area)) scrollToArea(area, "auto");
+    } else if (area === "calendar") {
+      setArea("tasks");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMobile]);
 
   // Looks up the entity a voice-capture notice points at, so "Edit" can reopen its normal
   // edit form instead of needing a bespoke voice-capture editing UI. Tasks are edited inline
   // on their row rather than through a modal, so "Edit" just jumps to the Tasks tab.
   function openEditForCapture(kind: CapturedKind, entityId: string) {
     if (kind === "task") {
-      setArea("tasks");
+      selectTab("tasks");
     } else if (kind === "project") {
       const item = data.projectCards.find((p) => p.id === entityId);
       if (item) setModal({ mode: "edit", kind: "project", item });
@@ -68,6 +121,65 @@ export default function TaskbookApp({ data }: { data: TaskbookData }) {
 
   const dayDetail = selectedDay != null ? data.dayDetails[selectedDay] : undefined;
 
+  function viewFor(key: AreaKey) {
+    switch (key) {
+      case "tasks":
+        return (
+          <TasksView
+            groups={data.taskGroups}
+            remainingToday={data.tasksRemainingToday}
+            query={query}
+            categoryOptions={data.categoryOptions}
+            projectOptions={data.projectOptions}
+          />
+        );
+      case "projects":
+        return (
+          <ProjectsView
+            cards={data.projectCards}
+            activeCount={data.activeProjectCount}
+            query={query}
+            categoryOptions={data.categoryOptions}
+          />
+        );
+      case "routines":
+        return (
+          <RoutinesView
+            daily={data.routineDaily}
+            scheduled={data.routineScheduled}
+            total={data.routineTotalCount}
+            query={query}
+          />
+        );
+      case "habits":
+        return (
+          <HabitsView
+            featured={data.habitFeatured}
+            suggested={data.habitSuggested}
+            onTrack={data.habitOnTrack}
+            atRiskCount={data.habitAtRiskCount}
+            query={query}
+          />
+        );
+      case "calendar":
+        return (
+          <CalendarRail
+            variant="panel"
+            monthLabel={data.monthLabel}
+            year={data.year}
+            cells={data.monthCells}
+            selectedDay={selectedDay}
+            dayOpen={dayOpen}
+            dayDetail={dayDetail}
+            upcoming={data.upcoming}
+            onClickDay={clickDay}
+          />
+        );
+      default:
+        return null;
+    }
+  }
+
   return (
     <ModalContext.Provider value={modalActions}>
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#efe9dc] font-serif">
@@ -80,58 +192,49 @@ export default function TaskbookApp({ data }: { data: TaskbookData }) {
           onOpenSettings={() => setSettingsOpen(true)}
         />
 
-        <div className="flex min-h-0 flex-1">
-          <div className="flex-1 overflow-y-auto px-11 py-8 pb-10">
-            {area === "tasks" && (
-              <TasksView
-                groups={data.taskGroups}
-                remainingToday={data.tasksRemainingToday}
-                query={query}
-                categoryOptions={data.categoryOptions}
-                projectOptions={data.projectOptions}
-              />
-            )}
-            {area === "projects" && (
-              <ProjectsView
-                cards={data.projectCards}
-                activeCount={data.activeProjectCount}
-                query={query}
-                categoryOptions={data.categoryOptions}
-              />
-            )}
-            {area === "routines" && (
-              <RoutinesView
-                daily={data.routineDaily}
-                scheduled={data.routineScheduled}
-                total={data.routineTotalCount}
-                query={query}
-              />
-            )}
-            {area === "habits" && (
-              <HabitsView
-                featured={data.habitFeatured}
-                suggested={data.habitSuggested}
-                onTrack={data.habitOnTrack}
-                atRiskCount={data.habitAtRiskCount}
-                query={query}
-              />
-            )}
+        {isMobile ? (
+          <div className="relative flex min-h-0 flex-1">
+            <div
+              ref={scrollRef}
+              onScroll={onCarouselScroll}
+              className="flex min-h-0 flex-1 snap-x snap-mandatory overflow-x-auto overflow-y-hidden"
+            >
+              {CAROUSEL_VIEWS.map((key) => (
+                <section
+                  key={key}
+                  className="w-full flex-none snap-start overflow-y-auto px-5 py-6 pb-10"
+                >
+                  {viewFor(key)}
+                </section>
+              ))}
+            </div>
             {area === "day" && dayDetail && (
-              <DayView detail={dayDetail} onBack={() => selectTab("tasks")} />
+              <div className="absolute inset-0 z-10 overflow-y-auto bg-[#efe9dc] px-5 py-6 pb-10">
+                <DayView detail={dayDetail} onBack={() => selectTab("calendar")} />
+              </div>
             )}
           </div>
+        ) : (
+          <div className="flex min-h-0 flex-1">
+            <div className="flex-1 overflow-y-auto px-11 py-8 pb-10">
+              {viewFor(area)}
+              {area === "day" && dayDetail && (
+                <DayView detail={dayDetail} onBack={() => selectTab("tasks")} />
+              )}
+            </div>
 
-          <CalendarRail
-            monthLabel={data.monthLabel}
-            year={data.year}
-            cells={data.monthCells}
-            selectedDay={selectedDay}
-            dayOpen={dayOpen}
-            dayDetail={dayDetail}
-            upcoming={data.upcoming}
-            onClickDay={clickDay}
-          />
-        </div>
+            <CalendarRail
+              monthLabel={data.monthLabel}
+              year={data.year}
+              cells={data.monthCells}
+              selectedDay={selectedDay}
+              dayOpen={dayOpen}
+              dayDetail={dayDetail}
+              upcoming={data.upcoming}
+              onClickDay={clickDay}
+            />
+          </div>
+        )}
 
         <BottomTabs
           area={area}
@@ -140,6 +243,7 @@ export default function TaskbookApp({ data }: { data: TaskbookData }) {
           activeProjectCount={data.activeProjectCount}
           routineTotalCount={data.routineTotalCount}
           habitAtRiskCount={data.habitAtRiskCount}
+          monthLabel={data.monthLabel}
         />
       </div>
 
