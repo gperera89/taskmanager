@@ -1,391 +1,403 @@
-import { getHabits, getProjects, getRoutines, getTasks } from "@/lib/api";
+import {
+  getCategories,
+  getDueItems,
+  getHabitsWithStatus,
+  getProjects,
+  getRoutines,
+  getTasks,
+  getUnreadVoiceCaptures,
+  isRoutineTickedNow,
+  type Routine,
+} from "@/lib/api";
 import { getCalendarEvents } from "@/lib/calendar";
 import {
-  addHabit,
-  addProject,
-  addRoutine,
-  addTask,
-  editHabit,
-  editProject,
-  editRoutine,
-  editTask,
-  markHabitDone,
-  removeHabit,
-  removeProject,
-  removeRoutine,
-  removeTask,
-  toggleRoutine,
-  toggleTask,
-} from "@/app/actions";
+  buildMonthCells,
+  calendarDateFromDue,
+  daysUntil,
+  bucketForDue,
+  formatLongDate,
+  formatShortDate,
+  localDaysUntil,
+  pad2,
+  type DueBucket,
+} from "@/lib/taskbookDates";
+import TaskbookApp from "@/components/taskbook/TaskbookApp";
+import type {
+  DayDetailVM,
+  HabitCardVM,
+  ProjectCardVM,
+  RoutineItemVM,
+  TaskbookData,
+  TaskGroupVM,
+  TaskItemVM,
+  UpcomingItemVM,
+  VoiceCaptureVM,
+} from "@/components/taskbook/types";
 
 const HABIT_FREQUENCY_LABELS: Record<string, string> = {
   DAILY: "Daily",
   WEEKLY: "Weekly",
   FORTNIGHTLY: "Fortnightly",
   MONTHLY: "Monthly",
+  CUSTOM: "Custom",
 };
+const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const DOW_ABBR = WEEKDAY_NAMES;
 
-const inputClass =
-  "min-w-0 rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800 dark:bg-transparent";
-const buttonClass =
-  "rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white dark:bg-zinc-50 dark:text-black";
+function toDateInputValue(date: Date | null): string {
+  return date ? date.toISOString().slice(0, 10) : "";
+}
+
+function ordinal(n: number): string {
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`;
+}
+
+function relativeDaysAgoLabel(d: Date, now: Date): string {
+  const diff = -localDaysUntil(d, now);
+  if (diff <= 0) return "today";
+  if (diff === 1) return "yesterday";
+  return `${diff} days ago`;
+}
+
+function relativeLabel(diff: number, displayDate: Date): string {
+  if (diff === 0) return "Today";
+  if (diff === 1) return "Tomorrow";
+  return `${WEEKDAY_NAMES[displayDate.getDay()]} ${displayDate.getDate()}`;
+}
 
 export default async function Home() {
-  let tasks, habits, projects, routines;
+  let tasks: Awaited<ReturnType<typeof getTasks>> | undefined;
+  let projects: Awaited<ReturnType<typeof getProjects>> | undefined;
+  let habitStatuses: Awaited<ReturnType<typeof getHabitsWithStatus>> | undefined;
+  let routines: Routine[] | undefined;
+  let categories: Awaited<ReturnType<typeof getCategories>> | undefined;
   let apiError: string | null = null;
 
   try {
-    [tasks, habits, projects, routines] = await Promise.all([
+    [tasks, projects, habitStatuses, routines, categories] = await Promise.all([
       getTasks(),
-      getHabits(),
       getProjects(),
+      getHabitsWithStatus(),
       getRoutines(),
+      getCategories(),
     ]);
-  } catch {
+  } catch (err) {
+    console.error("[page] failed to load tasks/projects/habits/routines/categories:", err);
     apiError = "Could not reach the database. Check DATABASE_URL in .env.local.";
   }
 
   if (apiError) {
     return (
-      <div className="flex flex-1 items-center justify-center bg-zinc-50 dark:bg-black">
-        <p className="text-zinc-600 dark:text-zinc-400">{apiError}</p>
+      <div className="flex flex-1 items-center justify-center bg-[#efe9dc]">
+        <p className="font-serif text-[#8a8069]">{apiError}</p>
       </div>
     );
   }
 
-  // Kept separate from the Promise.all above: a missing/misconfigured calendar
-  // shouldn't take down the rest of the dashboard.
   let calendarEvents: Awaited<ReturnType<typeof getCalendarEvents>>["events"] = [];
   let calendarErrors: string[] = [];
   try {
     ({ events: calendarEvents, errors: calendarErrors } = await getCalendarEvents());
-  } catch {
+  } catch (err) {
+    console.error("[page] failed to load calendar events:", err);
     calendarErrors = ["Could not load the calendar."];
   }
 
-  const projectNameById = new Map(projects!.map((project) => [project.id, project.name]));
-  const taskCountByProject = new Map<string, number>();
-  for (const task of tasks!) {
-    if (task.projectId) taskCountByProject.set(task.projectId, (taskCountByProject.get(task.projectId) ?? 0) + 1);
+  let pendingCaptures: Awaited<ReturnType<typeof getUnreadVoiceCaptures>> = [];
+  try {
+    pendingCaptures = await getUnreadVoiceCaptures();
+  } catch (err) {
+    console.error("[page] failed to load pending voice captures:", err);
   }
 
-  return (
-    <div className="flex flex-col flex-1 bg-zinc-50 dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl mx-auto flex-col gap-10 py-16 px-6">
-        <h1 className="text-3xl font-semibold tracking-tight text-black dark:text-zinc-50">
-          Life OS
-        </h1>
+  const now = new Date();
+  const year = now.getFullYear();
+  const month0 = now.getMonth();
+  const todayDay = now.getDate();
 
-        <Section title="Calendar">
-          {calendarErrors.map((error) => (
-            <p key={error} className="text-sm text-zinc-400">
-              {error}
-            </p>
-          ))}
-          {calendarEvents.length === 0 && calendarErrors.length === 0 && <Empty />}
-          {calendarEvents.length > 0 && (
-            <ul className="flex flex-col gap-2">
-              {calendarEvents.map((event) => (
-                <li
-                  key={event.id}
-                  className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-800"
-                >
-                  <div className="flex flex-col">
-                    <span className="text-zinc-900 dark:text-zinc-50">{event.title}</span>
-                    <span className="text-xs text-zinc-400">
-                      {event.source}
-                      {event.location && ` · ${event.location}`}
-                    </span>
-                  </div>
-                  <span className="text-xs text-zinc-400">{formatEventTime(event)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Section>
-
-        <Section title="Tasks">
-          <form action={addTask} className="flex flex-wrap gap-2">
-            <input name="title" placeholder="Title" required className={inputClass + " min-w-0 flex-1"} />
-            <input name="category" placeholder="Category" required className={inputClass + " w-32"} />
-            <input name="dueDate" type="date" className={inputClass} />
-            <select name="projectId" defaultValue="" className={inputClass}>
-              <option value="">No project</option>
-              {projects!.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
-            <button type="submit" className={buttonClass}>
-              Add
-            </button>
-          </form>
-
-          {tasks!.length === 0 && <Empty />}
-          <ul className="flex flex-col gap-2">
-            {tasks!.map((task) => (
-              <li
-                key={task.id}
-                className="flex flex-col gap-2 rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-800"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <form action={toggleTask.bind(null, task.id, task.isCompleted)}>
-                    <button
-                      type="submit"
-                      className={
-                        task.isCompleted
-                          ? "line-through text-zinc-400"
-                          : "text-left text-zinc-900 dark:text-zinc-50"
-                      }
-                    >
-                      {task.title}
-                    </button>
-                  </form>
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs uppercase tracking-wide text-zinc-400">
-                      {task.category}
-                      {task.projectId && ` · ${projectNameById.get(task.projectId) ?? ""}`}
-                    </span>
-                    <DeleteButton action={removeTask.bind(null, task.id)} />
-                  </div>
-                </div>
-                <EditDisclosure>
-                  <form action={editTask.bind(null, task.id)} className="flex flex-wrap gap-2">
-                    <input name="title" defaultValue={task.title} required className={inputClass + " min-w-0 flex-1"} />
-                    <input name="category" defaultValue={task.category} required className={inputClass + " w-32"} />
-                    <input name="dueDate" type="date" defaultValue={toDateInputValue(task.dueDate)} className={inputClass} />
-                    <select name="projectId" defaultValue={task.projectId ?? ""} className={inputClass}>
-                      <option value="">No project</option>
-                      {projects!.map((project) => (
-                        <option key={project.id} value={project.id}>
-                          {project.name}
-                        </option>
-                      ))}
-                    </select>
-                    <button type="submit" className={buttonClass}>
-                      Save
-                    </button>
-                  </form>
-                </EditDisclosure>
-              </li>
-            ))}
-          </ul>
-        </Section>
-
-        <Section title="Habits">
-          <form action={addHabit} className="flex flex-wrap gap-2">
-            <input name="title" placeholder="Title" required className={inputClass + " flex-1"} />
-            <select name="frequency" defaultValue="DAILY" className={inputClass}>
-              {Object.entries(HABIT_FREQUENCY_LABELS).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-            <button type="submit" className={buttonClass}>
-              Add
-            </button>
-          </form>
-
-          {habits!.length === 0 && <Empty />}
-          <ul className="flex flex-col gap-2">
-            {habits!.map((habit) => (
-              <li
-                key={habit.id}
-                className="flex flex-col gap-2 rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-800"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex flex-col">
-                    <span className="text-zinc-900 dark:text-zinc-50">{habit.title}</span>
-                    <span className="text-xs text-zinc-400">
-                      {HABIT_FREQUENCY_LABELS[habit.frequency]} · streak {habit.currentStreak}
-                      {habit.longestStreak > habit.currentStreak && ` (best ${habit.longestStreak})`}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <form action={markHabitDone.bind(null, habit.id)}>
-                      <button type="submit" className={buttonClass}>
-                        Done
-                      </button>
-                    </form>
-                    <DeleteButton action={removeHabit.bind(null, habit.id)} />
-                  </div>
-                </div>
-                <EditDisclosure>
-                  <form action={editHabit.bind(null, habit.id)} className="flex flex-wrap gap-2">
-                    <input name="title" defaultValue={habit.title} required className={inputClass + " flex-1"} />
-                    <select name="frequency" defaultValue={habit.frequency} className={inputClass}>
-                      {Object.entries(HABIT_FREQUENCY_LABELS).map(([value, label]) => (
-                        <option key={value} value={value}>
-                          {label}
-                        </option>
-                      ))}
-                    </select>
-                    <button type="submit" className={buttonClass}>
-                      Save
-                    </button>
-                  </form>
-                </EditDisclosure>
-              </li>
-            ))}
-          </ul>
-        </Section>
-
-        <Section title="Projects">
-          <form action={addProject} className="flex flex-wrap gap-2">
-            <input name="name" placeholder="Name" required className={inputClass + " flex-1"} />
-            <input name="description" placeholder="Description" className={inputClass + " flex-1"} />
-            <button type="submit" className={buttonClass}>
-              Add
-            </button>
-          </form>
-
-          {projects!.length === 0 && <Empty />}
-          <ul className="flex flex-col gap-2">
-            {projects!.map((project) => {
-              const taskCount = taskCountByProject.get(project.id) ?? 0;
-              return (
-                <li
-                  key={project.id}
-                  className="flex flex-col gap-2 rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-800"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex flex-col">
-                      <span className="text-zinc-900 dark:text-zinc-50">{project.name}</span>
-                      <span className="text-xs text-zinc-400">
-                        {taskCount} task{taskCount === 1 ? "" : "s"}
-                        {project.description && ` · ${project.description}`}
-                      </span>
-                    </div>
-                    <DeleteButton action={removeProject.bind(null, project.id)} />
-                  </div>
-                  <EditDisclosure>
-                    <form action={editProject.bind(null, project.id)} className="flex flex-wrap gap-2">
-                      <input name="name" defaultValue={project.name} required className={inputClass + " flex-1"} />
-                      <input
-                        name="description"
-                        defaultValue={project.description ?? ""}
-                        className={inputClass + " flex-1"}
-                      />
-                      <button type="submit" className={buttonClass}>
-                        Save
-                      </button>
-                    </form>
-                  </EditDisclosure>
-                </li>
-              );
-            })}
-          </ul>
-        </Section>
-
-        <Section title="Routines">
-          <form action={addRoutine} className="flex flex-wrap gap-2">
-            <input name="title" placeholder="Title" required className={inputClass + " flex-1"} />
-            <input name="reminderTime" placeholder="08:00" required className={inputClass + " w-24"} />
-            <button type="submit" className={buttonClass}>
-              Add
-            </button>
-          </form>
-
-          {routines!.length === 0 && <Empty />}
-          <ul className="flex flex-col gap-2">
-            {routines!.map((routine) => (
-              <li
-                key={routine.id}
-                className="flex flex-col gap-2 rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-800"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <form action={toggleRoutine.bind(null, routine.id, routine.isActive)}>
-                    <button
-                      type="submit"
-                      className={
-                        routine.isActive
-                          ? "text-left text-zinc-900 dark:text-zinc-50"
-                          : "text-left text-zinc-400 line-through"
-                      }
-                    >
-                      {routine.title}
-                    </button>
-                  </form>
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs text-zinc-400">{routine.reminderTime}</span>
-                    <DeleteButton action={removeRoutine.bind(null, routine.id)} />
-                  </div>
-                </div>
-                <EditDisclosure>
-                  <form action={editRoutine.bind(null, routine.id)} className="flex flex-wrap gap-2">
-                    <input name="title" defaultValue={routine.title} required className={inputClass + " flex-1"} />
-                    <input
-                      name="reminderTime"
-                      defaultValue={routine.reminderTime}
-                      required
-                      className={inputClass + " w-24"}
-                    />
-                    <button type="submit" className={buttonClass}>
-                      Save
-                    </button>
-                  </form>
-                </EditDisclosure>
-              </li>
-            ))}
-          </ul>
-        </Section>
-      </main>
-    </div>
-  );
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section className="flex flex-col gap-3">
-      <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-500">
-        {title}
-      </h2>
-      {children}
-    </section>
-  );
-}
-
-function Empty() {
-  return <p className="text-sm text-zinc-400">Nothing here yet.</p>;
-}
-
-function formatEventTime(event: { start: string; allDay: boolean }) {
-  const start = new Date(event.start);
-  if (event.allDay) {
-    return start.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  const monthStart = new Date(Date.UTC(year, month0, 1));
+  const monthEnd = new Date(Date.UTC(year, month0 + 1, 0, 23, 59, 59, 999));
+  let dueTasks: Awaited<ReturnType<typeof getDueItems>>["tasks"] = [];
+  let dueProjects: Awaited<ReturnType<typeof getDueItems>>["projects"] = [];
+  try {
+    ({ tasks: dueTasks, projects: dueProjects } = await getDueItems(monthStart, monthEnd));
+  } catch (err) {
+    console.error("[page] failed to load due tasks/projects for the month:", err);
+    // Calendar rail just won't show dots/details for the month; not fatal.
   }
-  return start.toLocaleString(undefined, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
+
+  const monthPrefix = `${year}-${pad2(month0 + 1)}`;
+  const dayDetails: Record<number, DayDetailVM> = {};
+  const dotDays = new Set<number>();
+
+  function ensureDay(day: number): DayDetailVM {
+    if (!dayDetails[day]) {
+      const d = new Date(year, month0, day);
+      dayDetails[day] = {
+        day,
+        weekday: WEEKDAY_NAMES[d.getDay()],
+        dateLabel: formatShortDate(d),
+        tasks: [],
+        projects: [],
+        events: [],
+      };
+    }
+    return dayDetails[day];
+  }
+
+  for (const t of dueTasks) {
+    if (!t.dueDate) continue;
+    const key = t.dueDate.toISOString().slice(0, 10);
+    if (!key.startsWith(monthPrefix)) continue;
+    const day = Number(key.slice(8, 10));
+    ensureDay(day).tasks.push({ id: t.id, title: t.title, isCompleted: t.isCompleted, projectName: t.project?.name ?? null });
+    dotDays.add(day);
+  }
+  for (const p of dueProjects) {
+    if (!p.dueDate) continue;
+    const key = p.dueDate.toISOString().slice(0, 10);
+    if (!key.startsWith(monthPrefix)) continue;
+    const day = Number(key.slice(8, 10));
+    ensureDay(day).projects.push({ id: p.id, name: p.name });
+    dotDays.add(day);
+  }
+  for (const e of calendarEvents) {
+    const start = new Date(e.start);
+    if (start.getFullYear() !== year || start.getMonth() !== month0) continue;
+    const day = start.getDate();
+    const metaLabel = `${e.allDay ? "All day" : start.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })} · ${e.source}`;
+    ensureDay(day).events.push({ id: e.id, title: e.title, metaLabel });
+    dotDays.add(day);
+  }
+
+  const monthCells = buildMonthCells(year, month0, todayDay, dotDays);
+  const monthLabel = new Intl.DateTimeFormat("en-US", { month: "long" }).format(now);
+
+  // Upcoming panel (default rail state): the next few due tasks/projects/events, regardless
+  // of which month they fall in.
+  type UpcomingSource = { sortKey: number; item: UpcomingItemVM };
+  const upcomingSources: UpcomingSource[] = [];
+  for (const t of tasks!) {
+    if (t.isCompleted || !t.dueDate) continue;
+    const diff = daysUntil(t.dueDate, now);
+    if (diff < 0) continue;
+    const d = calendarDateFromDue(t.dueDate);
+    upcomingSources.push({
+      sortKey: d.getTime(),
+      item: { key: `t-${t.id}`, a: relativeLabel(diff, d), b: t.title, c: t.category, hasC: true },
+    });
+  }
+  for (const p of projects!) {
+    if (p.isCompleted || !p.dueDate) continue;
+    const diff = daysUntil(p.dueDate, now);
+    if (diff < 0) continue;
+    const d = calendarDateFromDue(p.dueDate);
+    upcomingSources.push({
+      sortKey: d.getTime(),
+      item: { key: `p-${p.id}`, a: relativeLabel(diff, d), b: p.name, c: "Project", hasC: true },
+    });
+  }
+  for (const e of calendarEvents) {
+    const start = new Date(e.start);
+    const diff = localDaysUntil(start, now);
+    if (start.getTime() < now.getTime() && diff !== 0) continue;
+    upcomingSources.push({
+      sortKey: start.getTime(),
+      item: {
+        key: `e-${e.id}`,
+        a: relativeLabel(diff, start),
+        b: e.title,
+        c: `${e.allDay ? "All day" : start.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })} · ${e.source}`,
+        hasC: true,
+      },
+    });
+  }
+  upcomingSources.sort((a, b) => a.sortKey - b.sortKey);
+  const upcoming = upcomingSources.slice(0, 3).map((s) => s.item);
+
+  // --- Tasks tab: grouped by due date ---
+  type TaskWithSubtasks = Awaited<ReturnType<typeof getTasks>>[number];
+  const projectNameById = new Map(projects!.map((p) => [p.id, p.name]));
+  function toTaskVM(t: TaskWithSubtasks): TaskItemVM {
+    const dueLabel = t.dueDate ? formatShortDate(calendarDateFromDue(t.dueDate)) : null;
+    return {
+      id: t.id,
+      title: t.title,
+      isCompleted: t.isCompleted,
+      category: t.category,
+      description: t.description,
+      dueDateValue: toDateInputValue(t.dueDate),
+      dueLabel,
+      projectId: t.projectId,
+      projectName: t.projectId ? projectNameById.get(t.projectId) ?? null : null,
+      subtasksDone: t.subtasks.filter((s) => s.isCompleted).length,
+      subtasksTotal: t.subtasks.length,
+    };
+  }
+
+  const bucketOrder: DueBucket[] = ["overdue", "today", "tomorrow", "week", "later", "none"];
+  const bucketLabel = (b: DueBucket): string => {
+    switch (b) {
+      case "overdue":
+        return "Overdue";
+      case "today":
+        return `Today · ${formatShortDate(now)}`;
+      case "tomorrow":
+        return `Tomorrow · ${formatShortDate(new Date(year, month0, todayDay + 1))}`;
+      case "week":
+        return "This week";
+      case "later":
+        return "Later";
+      case "none":
+        return "No date";
+    }
+  };
+
+  const grouped = new Map<DueBucket, TaskItemVM[]>();
+  for (const t of tasks!) {
+    const vm = toTaskVM(t);
+    const b = bucketForDue(t.dueDate, now);
+    if (!grouped.has(b)) grouped.set(b, []);
+    grouped.get(b)!.push(vm);
+  }
+  const taskGroups: TaskGroupVM[] = bucketOrder
+    .filter((b) => grouped.has(b))
+    .map((b) => ({ key: b, label: bucketLabel(b), tasks: grouped.get(b)! }));
+  const tasksRemainingToday = (grouped.get("today") ?? []).filter((t) => !t.isCompleted).length;
+
+  // --- Projects tab ---
+  const tasksByProject = new Map<string, TaskWithSubtasks[]>();
+  for (const t of tasks!) {
+    if (!t.projectId) continue;
+    if (!tasksByProject.has(t.projectId)) tasksByProject.set(t.projectId, []);
+    tasksByProject.get(t.projectId)!.push(t);
+  }
+  const projectCards: ProjectCardVM[] = projects!.map((p) => {
+    const items = tasksByProject.get(p.id) ?? [];
+    const done = items.filter((t) => t.isCompleted).length;
+    const total = items.length;
+    const progressPct = total ? Math.round((done / total) * 100) : 0;
+    const previewSource = [...items].sort((a, b) => Number(a.isCompleted) - Number(b.isCompleted));
+    const preview = previewSource.slice(0, 3).map((t) => ({
+      id: t.id,
+      title: t.title,
+      isCompleted: t.isCompleted,
+      dueLabel: t.dueDate ? formatShortDate(calendarDateFromDue(t.dueDate)) : null,
+    }));
+    const moreCount = Math.max(0, total - preview.length);
+    return {
+      id: p.id,
+      name: p.name,
+      description: p.description,
+      dueDateValue: toDateInputValue(p.dueDate),
+      done,
+      total,
+      progressPct,
+      preview,
+      moreCount,
+    };
   });
-}
+  const activeProjectCount = projects!.filter((p) => !p.isCompleted).length;
 
-function DeleteButton({ action }: { action: () => Promise<void> }) {
-  return (
-    <form action={action}>
-      <button type="submit" className="text-xs text-zinc-400 hover:text-red-500">
-        Delete
-      </button>
-    </form>
-  );
-}
+  // --- Routines tab ---
+  function scheduleLabel(r: Routine): string {
+    if (r.frequency === "WEEKLY") {
+      const days = r.daysOfWeek.length ? r.daysOfWeek.map((d) => DOW_ABBR[d]).join(", ") : "";
+      return days ? `Weekly · ${days}` : "Weekly";
+    }
+    if (r.frequency === "MONTHLY") {
+      return r.dayOfMonth ? `Monthly · ${ordinal(r.dayOfMonth)}` : "Monthly";
+    }
+    return "";
+  }
+  const routineVMs: RoutineItemVM[] = routines!.map((r) => ({
+    id: r.id,
+    title: r.title,
+    reminderTime: r.reminderTime,
+    frequency: r.frequency,
+    daysOfWeek: r.daysOfWeek,
+    dayOfMonth: r.dayOfMonth,
+    isActive: r.isActive,
+    isTicked: isRoutineTickedNow(r),
+    scheduleLabel: scheduleLabel(r),
+  }));
+  const routineDaily = routineVMs.filter((r) => r.frequency === "DAILY");
+  const routineScheduled = routineVMs.filter((r) => r.frequency !== "DAILY");
+  const routineTotalCount = routineVMs.length;
 
-function EditDisclosure({ children }: { children: React.ReactNode }) {
-  return (
-    <details>
-      <summary className="cursor-pointer text-xs text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-50">
-        Edit
-      </summary>
-      <div className="mt-2">{children}</div>
-    </details>
-  );
-}
+  // --- Habits tab ---
+  type HabitStatusItem = Awaited<ReturnType<typeof getHabitsWithStatus>>[number];
+  function habitDetailLabel(hs: HabitStatusItem): string {
+    const freqLabel = HABIT_FREQUENCY_LABELS[hs.habit.frequency];
+    if (hs.atRisk) {
+      const lastDoneLabel = hs.habit.lastCompletedDate ? relativeDaysAgoLabel(hs.habit.lastCompletedDate, now) : "not yet done";
+      return `Last done ${lastDoneLabel} · do it today to keep your ${hs.habit.currentStreak}-day streak.`;
+    }
+    if (hs.isDoneThisPeriod) {
+      return `${freqLabel} · done today`;
+    }
+    const daysLabel = hs.daysRemaining <= 1 ? "due tomorrow" : `due in ${Math.ceil(hs.daysRemaining)} days`;
+    return `${freqLabel} · ${daysLabel}`;
+  }
+  const habitVMs: HabitCardVM[] = habitStatuses!.map((hs) => ({
+    id: hs.habit.id,
+    title: hs.habit.title,
+    frequency: hs.habit.frequency,
+    frequencyLabel: HABIT_FREQUENCY_LABELS[hs.habit.frequency],
+    customIntervalDays: hs.habit.customIntervalDays,
+    currentStreak: hs.habit.currentStreak,
+    longestStreak: hs.habit.longestStreak,
+    atRisk: hs.atRisk,
+    isDoneThisPeriod: hs.isDoneThisPeriod,
+    detailLabel: habitDetailLabel(hs),
+  }));
+  const habitFeatured = habitVMs[0] ?? null;
+  const rest = habitVMs.slice(1);
+  const habitSuggested = rest.filter((h) => !h.isDoneThisPeriod);
+  const habitOnTrack = rest.filter((h) => h.isDoneThisPeriod);
+  const habitAtRiskCount = habitVMs.filter((h) => h.atRisk).length;
 
-function toDateInputValue(date: Date | null) {
-  return date ? date.toISOString().slice(0, 10) : "";
+  // --- Pending voice captures (notification panel) ---
+  const CAPTURED_KIND_MAP: Record<string, VoiceCaptureVM["kind"]> = {
+    TASK: "task",
+    PROJECT: "project",
+    ROUTINE: "routine",
+    HABIT: "habit",
+  };
+  const pendingCaptureVMs: VoiceCaptureVM[] = pendingCaptures.map((c) => ({
+    id: c.id,
+    transcript: c.transcript,
+    kind: CAPTURED_KIND_MAP[c.kind],
+    entityId: c.entityId,
+    summary: c.summary,
+    parseError: c.parseError,
+  }));
+
+  const data: TaskbookData = {
+    todayLabel: formatLongDate(now),
+    monthLabel,
+    year,
+    monthCells,
+    dayDetails,
+    upcoming,
+    taskGroups,
+    tasksRemainingToday,
+    projectCards,
+    activeProjectCount,
+    routineDaily,
+    routineScheduled,
+    routineTotalCount,
+    habitFeatured,
+    habitSuggested,
+    habitOnTrack,
+    habitAtRiskCount,
+    calendarErrors,
+    projectOptions: projects!.map((p) => ({ id: p.id, name: p.name })),
+    categoryOptions: categories!.map((c) => ({ id: c.id, name: c.name })),
+    pendingCaptures: pendingCaptureVMs,
+  };
+
+  return <TaskbookApp data={data} />;
 }

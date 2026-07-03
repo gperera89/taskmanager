@@ -11,23 +11,60 @@ datasource db {
   provider = "postgresql"
 }
 
+// Selectable options for Task.category (a free-text field on Task itself — this table only
+// drives the "pick or manage a category" UI, it isn't a foreign key).
+model Category {
+  id   String @id @default(uuid())
+  name String @unique
+}
+
 model Project {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   name        String
-  description String?  
-  tasks       Task[]   
+  description String?
+  isCompleted Boolean   @default(false)
+  dueDate     DateTime?
+  tasks       Task[]
 }
 
 model Task {
   id          String    @id @default(uuid())
   title       String
-  category    String    
+  description String?
+  category    String
   dueDate     DateTime?
   isCompleted Boolean   @default(false)
   createdAt   DateTime  @default(now())
 
   projectId   String?
   project     Project?  @relation(fields: [projectId], references: [id])
+
+  // Subtasks: a task can be broken down into child tasks of itself.
+  parentId    String?
+  parent      Task?     @relation("TaskSubtasks", fields: [parentId], references: [id], onDelete: Cascade)
+  subtasks    Task[]    @relation("TaskSubtasks")
+}
+
+enum CapturedKind {
+  TASK
+  PROJECT
+  ROUTINE
+  HABIT
+}
+
+// A voice memo transcribed by Whisper and parsed by an LLM into a Task/Project/Routine/Habit,
+// which is created immediately. This row is just the unread notice pointing at that entity —
+// marking it read or opening it for editing deletes the row (see dismissVoiceCapture).
+model VoiceCapture {
+  id          String       @id @default(uuid())
+  transcript  String
+  kind        CapturedKind
+  entityId    String
+  summary     String
+  // Set when the LLM's JSON response couldn't be parsed, so the transcript was filed as a
+  // plain task instead of being understood. Surfaced in the UI as "needs review".
+  parseError  Boolean      @default(false)
+  createdAt   DateTime     @default(now())
 }
 
 enum HabitFrequency {
@@ -35,20 +72,36 @@ enum HabitFrequency {
   WEEKLY
   FORTNIGHTLY
   MONTHLY
+  CUSTOM
 }
 
 model Habit {
-  id                String         @id @default(uuid())
-  title             String
-  frequency         HabitFrequency @default(DAILY)
-  currentStreak     Int            @default(0)
-  longestStreak     Int            @default(0)
-  lastCompletedDate DateTime?
+  id                 String         @id @default(uuid())
+  title              String
+  frequency          HabitFrequency @default(DAILY)
+  // Only used when frequency = CUSTOM, e.g. 2 for "every second day".
+  customIntervalDays Int?
+  currentStreak      Int            @default(0)
+  longestStreak      Int            @default(0)
+  lastCompletedDate  DateTime?
+}
+
+enum RoutineFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
 }
 
 model Routine {
-  id           String   @id @default(uuid())
+  id           String           @id @default(uuid())
   title        String
-  reminderTime String  
-  isActive     Boolean  @default(true)
+  reminderTime String
+  frequency    RoutineFrequency @default(DAILY)
+  // Used when frequency = WEEKLY; 0=Sunday..6=Saturday. Supports "a particular day of the week".
+  daysOfWeek   Int[]            @default([])
+  // Used when frequency = MONTHLY.
+  dayOfMonth   Int?
+  isActive     Boolean          @default(true)
+  // When it was last ticked; ticking auto-expires after 1 hour and resets on the next scheduled occurrence.
+  lastCompletedAt DateTime?
 }

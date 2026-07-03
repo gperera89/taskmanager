@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Pinyon+Script&family=Lora:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;height:100%;background:#efe9dc;font-family:'Lora',Georgia,serif}
+  .lbl{font-family:'Lora',serif;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#a49a82}
+  .chip{font-family:'Lora',serif;font-size:11.5px;color:#557694;background:rgba(85,118,148,.1);padding:2px 9px;border-radius:20px;white-space:nowrap}
+  .chip.pj{color:#8a8069;background:rgba(138,128,105,.13)}
+  .box{width:22px;height:22px;border:1.5px solid #b3a988;border-radius:4px;flex:none}
+  .h1{font-family:'Pinyon Script',cursive;line-height:.8;color:#2a2622}
+</style>
+</helmet>
+
+<div style="height:100vh;display:flex;flex-direction:column;background:#efe9dc;overflow:hidden">
+
+  <!-- header -->
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:15px 30px;border-bottom:1px solid #ddd4c1;flex:none">
+    <div style="display:flex;align-items:center;gap:11px;position:relative">
+      <div onClick="{{ toggleAdd }}" style="display:flex;align-items:center;gap:7px;background:#17399b;color:#fff;border-radius:22px;padding:8px 14px 8px 11px;cursor:pointer">
+        <svg width="16" height="16" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>
+        <span style="font-family:'Lora',serif;font-size:14px">Add</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" style="margin-left:1px"><path d="M6 9l6 6 6-6" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div onClick="{{ toggleRec }}" style="{{ recStyle }}" title="Speak to add">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><rect x="9" y="3" width="6" height="11" rx="3" stroke="#557694" stroke-width="1.6"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3" stroke="#557694" stroke-width="1.6" stroke-linecap="round"/></svg>
+      </div>
+      <sc-if value="{{ listening }}" hint-placeholder-val="{{ false }}"><span style="font-family:'Lora',serif;font-style:italic;font-size:12.5px;color:#17399b">Listening… <span style="color:#a49a82">tap to stop</span></span></sc-if>
+      <sc-if value="{{ showAdd }}" hint-placeholder-val="{{ false }}">
+        <div style="position:absolute;top:50px;left:0;background:#fff;border:1px solid #ddd4c1;border-radius:11px;box-shadow:0 14px 34px rgba(70,55,30,.22);padding:6px;z-index:30;width:196px">
+          <sc-for list="{{ addKinds }}" as="k" hint-placeholder-count="4">
+            <div onClick="{{ k.onClick }}" style="padding:10px 11px;border-radius:8px;font-family:'Lora',serif;font-size:15px;color:#2a2622;cursor:pointer;display:flex;align-items:center;gap:11px"><svg width="15" height="15" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="#17399b" stroke-width="2" stroke-linecap="round"/></svg>New {{ k.name }}</div>
+          </sc-for>
+        </div>
+      </sc-if>
+    </div>
+    <div style="display:flex;align-items:center;gap:16px">
+      <div style="display:flex;align-items:center;gap:9px;border:1px solid #d3c9b3;border-radius:22px;padding:7px 15px;width:260px;color:#a49a82">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="#b3a988" stroke-width="1.6"/><path d="M20 20l-4-4" stroke="#b3a988" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <span style="font-family:'Lora',serif;font-size:13.5px">Search tasks…</span>
+      </div>
+      <span style="font-family:'Lora',serif;font-size:13px;color:#8a8069">Friday, 3 July</span>
+      <div style="position:relative">
+        <div onClick="{{ toggleNotif }}" style="cursor:pointer;width:36px;height:36px;display:flex;align-items:center;justify-content:center;position:relative">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none"><path d="M6 9a6 6 0 1 1 12 0c0 4 1.5 5 2 6H4c.5-1 2-2 2-6Z" stroke="#557694" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 20a2 2 0 0 0 4 0" stroke="#557694" stroke-width="1.6" stroke-linecap="round"/></svg>
+          <sc-if value="{{ hasNotif }}" hint-placeholder-val="{{ true }}"><span style="position:absolute;top:-1px;right:-2px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:#17399b;color:#fff;font-family:'Lora',serif;font-size:10px;display:flex;align-items:center;justify-content:center;box-sizing:border-box">{{ notifCount }}</span></sc-if>
+        </div>
+        <sc-if value="{{ showNotif }}" hint-placeholder-val="{{ false }}">
+          <div style="position:absolute;top:46px;right:0;width:330px;background:#fff;border:1px solid #ddd4c1;border-radius:12px;box-shadow:0 16px 40px rgba(70,55,30,.22);padding:15px 16px;z-index:30">
+            <div class="lbl" style="margin-bottom:4px">Captured for review</div>
+            <div style="font-family:'Lora',serif;font-style:italic;font-size:12px;color:#a49a82;margin-bottom:10px">Added by voice or AI — confirm to file them.</div>
+            <sc-for list="{{ notif }}" as="n" hint-placeholder-count="2">
+              <div style="padding:11px 0;border-top:1px solid #eee5d4">
+                <div style="display:flex;align-items:baseline;gap:8px"><span class="chip">{{ n.type }}</span><span style="font-family:'Lora',serif;font-style:italic;font-size:11px;color:#a49a82">via {{ n.via }}</span></div>
+                <div style="font-family:'Lora',serif;font-size:15px;color:#2a2622;margin-top:6px">{{ n.title }}</div>
+                <div style="display:flex;gap:8px;margin-top:9px">
+                  <span onClick="{{ n.onDismiss }}" style="font-family:'Lora',serif;font-size:13px;color:#fff;background:#17399b;padding:5px 14px;border-radius:16px;cursor:pointer">Add</span>
+                  <span onClick="{{ n.onDismiss }}" style="font-family:'Lora',serif;font-size:13px;color:#8a8069;border:1px solid #d3c9b3;padding:5px 14px;border-radius:16px;cursor:pointer">Dismiss</span>
+                </div>
+              </div>
+            </sc-for>
+            <sc-if value="{{ notifEmpty }}" hint-placeholder-val="{{ false }}"><div style="font-family:'Lora',serif;font-style:italic;font-size:14px;color:#a49a82;padding:14px 0 4px">All caught up.</div></sc-if>
+          </div>
+        </sc-if>
+      </div>
+    </div>
+  </div>
+
+  <!-- body -->
+  <div style="flex:1;display:flex;min-height:0">
+
+    <!-- content -->
+    <div style="flex:1;overflow-y:auto;padding:30px 44px 40px">
+
+      <!-- ===== TASKS ===== -->
+      <sc-if value="{{ showTasks }}" hint-placeholder-val="{{ true }}">
+      <div>
+        <div style="display:flex;align-items:flex-end;justify-content:space-between;max-width:680px">
+          <div class="h1" style="font-size:62px">Tasks</div>
+          <div style="font-family:'Lora',serif;font-size:13px;color:#8a8069;padding-bottom:10px">4 remaining today</div>
+        </div>
+        <div style="height:1px;background:#d5cbb4;margin:20px 0 4px;max-width:680px"></div>
+        <div style="max-width:680px">
+          <div class="lbl" style="margin:20px 0 4px">Today · Fri 3 Jul</div>
+          <div style="display:flex;gap:14px;padding:15px 2px;border-bottom:1px solid #e1d8c4">
+            <span style="width:22px;height:22px;border:1.5px solid #17399b;border-radius:4px;flex:none;background:rgba(23,57,155,.06);display:inline-flex;align-items:center;justify-content:center;margin-top:2px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M4 13.5 L9.5 18.5 L20 5.5" stroke="#17399b" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+            <div style="flex:1"><div style="font-family:'Lora',serif;font-size:17px;color:#a49a82;text-decoration:line-through">Reply to Eleanor's email</div></div>
+            <span style="font-family:'Lora',serif;font-size:12.5px;color:#b3a988;padding-top:3px">9:00</span>
+          </div>
+          <div style="display:flex;gap:14px;padding:15px 2px;border-bottom:1px solid #e1d8c4">
+            <span class="box" style="margin-top:2px"></span>
+            <div style="flex:1"><div style="font-family:'Lora',serif;font-size:17px;color:#2a2622">Draft the Q3 proposal</div><div style="font-family:'Lora',serif;font-size:13.5px;color:#8a8069;margin-top:3px;line-height:1.45">Outline scope, budget and the timeline for review.</div><div style="display:flex;align-items:center;gap:8px;margin-top:8px"><span style="font-family:'Lora',serif;font-size:12px;color:#557694">2 of 3 subtasks</span><span style="width:100px;height:3px;background:#e1d8c4;border-radius:2px;position:relative;overflow:hidden;display:inline-block"><span style="position:absolute;inset:0 33% 0 0;background:#557694;border-radius:2px"></span></span></div></div>
+            <span style="font-family:'Lora',serif;font-size:12.5px;color:#b3a988;padding-top:3px">11:30</span>
+          </div>
+          <div style="display:flex;gap:14px;padding:15px 2px;border-bottom:1px solid #e1d8c4">
+            <span class="box" style="margin-top:2px"></span>
+            <div style="flex:1"><div style="font-family:'Lora',serif;font-size:17px;color:#2a2622">Order new cabinet handles</div><div style="margin-top:6px"><span class="chip pj">Kitchen Renovation</span></div></div>
+          </div>
+          <div style="display:flex;gap:14px;padding:15px 2px;border-bottom:1px solid #e1d8c4">
+            <span class="box" style="margin-top:2px"></span>
+            <div style="flex:1"><div style="font-family:'Lora',serif;font-size:17px;color:#2a2622">Book dentist appointment</div></div>
+          </div>
+          <div style="display:flex;gap:14px;padding:13px 14px;margin-top:12px;background:transparent;border:1.5px solid #17399b;border-radius:8px">
+            <span class="box" style="border-color:#cbc0a8;margin-top:1px"></span>
+            <div style="flex:1;font-family:'Lora',serif;font-size:17px;color:#2a2622">Water the fig tree<span style="display:inline-block;width:1.5px;height:20px;background:#17399b;margin-left:2px;vertical-align:-4px"></span></div>
+            <span style="font-family:'Lora',serif;font-size:12.5px;color:#557694;padding-top:3px">Add date</span>
+          </div>
+          <div class="lbl" style="margin:26px 0 4px">Tomorrow · Sat 4 Jul</div>
+          <div style="display:flex;gap:14px;padding:15px 2px;border-bottom:1px solid #e1d8c4;opacity:.8">
+            <span class="box" style="margin-top:2px"></span>
+            <div style="flex:1"><div style="font-family:'Lora',serif;font-size:17px;color:#2a2622">Collect dry cleaning</div></div>
+          </div>
+          <div style="display:flex;gap:14px;padding:15px 2px;opacity:.8">
+            <span class="box" style="margin-top:2px"></span>
+            <div style="flex:1"><div style="font-family:'Lora',serif;font-size:17px;color:#2a2622">Weekly review</div></div>
+          </div>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- ===== PROJECTS ===== -->
+      <sc-if value="{{ showProjects }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div style="display:flex;align-items:flex-end;justify-content:space-between">
+          <div class="h1" style="font-size:62px">Projects</div>
+          <div style="font-family:'Lora',serif;font-size:13px;color:#8a8069;padding-bottom:10px">4 active</div>
+        </div>
+        <div style="height:1px;background:#d5cbb4;margin:20px 0 24px"></div>
+        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px;max-width:940px">
+
+          <div style="border:1px solid #e1d8c4;border-radius:12px;padding:22px 22px 20px;background:#f2ecdf">
+            <div style="display:flex;align-items:baseline;justify-content:space-between"><div style="font-family:'Lora',serif;font-weight:600;font-size:21px;color:#2a2622">Kitchen Renovation</div><div style="font-family:'Lora',serif;font-size:13px;color:#557694">3 / 7</div></div>
+            <div style="height:4px;background:#e1d8c4;border-radius:2px;margin:10px 0 16px;overflow:hidden"><div style="width:43%;height:100%;background:#17399b;border-radius:2px"></div></div>
+            <div style="display:flex;flex-direction:column;gap:12px">
+              <div style="display:flex;gap:12px;align-items:center"><span style="width:20px;height:20px;border:1.5px solid #17399b;border-radius:4px;flex:none;background:rgba(23,57,155,.06);display:inline-flex;align-items:center;justify-content:center"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M4 13.5 L9.5 18.5 L20 5.5" stroke="#17399b" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span style="font-family:'Lora',serif;font-size:15px;color:#a49a82;text-decoration:line-through">Choose worktop material</span></div>
+              <div style="display:flex;gap:12px;align-items:center"><span class="box" style="width:20px;height:20px"></span><div style="flex:1"><span style="font-family:'Lora',serif;font-size:15px;color:#2a2622">Order new cabinet handles</span><span class="chip" style="margin-left:8px">Today</span></div></div>
+              <div style="display:flex;gap:12px;align-items:center"><span class="box" style="width:20px;height:20px"></span><div style="flex:1"><span style="font-family:'Lora',serif;font-size:15px;color:#2a2622">Book the plumber</span><span class="chip" style="margin-left:8px">Tue 8 Jul</span></div></div>
+              <div style="font-family:'Lora',serif;font-style:italic;font-size:13px;color:#a49a82;padding-left:32px">+ 2 more</div>
+            </div>
+          </div>
+
+          <div style="border:1px solid #e1d8c4;border-radius:12px;padding:22px 22px 20px;background:#f2ecdf">
+            <div style="display:flex;align-items:baseline;justify-content:space-between"><div style="font-family:'Lora',serif;font-weight:600;font-size:21px;color:#2a2622">Book Manuscript</div><div style="font-family:'Lora',serif;font-size:13px;color:#557694">5 / 12</div></div>
+            <div style="height:4px;background:#e1d8c4;border-radius:2px;margin:10px 0 16px;overflow:hidden"><div style="width:42%;height:100%;background:#17399b;border-radius:2px"></div></div>
+            <div style="display:flex;flex-direction:column;gap:12px">
+              <div style="display:flex;gap:12px;align-items:center"><span class="box" style="width:20px;height:20px"></span><div style="flex:1"><span style="font-family:'Lora',serif;font-size:15px;color:#2a2622">Edit chapter three</span><span class="chip" style="margin-left:8px">Today</span></div></div>
+              <div style="display:flex;gap:12px;align-items:center"><span class="box" style="width:20px;height:20px"></span><div style="flex:1"><span style="font-family:'Lora',serif;font-size:15px;color:#2a2622">Submit chapter three to editor</span><span class="chip" style="margin-left:8px">Tue 8 Jul</span></div></div>
+              <div style="display:flex;gap:12px;align-items:center"><span class="box" style="width:20px;height:20px"></span><span style="font-family:'Lora',serif;font-size:15px;color:#2a2622">Rewrite the opening scene</span></div>
+              <div style="font-family:'Lora',serif;font-style:italic;font-size:13px;color:#a49a82;padding-left:32px">+ 4 more</div>
+            </div>
+          </div>
+
+          <div style="border:1px solid #e1d8c4;border-radius:12px;padding:22px 22px 20px;background:#f2ecdf">
+            <div style="display:flex;align-items:baseline;justify-content:space-between"><div style="font-family:'Lora',serif;font-weight:600;font-size:21px;color:#2a2622">Spring Garden</div><div style="font-family:'Lora',serif;font-size:13px;color:#557694">1 / 5</div></div>
+            <div style="height:4px;background:#e1d8c4;border-radius:2px;margin:10px 0 16px;overflow:hidden"><div style="width:20%;height:100%;background:#17399b;border-radius:2px"></div></div>
+            <div style="display:flex;flex-direction:column;gap:12px">
+              <div style="display:flex;gap:12px;align-items:center"><span class="box" style="width:20px;height:20px"></span><span style="font-family:'Lora',serif;font-size:15px;color:#2a2622">Prune the roses</span></div>
+              <div style="display:flex;gap:12px;align-items:center"><span class="box" style="width:20px;height:20px"></span><div style="flex:1"><span style="font-family:'Lora',serif;font-size:15px;color:#2a2622">Plant tomato seedlings</span><span class="chip" style="margin-left:8px">Sat 12 Jul</span></div></div>
+              <div style="font-family:'Lora',serif;font-style:italic;font-size:13px;color:#a49a82;padding-left:32px">+ 2 more</div>
+            </div>
+          </div>
+
+          <div style="border:1px solid #e1d8c4;border-radius:12px;padding:22px 22px 20px;background:#f2ecdf">
+            <div style="display:flex;align-items:baseline;justify-content:space-between"><div style="font-family:'Lora',serif;font-weight:600;font-size:21px;color:#2a2622">Website Refresh</div><div style="font-family:'Lora',serif;font-size:13px;color:#557694">4 / 9</div></div>
+            <div style="height:4px;background:#e1d8c4;border-radius:2px;margin:10px 0 16px;overflow:hidden"><div style="width:44%;height:100%;background:#17399b;border-radius:2px"></div></div>
+            <div style="display:flex;flex-direction:column;gap:12px">
+              <div style="display:flex;gap:12px;align-items:center"><span class="box" style="width:20px;height:20px"></span><span style="font-family:'Lora',serif;font-size:15px;color:#2a2622">Write the new copy</span></div>
+              <div style="display:flex;gap:12px;align-items:center"><span class="box" style="width:20px;height:20px"></span><div style="flex:1"><span style="font-family:'Lora',serif;font-size:15px;color:#2a2622">Review staging build</span><span class="chip" style="margin-left:8px">Thu 10 Jul</span></div></div>
+              <div style="font-family:'Lora',serif;font-style:italic;font-size:13px;color:#a49a82;padding-left:32px">+ 3 more</div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- ===== ROUTINES ===== -->
+      <sc-if value="{{ showRoutines }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div style="display:flex;align-items:flex-end;justify-content:space-between">
+          <div class="h1" style="font-size:62px">Routines</div>
+          <div style="font-family:'Lora',serif;font-size:13px;color:#8a8069;padding-bottom:10px">6 total</div>
+        </div>
+        <div style="height:1px;background:#d5cbb4;margin:20px 0 24px"></div>
+        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:44px;max-width:900px">
+
+          <div>
+            <div class="lbl" style="margin-bottom:6px">Every day</div>
+            <div style="display:flex;gap:13px;padding:14px 2px;border-bottom:1px solid #e1d8c4">
+              <span style="width:22px;height:22px;border:1.5px solid #17399b;border-radius:4px;flex:none;background:rgba(23,57,155,.06);display:inline-flex;align-items:center;justify-content:center;margin-top:1px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M4 13.5 L9.5 18.5 L20 5.5" stroke="#17399b" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+              <div style="flex:1"><div style="font-family:'Lora',serif;font-size:16px;color:#a49a82;text-decoration:line-through">Make the bed</div><div style="font-family:'Lora',serif;font-style:italic;font-size:12px;color:#b3a988;margin-top:2px">auto-resets in 58 min</div></div>
+            </div>
+            <div style="display:flex;gap:13px;padding:14px 2px;border-bottom:1px solid #e1d8c4"><span class="box" style="margin-top:1px"></span><div style="flex:1"><span style="font-family:'Lora',serif;font-size:16px;color:#2a2622">Take vitamins</span></div></div>
+            <div style="display:flex;gap:13px;padding:14px 2px"><span class="box" style="margin-top:1px"></span><div style="flex:1"><span style="font-family:'Lora',serif;font-size:16px;color:#2a2622">Evening journal</span></div></div>
+          </div>
+
+          <div>
+            <div class="lbl" style="margin-bottom:6px">On a schedule</div>
+            <div style="display:flex;gap:13px;padding:14px 2px;border-bottom:1px solid #e1d8c4;align-items:center"><span class="box"></span><div style="flex:1;display:flex;align-items:center;justify-content:space-between"><span style="font-family:'Lora',serif;font-size:16px;color:#2a2622">Water the plants</span><span class="chip">Weekly · Sun</span></div></div>
+            <div style="display:flex;gap:13px;padding:14px 2px;border-bottom:1px solid #e1d8c4;align-items:center"><span class="box"></span><div style="flex:1;display:flex;align-items:center;justify-content:space-between"><span style="font-family:'Lora',serif;font-size:16px;color:#2a2622">Team stand-up</span><span class="chip">Every Mon</span></div></div>
+            <div style="display:flex;gap:13px;padding:14px 2px;align-items:center"><span class="box"></span><div style="flex:1;display:flex;align-items:center;justify-content:space-between"><span style="font-family:'Lora',serif;font-size:16px;color:#2a2622">Pay the rent</span><span class="chip">Monthly · 1st</span></div></div>
+          </div>
+
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- ===== HABITS ===== -->
+      <sc-if value="{{ showHabits }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div style="display:flex;align-items:flex-end;justify-content:space-between">
+          <div class="h1" style="font-size:62px">Habits</div>
+          <div style="font-family:'Lora',serif;font-size:13px;color:#8a8069;padding-bottom:10px">1 needs attention</div>
+        </div>
+        <div style="height:1px;background:#d5cbb4;margin:20px 0 24px"></div>
+
+        <div style="max-width:920px">
+          <div style="border:1.5px solid #17399b;border-radius:12px;padding:20px 24px;display:flex;align-items:center;justify-content:space-between;gap:24px">
+            <div>
+              <div class="lbl" style="color:#17399b">Keep the streak</div>
+              <div style="font-family:'Lora',serif;font-size:22px;color:#2a2622;margin-top:5px">Read a book</div>
+              <div style="font-family:'Lora',serif;font-style:italic;font-size:14px;color:#8a8069;margin-top:3px">Last done 2 days ago · do it today to keep your 9-day streak.</div>
+            </div>
+            <div style="display:flex;gap:10px;flex:none">
+              <span style="font-family:'Lora',serif;font-size:14px;color:#fff;background:#17399b;padding:9px 20px;border-radius:22px">Done today</span>
+              <span style="font-family:'Lora',serif;font-size:14px;color:#557694;border:1px solid #c3b9a1;padding:9px 20px;border-radius:22px">Skip</span>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:44px;margin-top:26px">
+            <div>
+              <div class="lbl" style="margin-bottom:6px">Suggested next</div>
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 2px;border-bottom:1px solid #e1d8c4"><div><div style="font-family:'Lora',serif;font-size:16px;color:#2a2622">Meditate</div><div style="font-family:'Lora',serif;font-size:12px;color:#8a8069;margin-top:2px">Fortnightly · due tomorrow</div></div><div style="text-align:right"><div style="font-family:'Lora',serif;font-weight:600;font-size:17px;color:#557694">4</div><div class="lbl" style="font-size:9px">streak</div></div></div>
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 2px"><div><div style="font-family:'Lora',serif;font-size:16px;color:#2a2622">Call a friend</div><div style="font-family:'Lora',serif;font-size:12px;color:#8a8069;margin-top:2px">Weekly · done 3 days ago</div></div><div style="text-align:right"><div style="font-family:'Lora',serif;font-weight:600;font-size:17px;color:#557694">7</div><div class="lbl" style="font-size:9px">streak</div></div></div>
+            </div>
+            <div>
+              <div class="lbl" style="margin-bottom:6px">On track</div>
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 2px;border-bottom:1px solid #e1d8c4"><div><div style="font-family:'Lora',serif;font-size:16px;color:#2a2622">Morning walk</div><div style="font-family:'Lora',serif;font-size:12px;color:#8a8069;margin-top:2px">Daily · done today</div></div><div style="text-align:right"><div style="font-family:'Lora',serif;font-weight:600;font-size:17px;color:#557694">21</div><div class="lbl" style="font-size:9px">streak</div></div></div>
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 2px"><div><div style="font-family:'Lora',serif;font-size:16px;color:#2a2622">Water intake</div><div style="font-family:'Lora',serif;font-size:12px;color:#8a8069;margin-top:2px">Daily · done today</div></div><div style="text-align:right"><div style="font-family:'Lora',serif;font-weight:600;font-size:17px;color:#557694">34</div><div class="lbl" style="font-size:9px">streak</div></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- ===== CALENDAR DAY VIEW ===== -->
+      <sc-if value="{{ showDay }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div style="display:flex;align-items:center;gap:14px;margin-bottom:2px">
+          <span onClick="{{ backFromDay }}" style="font-family:'Lora',serif;font-size:13px;color:#557694;cursor:pointer">‹ Back</span>
+        </div>
+        <div style="display:flex;align-items:flex-end;gap:16px;max-width:680px;margin-top:6px">
+          <div class="h1" style="font-size:60px">{{ dvTitle }}</div>
+          <div style="font-family:'Lora',serif;font-size:22px;color:#557694;padding-bottom:9px">{{ dvSub }}</div>
+        </div>
+        <div style="height:1px;background:#d5cbb4;margin:20px 0 4px;max-width:680px"></div>
+        <div style="max-width:680px">
+          <sc-if value="{{ dvHasTasks }}" hint-placeholder-val="{{ false }}">
+            <div class="lbl" style="margin:22px 0 4px">Tasks due</div>
+            <sc-for list="{{ dvTasks }}" as="t" hint-placeholder-count="2">
+              <div style="display:flex;gap:14px;padding:14px 2px;border-bottom:1px solid #e1d8c4">
+                <span class="box" style="margin-top:2px"></span>
+                <div style="flex:1"><div style="{{ t.titleStyle }}">{{ t.title }}</div><sc-if value="{{ t.hasPj }}" hint-placeholder-val="{{ false }}"><div style="margin-top:6px"><span class="chip pj">{{ t.pj }}</span></div></sc-if></div>
+                <sc-if value="{{ t.hasTime }}" hint-placeholder-val="{{ false }}"><span style="font-family:'Lora',serif;font-size:12.5px;color:#b3a988;padding-top:3px">{{ t.time }}</span></sc-if>
+              </div>
+            </sc-for>
+          </sc-if>
+          <sc-if value="{{ dvHasProjects }}" hint-placeholder-val="{{ false }}">
+            <div class="lbl" style="margin:24px 0 4px">Due from projects</div>
+            <sc-for list="{{ dvProjects }}" as="t" hint-placeholder-count="2">
+              <div style="display:flex;gap:14px;padding:14px 2px;border-bottom:1px solid #e1d8c4">
+                <span class="box" style="margin-top:2px"></span>
+                <div style="flex:1"><div style="font-family:'Lora',serif;font-size:17px;color:#2a2622">{{ t.title }}</div><div style="margin-top:6px"><span class="chip pj">{{ t.pj }}</span></div></div>
+              </div>
+            </sc-for>
+          </sc-if>
+          <sc-if value="{{ dvHasEvents }}" hint-placeholder-val="{{ false }}">
+            <div class="lbl" style="margin:24px 0 4px">From your calendars</div>
+            <sc-for list="{{ dvEvents }}" as="e" hint-placeholder-count="2">
+              <div style="display:flex;gap:14px;padding:12px 2px;border-bottom:1px solid #e1d8c4;align-items:center">
+                <span style="width:8px;height:8px;border-radius:50%;background:#557694;flex:none;margin-left:7px"></span>
+                <div style="flex:1"><div style="font-family:'Lora',serif;font-size:17px;color:#2a2622">{{ e.title }}</div></div>
+                <span style="font-family:'Lora',serif;font-size:12.5px;color:#a49a82;font-style:italic">{{ e.meta }}</span>
+              </div>
+            </sc-for>
+          </sc-if>
+          <sc-if value="{{ dvEmpty }}" hint-placeholder-val="{{ false }}">
+            <div style="font-family:'Lora',serif;font-style:italic;font-size:15px;color:#a49a82;padding:30px 2px">Nothing due on this day.</div>
+          </sc-if>
+        </div>
+      </div>
+      </sc-if>
+
+    </div>
+
+    <!-- calendar rail -->
+    <div style="width:372px;flex:none;border-left:1px solid #ddd4c1;padding:26px 26px 30px;background:#ece5d6;overflow-y:auto">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div style="font-family:'Pinyon Script',cursive;font-size:40px;line-height:.8;color:#2a2622">July</div>
+        <div style="display:flex;align-items:center;gap:14px">
+          <span style="font-family:'Lora',serif;font-size:13px;color:#8a8069">2026</span>
+          <div style="display:flex;gap:8px">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#8a8069" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 5l7 7-7 7" stroke="#8a8069" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:4px">
+        <div class="lbl" style="text-align:center;font-size:10px">M</div><div class="lbl" style="text-align:center;font-size:10px">T</div><div class="lbl" style="text-align:center;font-size:10px">W</div><div class="lbl" style="text-align:center;font-size:10px">T</div><div class="lbl" style="text-align:center;font-size:10px">F</div><div class="lbl" style="text-align:center;font-size:10px">S</div><div class="lbl" style="text-align:center;font-size:10px">S</div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px">
+        <sc-for list="{{ days }}" as="day" hint-placeholder-count="49">
+          <div onClick="{{ day.onClick }}" style="display:contents"><div style="{{ day.cellStyle }}"><span>{{ day.n }}</span><span style="{{ day.dotStyle }}"></span></div></div>
+        </sc-for>
+      </div>
+
+      <div style="height:1px;background:#d5cbb4;margin:22px 0 16px"></div>
+      <div class="lbl" style="margin-bottom:12px">{{ railTitle }}</div>
+      <div style="display:flex;flex-direction:column;gap:13px">
+        <sc-for list="{{ railItems }}" as="item" hint-placeholder-count="3">
+          <div style="display:flex;gap:11px;align-items:baseline">
+            <span style="font-family:'Lora',serif;font-weight:600;font-size:13px;color:#557694;width:44px;flex:none">{{ item.a }}</span>
+            <div><div style="font-family:'Lora',serif;font-size:14px;color:#2a2622">{{ item.b }}</div><sc-if value="{{ item.hasC }}" hint-placeholder-val="{{ false }}"><div style="font-family:'Lora',serif;font-size:11.5px;color:#a49a82;margin-top:1px">{{ item.c }}</div></sc-if></div>
+          </div>
+        </sc-for>
+        <sc-if value="{{ railEmpty }}" hint-placeholder-val="{{ false }}">
+          <div style="font-family:'Lora',serif;font-style:italic;font-size:13px;color:#a49a82">Nothing scheduled.</div>
+        </sc-if>
+      </div>
+      <sc-if value="{{ railHasHint }}" hint-placeholder-val="{{ false }}">
+        <div style="margin-top:16px;font-family:'Lora',serif;font-style:italic;font-size:12px;color:#557694">{{ railHint }}</div>
+      </sc-if>
+    </div>
+  </div>
+
+  <!-- bottom tabs -->
+  <div style="display:flex;height:70px;border-top:1px solid #ddd4c1;background:#e6ded0;flex:none">
+    <sc-for list="{{ tabList }}" as="tab" hint-placeholder-count="4">
+      <div style="{{ tab.wrapStyle }}" onClick="{{ tab.onClick }}">
+        <span style="{{ tab.nmStyle }}">{{ tab.name }}</span>
+        <span style="{{ tab.ctStyle }}">{{ tab.count }}</span>
+      </div>
+    </sc-for>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = {
+    area: 'tasks', selectedDay: null, dayOpen: false,
+    showAdd: false, showNotif: false, listening: false,
+    notif: [
+      { id: 1, type: 'Task', title: 'Pick up parcel from the depot', via: 'Voice' },
+      { id: 2, type: 'Project', title: "Plan Lucy's birthday", via: 'AI' },
+    ],
+  };
+
+  dismiss(id) { this.setState(s => ({ notif: s.notif.filter(n => n.id !== id) })); }
+
+  dayData = {
+    3:  { wd: 'Friday',    tasks: [{t:"Reply to Eleanor's email",time:'9:00',done:true},{t:'Draft the Q3 proposal',time:'11:30'},{t:'Order new cabinet handles',pj:'Kitchen Renovation'},{t:'Book dentist appointment'}], projects: [], events: [{t:'Dentist — check-up',meta:'2:00 · Gmail'}] },
+    4:  { wd: 'Saturday',  tasks: [{t:'Collect dry cleaning'},{t:'Weekly review'}], projects: [], events: [] },
+    8:  { wd: 'Wednesday', tasks: [{t:'Send June invoices',time:'10:00'},{t:'Renew car insurance'}], projects: [{t:'Book the plumber',pj:'Kitchen Renovation'},{t:'Submit chapter three to editor',pj:'Book Manuscript'}], events: [{t:'Lunch with Sam',meta:'12:30 · Gmail'},{t:'Design review',meta:'3:00 · Outlook'}] },
+    10: { wd: 'Friday',    tasks: [{t:'Pay the credit card'}], projects: [{t:'Review staging build',pj:'Website Refresh'}], events: [{t:'Coffee with Nia',meta:'11:00 · Gmail'}] },
+    12: { wd: 'Sunday',    tasks: [], projects: [{t:'Plant tomato seedlings',pj:'Spring Garden'}], events: [] },
+    15: { wd: 'Wednesday', tasks: [], projects: [{t:'Fit new worktop',pj:'Kitchen Renovation'}], events: [] },
+    22: { wd: 'Wednesday', tasks: [], projects: [{t:'Manuscript to proofreader',pj:'Book Manuscript'}], events: [] },
+    28: { wd: 'Tuesday',   tasks: [{t:'Car service'}], projects: [], events: [] },
+  };
+
+  clickDay(n) {
+    if (this.state.selectedDay !== n) this.setState({ selectedDay: n, dayOpen: false });
+    else this.setState({ dayOpen: true, area: 'day' });
+  }
+
+  renderVals() {
+    const area = this.state.area, sel = this.state.selectedDay;
+
+    // --- bottom tabs ---
+    const mkTab = (key, name, count) => {
+      const on = area === key;
+      return {
+        key, name, count,
+        onClick: () => this.setState({ area: key, dayOpen: false }),
+        wrapStyle: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '3px', height: '100%', borderRight: key === 'habits' ? 'none' : '1px solid #ddd4c1', cursor: 'pointer', background: on ? '#e9e1d0' : 'transparent' },
+        nmStyle: { fontFamily: "'Lora',serif", fontSize: '15px', color: on ? '#17399b' : '#8a8069', fontWeight: on ? 600 : 400 },
+        ctStyle: { fontFamily: "'Lora',serif", fontSize: '11px', color: on ? '#557694' : '#b3a988' },
+      };
+    };
+    const tabList = [mkTab('tasks','Tasks','4 today'), mkTab('projects','Projects','4 active'), mkTab('routines','Routines','6'), mkTab('habits','Habits','1 at risk')];
+
+    // --- calendar cells ---
+    const seq = [];
+    for (let n = 22; n <= 30; n++) seq.push({ n, m: 'jun' });
+    for (let n = 1;  n <= 31; n++) seq.push({ n, m: 'jul' });
+    for (let n = 1;  n <= 9;  n++) seq.push({ n, m: 'aug' });
+    const days = seq.map(d => {
+      const inM = d.m === 'jul';
+      const isToday = inM && d.n === 3;
+      const isSel = inM && sel === d.n;
+      const hasDot = inM && !!this.dayData[d.n];
+      const cellStyle = { height: '38px', borderRadius: '8px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', fontFamily: "'Lora',serif", fontSize: '13px', position: 'relative', color: inM ? '#4a4436' : '#c3b9a1', cursor: inM ? 'pointer' : 'default', userSelect: 'none' };
+      if (isToday) { cellStyle.background = '#17399b'; cellStyle.color = '#fff'; }
+      if (isSel && !isToday) { cellStyle.outline = '1.5px solid #17399b'; cellStyle.color = '#17399b'; }
+      if (isSel && isToday) { cellStyle.outline = '1.5px solid #17399b'; cellStyle.outlineOffset = '1px'; }
+      return {
+        key: d.m + d.n, n: d.n, dot: hasDot, cellStyle,
+        dotStyle: { width: '4px', height: '4px', borderRadius: '50%', background: isToday ? '#fff' : '#557694', position: 'absolute', bottom: '5px' },
+        onClick: inM ? () => this.clickDay(d.n) : () => {},
+      };
+    });
+
+    // --- rail list ---
+    let railTitle, railItems = [], railHint = '', railHasHint = false;
+    if (sel != null) {
+      const dd = this.dayData[sel];
+      const wd = dd ? dd.wd.slice(0, 3) + ' ' : '';
+      railTitle = wd + sel + ' July';
+      if (dd) {
+        dd.tasks.forEach(t => railItems.push({ a: t.time || '·', b: t.t, c: t.pj || '', hasC: !!t.pj }));
+        (dd.projects || []).forEach(p => railItems.push({ a: '·', b: p.t, c: p.pj, hasC: true }));
+        dd.events.forEach(e => railItems.push({ a: '', b: e.t, c: e.meta, hasC: true }));
+      }
+      if (!this.state.dayOpen) { railHint = 'Click ' + sel + ' July again to open the full day →'; railHasHint = true; }
+    } else {
+      railTitle = 'Coming up';
+      railItems = [
+        { a: 'Today', b: 'Dentist — check-up', c: '2:00 pm · Gmail', hasC: true },
+        { a: 'Mon 6', b: 'Team stand-up', c: '9:30 am · Outlook', hasC: true },
+        { a: 'Tue 8', b: 'Book the plumber', c: 'Kitchen Renovation', hasC: true },
+      ];
+    }
+
+    // --- day view content ---
+    const dd = (sel != null && this.dayData[sel]) || { wd: 'Day', tasks: [], projects: [], events: [] };
+    const mapTask = t => ({ title: t.t, time: t.time || '', hasTime: !!t.time, hasPj: !!t.pj, pj: t.pj || '', titleStyle: { fontFamily: "'Lora',serif", fontSize: '17px', color: t.done ? '#a49a82' : '#2a2622', textDecoration: t.done ? 'line-through' : 'none' } });
+    const dvTasks = dd.tasks.map(mapTask);
+    const dvProjects = (dd.projects || []).map(p => ({ title: p.t, pj: p.pj }));
+    const dvEvents = dd.events.map(e => ({ title: e.t, meta: e.meta }));
+    const dvEmpty = dvTasks.length === 0 && dvProjects.length === 0 && dvEvents.length === 0;
+
+    const notif = this.state.notif.map(n => ({ ...n, onDismiss: () => this.dismiss(n.id) }));
+    const recStyle = { width: '38px', height: '38px', borderRadius: '50%', border: this.state.listening ? '1.5px solid #17399b' : '1px solid #d3c9b3', background: this.state.listening ? 'rgba(23,57,155,.08)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' };
+
+    return {
+      showAdd: this.state.showAdd, showNotif: this.state.showNotif, listening: this.state.listening,
+      toggleAdd: () => this.setState(s => ({ showAdd: !s.showAdd, showNotif: false })),
+      toggleNotif: () => this.setState(s => ({ showNotif: !s.showNotif, showAdd: false })),
+      toggleRec: () => this.setState(s => ({ listening: !s.listening })),
+      addKinds: ['Task', 'Project', 'Routine', 'Habit'].map(k => ({ name: k, onClick: () => this.setState({ showAdd: false }) })),
+      notif, notifCount: notif.length, hasNotif: notif.length > 0, notifEmpty: notif.length === 0, recStyle,
+      showTasks: area === 'tasks', showProjects: area === 'projects', showRoutines: area === 'routines', showHabits: area === 'habits', showDay: area === 'day',
+      tabList, days, railTitle, railItems, railEmpty: railItems.length === 0, railHint, railHasHint,
+      backFromDay: () => this.setState({ area: 'tasks', dayOpen: false }),
+      dvTitle: dd.wd, dvSub: sel != null ? sel + ' July' : '',
+      dvTasks, dvHasTasks: dvTasks.length > 0, dvProjects, dvHasProjects: dvProjects.length > 0, dvEvents, dvHasEvents: dvEvents.length > 0, dvEmpty,
+    };
+  }
+}
+</script>
+</body>
+</html>

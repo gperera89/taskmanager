@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Pinyon+Script&family=Lora:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+<style>
+  body{margin:0;background:#e4ddce;font-family:'Lora',Georgia,serif}
+  .stage{padding:48px 52px}
+  .stage-h{font:600 13px/1.2 system-ui,sans-serif;color:#2a2622;margin:0 0 4px}
+  .stage-sub{font:400 12px/1.4 system-ui,sans-serif;color:rgba(0,0,0,.5);margin:0 0 30px}
+  .row{display:flex;gap:34px;align-items:flex-start}
+  .cap{font:400 11px/1.3 system-ui,sans-serif;color:rgba(0,0,0,.55);margin-top:13px;text-align:center}
+  .cap b{color:#17399b;font-weight:600}
+  /* phone shell */
+  .phone{width:362px;flex:none;background:#efe9dc;border-radius:36px;border:1px solid #d8cfbc;box-shadow:0 12px 34px rgba(70,55,30,.18);overflow:hidden}
+  .sbar{display:flex;justify-content:space-between;align-items:center;padding:12px 26px 2px;font-family:'Lora',serif;font-size:12px;color:#6b6558}
+  .sbar .dots{display:flex;gap:3px}
+  .peek{display:flex;align-items:center;justify-content:space-between;padding:6px 20px 0}
+  .peek span{font-family:'Pinyon Script',cursive;font-size:22px;color:#c3b9a1}
+  .pgdots{display:flex;gap:6px;align-items:center}
+  .pgdots i{width:6px;height:6px;border-radius:50%;background:#cdc3aa;display:block}
+  .pgdots i.on{background:#17399b;width:7px;height:7px}
+  .body{padding:2px 22px 26px}
+  .h1{font-family:'Pinyon Script',cursive;line-height:.82;color:#2a2622}
+  .rule{height:1px;background:#d5cbb4;margin:14px 0 2px}
+  .chip{font-family:'Lora',serif;font-size:11px;color:#557694;background:rgba(85,118,148,.1);padding:2px 9px;border-radius:20px;white-space:nowrap}
+  .fab{position:absolute;right:22px;bottom:24px;width:52px;height:52px;border-radius:50%;background:#17399b;box-shadow:0 6px 16px rgba(23,57,155,.34);display:flex;align-items:center;justify-content:center}
+  .grp{font-family:'Lora',serif;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#a49a82;margin:18px 0 4px}
+</style>
+</helmet>
+
+<div class="stage">
+  <p class="stage-h">Quiet Journal (1a) — mobile, all four areas</p>
+  <p class="stage-sub">Swipe left/right between sections; the neighbouring section names peek at the edges. Cobalt is reserved for the active/adding state and key markers.</p>
+  <div class="row">
+
+    <!-- ===================== TO-DO ===================== -->
+    <div>
+      <div class="phone" style="position:relative">
+        <div class="sbar"><span>9:41</span><span class="dots" style="font-size:11px;letter-spacing:.06em">Thu 3 Jul</span></div>
+        <div class="peek"><span>Habits</span><div class="pgdots"><i class="on"></i><i></i><i></i><i></i></div><span>Projects</span></div>
+        <div class="body">
+          <div style="display:flex;align-items:flex-end;justify-content:space-between;margin-top:6px">
+            <div class="h1" style="font-size:52px">Today</div>
+            <div style="font-family:'Lora',serif;font-size:12px;color:#8a8069;padding-bottom:8px">4 left</div>
+          </div>
+          <div class="rule"></div>
+
+          <div style="display:flex;gap:13px;padding:14px 2px;border-bottom:1px solid #e1d8c4">
+            <span style="flex:none;display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border:1.5px solid #17399b;border-radius:4px;margin-top:2px;background:rgba(23,57,155,.06)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M4 13.5 L9.5 18.5 L20 5.5" stroke="#17399b" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+            <div style="flex:1"><div style="font-family:'Lora',serif;font-size:16px;color:#a49a82;text-decoration:line-through;line-height:1.3">Reply to Eleanor's email</div></div>
+            <span style="font-family:'Lora',serif;font-size:12px;color:#b3a988;padding-top:3px">9:00</span>
+          </div>
+
+          <div style="display:flex;gap:13px;padding:14px 2px;border-bottom:1px solid #e1d8c4">
+            <span style="flex:none;width:22px;height:22px;border:1.5px solid #b3a988;border-radius:4px;margin-top:2px"></span>
+            <div style="flex:1"><div style="font-family:'Lora',serif;font-size:16px;color:#2a2622;line-height:1.3">Draft the Q3 proposal</div><div style="font-family:'Lora',serif;font-size:13px;color:#8a8069;margin-top:3px;line-height:1.45">Outline scope, budget and the timeline for review.</div><div style="display:flex;align-items:center;gap:7px;margin-top:7px"><span style="font-family:'Lora',serif;font-size:11.5px;color:#557694">2 of 3 subtasks</span><span style="flex:1;height:3px;background:#e1d8c4;border-radius:2px;position:relative;overflow:hidden;max-width:90px"><span style="position:absolute;inset:0 33% 0 0;background:#557694;border-radius:2px"></span></span></div></div>
+            <span style="font-family:'Lora',serif;font-size:12px;color:#b3a988;padding-top:3px">11:30</span>
+          </div>
+
+          <div style="display:flex;gap:13px;padding:14px 2px;border-bottom:1px solid #e1d8c4">
+            <span style="flex:none;width:22px;height:22px;border:1.5px solid #b3a988;border-radius:4px;margin-top:2px"></span>
+            <div style="flex:1"><div style="font-family:'Lora',serif;font-size:16px;color:#2a2622;line-height:1.3">Order new cabinet handles</div><div style="display:flex;gap:6px;margin-top:6px"><span class="chip" style="color:#8a8069;background:rgba(138,128,105,.13)">Kitchen Renovation</span></div></div>
+          </div>
+
+          <div style="display:flex;gap:13px;padding:14px 2px;border-bottom:1px solid #e1d8c4">
+            <span style="flex:none;width:22px;height:22px;border:1.5px solid #b3a988;border-radius:4px;margin-top:2px"></span>
+            <div style="flex:1"><div style="font-family:'Lora',serif;font-size:16px;color:#2a2622;line-height:1.3">Book dentist appointment</div></div>
+          </div>
+
+          <div class="grp">Tomorrow</div>
+          <div style="display:flex;gap:13px;padding:12px 2px 0;opacity:.72">
+            <span style="flex:none;width:22px;height:22px;border:1.5px solid #b3a988;border-radius:4px;margin-top:2px"></span>
+            <div style="flex:1"><div style="font-family:'Lora',serif;font-size:16px;color:#2a2622;line-height:1.3">Water the fig tree</div></div>
+          </div>
+        </div>
+        <div class="fab"><svg width="22" height="22" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg></div>
+      </div>
+      <div class="cap"><b>To-do</b> · dated tasks, subtask progress, project tags</div>
+    </div>
+
+    <!-- ===================== PROJECTS ===================== -->
+    <div>
+      <div class="phone" style="position:relative">
+        <div class="sbar"><span>9:41</span><span class="dots" style="font-size:11px;letter-spacing:.06em">Thu 3 Jul</span></div>
+        <div class="peek"><span>To-do</span><div class="pgdots"><i></i><i class="on"></i><i></i><i></i></div><span>Routines</span></div>
+        <div class="body">
+          <div class="h1" style="font-size:52px;margin-top:6px">Projects</div>
+          <div class="rule"></div>
+
+          <!-- project 1 -->
+          <div style="margin-top:16px;padding-bottom:16px;border-bottom:1px solid #e1d8c4">
+            <div style="display:flex;align-items:baseline;justify-content:space-between">
+              <div style="font-family:'Lora',serif;font-weight:600;font-size:19px;color:#2a2622">Kitchen Renovation</div>
+              <div style="font-family:'Lora',serif;font-size:12px;color:#557694">3 / 7</div>
+            </div>
+            <div style="height:4px;background:#e1d8c4;border-radius:2px;margin:8px 0 12px;overflow:hidden"><div style="width:43%;height:100%;background:#17399b;border-radius:2px"></div></div>
+            <div style="display:flex;flex-direction:column;gap:10px">
+              <div style="display:flex;gap:12px;align-items:center"><span style="flex:none;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border:1.5px solid #17399b;border-radius:4px;background:rgba(23,57,155,.06)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M4 13.5 L9.5 18.5 L20 5.5" stroke="#17399b" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span style="font-family:'Lora',serif;font-size:15px;color:#a49a82;text-decoration:line-through">Choose worktop material</span></div>
+              <div style="display:flex;gap:12px;align-items:center"><span style="flex:none;width:20px;height:20px;border:1.5px solid #b3a988;border-radius:4px"></span><div style="flex:1"><span style="font-family:'Lora',serif;font-size:15px;color:#2a2622">Order new cabinet handles</span><span class="chip" style="margin-left:8px">Fri 4 Jul</span></div></div>
+              <div style="display:flex;gap:12px;align-items:center"><span style="flex:none;width:20px;height:20px;border:1.5px solid #b3a988;border-radius:4px"></span><span style="font-family:'Lora',serif;font-size:15px;color:#2a2622">Book the plumber</span></div>
+              <div style="font-family:'Lora',serif;font-style:italic;font-size:13px;color:#a49a82;padding-left:32px">+ 2 more</div>
+            </div>
+          </div>
+
+          <!-- project 2 -->
+          <div style="margin-top:16px">
+            <div style="display:flex;align-items:baseline;justify-content:space-between">
+              <div style="font-family:'Lora',serif;font-weight:600;font-size:19px;color:#2a2622">Book Manuscript</div>
+              <div style="font-family:'Lora',serif;font-size:12px;color:#557694">5 / 12</div>
+            </div>
+            <div style="height:4px;background:#e1d8c4;border-radius:2px;margin:8px 0 12px;overflow:hidden"><div style="width:42%;height:100%;background:#17399b;border-radius:2px"></div></div>
+            <div style="display:flex;flex-direction:column;gap:10px">
+              <div style="display:flex;gap:12px;align-items:center"><span style="flex:none;width:20px;height:20px;border:1.5px solid #b3a988;border-radius:4px"></span><div style="flex:1"><span style="font-family:'Lora',serif;font-size:15px;color:#2a2622">Edit chapter three</span><span class="chip" style="margin-left:8px">Today</span></div></div>
+              <div style="display:flex;gap:12px;align-items:center"><span style="flex:none;width:20px;height:20px;border:1.5px solid #b3a988;border-radius:4px"></span><span style="font-family:'Lora',serif;font-size:15px;color:#2a2622">Rewrite the opening scene</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="fab"><svg width="22" height="22" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg></div>
+      </div>
+      <div class="cap"><b>Projects</b> · each a list; dated subtasks flow into To-do</div>
+    </div>
+
+    <!-- ===================== ROUTINES ===================== -->
+    <div>
+      <div class="phone" style="position:relative">
+        <div class="sbar"><span>9:41</span><span class="dots" style="font-size:11px;letter-spacing:.06em">Thu 3 Jul</span></div>
+        <div class="peek"><span>Projects</span><div class="pgdots"><i></i><i></i><i class="on"></i><i></i></div><span>Habits</span></div>
+        <div class="body">
+          <div class="h1" style="font-size:52px;margin-top:6px">Routines</div>
+          <div class="rule"></div>
+
+          <div class="grp">Every day</div>
+          <div style="display:flex;gap:13px;padding:12px 2px;border-bottom:1px solid #e1d8c4">
+            <span style="flex:none;display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border:1.5px solid #17399b;border-radius:4px;background:rgba(23,57,155,.06)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M4 13.5 L9.5 18.5 L20 5.5" stroke="#17399b" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+            <div style="flex:1"><div style="font-family:'Lora',serif;font-size:16px;color:#a49a82;text-decoration:line-through">Make the bed</div><div style="font-family:'Lora',serif;font-style:italic;font-size:12px;color:#b3a988;margin-top:2px">auto-resets in 58 min</div></div>
+          </div>
+          <div style="display:flex;gap:13px;padding:12px 2px;border-bottom:1px solid #e1d8c4">
+            <span style="flex:none;width:22px;height:22px;border:1.5px solid #b3a988;border-radius:4px;margin-top:1px"></span>
+            <div style="flex:1"><div style="font-family:'Lora',serif;font-size:16px;color:#2a2622">Take vitamins</div></div>
+          </div>
+          <div style="display:flex;gap:13px;padding:12px 2px;border-bottom:1px solid #e1d8c4">
+            <span style="flex:none;width:22px;height:22px;border:1.5px solid #b3a988;border-radius:4px;margin-top:1px"></span>
+            <div style="flex:1"><div style="font-family:'Lora',serif;font-size:16px;color:#2a2622">Evening journal</div></div>
+          </div>
+
+          <div class="grp">On a schedule</div>
+          <div style="display:flex;gap:13px;padding:12px 2px;border-bottom:1px solid #e1d8c4">
+            <span style="flex:none;width:22px;height:22px;border:1.5px solid #b3a988;border-radius:4px;margin-top:1px"></span>
+            <div style="flex:1;display:flex;align-items:center;justify-content:space-between"><span style="font-family:'Lora',serif;font-size:16px;color:#2a2622">Water the plants</span><span class="chip">Weekly · Sun</span></div>
+          </div>
+          <div style="display:flex;gap:13px;padding:12px 2px;border-bottom:1px solid #e1d8c4">
+            <span style="flex:none;width:22px;height:22px;border:1.5px solid #b3a988;border-radius:4px;margin-top:1px"></span>
+            <div style="flex:1;display:flex;align-items:center;justify-content:space-between"><span style="font-family:'Lora',serif;font-size:16px;color:#2a2622">Team stand-up</span><span class="chip">Every Mon</span></div>
+          </div>
+          <div style="display:flex;gap:13px;padding:12px 2px">
+            <span style="flex:none;width:22px;height:22px;border:1.5px solid #b3a988;border-radius:4px;margin-top:1px"></span>
+            <div style="flex:1;display:flex;align-items:center;justify-content:space-between"><span style="font-family:'Lora',serif;font-size:16px;color:#2a2622">Pay the rent</span><span class="chip">Monthly · 1st</span></div>
+          </div>
+        </div>
+        <div class="fab"><svg width="22" height="22" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg></div>
+      </div>
+      <div class="cap"><b>Routines</b> · recur & auto-reset; tick ahead of time</div>
+    </div>
+
+    <!-- ===================== HABITS ===================== -->
+    <div>
+      <div class="phone" style="position:relative">
+        <div class="sbar"><span>9:41</span><span class="dots" style="font-size:11px;letter-spacing:.06em">Thu 3 Jul</span></div>
+        <div class="peek"><span>Routines</span><div class="pgdots"><i></i><i></i><i></i><i class="on"></i></div><span>To-do</span></div>
+        <div class="body">
+          <div class="h1" style="font-size:52px;margin-top:6px">Habits</div>
+          <div class="rule"></div>
+
+          <!-- streak at risk -->
+          <div style="margin-top:16px;border:1.5px solid #17399b;border-radius:10px;padding:15px 16px">
+            <div style="font-family:'Lora',serif;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#17399b">Keep the streak</div>
+            <div style="font-family:'Lora',serif;font-size:19px;color:#2a2622;margin-top:5px">Read a book</div>
+            <div style="font-family:'Lora',serif;font-style:italic;font-size:13px;color:#8a8069;margin-top:3px">Last done 2 days ago · do it today to keep your 9-day streak.</div>
+            <div style="display:flex;gap:10px;margin-top:12px">
+              <span style="font-family:'Lora',serif;font-size:14px;color:#fff;background:#17399b;padding:7px 16px;border-radius:22px">Done today</span>
+              <span style="font-family:'Lora',serif;font-size:14px;color:#557694;border:1px solid #c3b9a1;padding:7px 16px;border-radius:22px">Skip</span>
+            </div>
+          </div>
+
+          <div class="grp">Suggested next</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:13px 2px;border-bottom:1px solid #e1d8c4">
+            <div><div style="font-family:'Lora',serif;font-size:16px;color:#2a2622">Meditate</div><div style="font-family:'Lora',serif;font-size:12px;color:#8a8069;margin-top:2px">Every 2 weeks · due tomorrow</div></div>
+            <div style="text-align:right"><div style="font-family:'Lora',serif;font-weight:600;font-size:17px;color:#557694">4</div><div style="font-family:'Lora',serif;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:#a49a82">streak</div></div>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:13px 2px;border-bottom:1px solid #e1d8c4">
+            <div><div style="font-family:'Lora',serif;font-size:16px;color:#2a2622">Go for a walk</div><div style="font-family:'Lora',serif;font-size:12px;color:#8a8069;margin-top:2px">Every 2nd day · on track</div></div>
+            <div style="text-align:right"><div style="font-family:'Lora',serif;font-weight:600;font-size:17px;color:#557694">21</div><div style="font-family:'Lora',serif;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:#a49a82">streak</div></div>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:13px 2px">
+            <div><div style="font-family:'Lora',serif;font-size:16px;color:#2a2622">Call a friend</div><div style="font-family:'Lora',serif;font-size:12px;color:#8a8069;margin-top:2px">Weekly · done 3 days ago</div></div>
+            <div style="text-align:right"><div style="font-family:'Lora',serif;font-weight:600;font-size:17px;color:#557694">7</div><div style="font-family:'Lora',serif;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:#a49a82">streak</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="cap"><b>Habits</b> · surfaces what's at risk, then suggests</div>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+</body>
+</html>
