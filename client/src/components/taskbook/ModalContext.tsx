@@ -4,7 +4,7 @@ import { createContext, useContext } from "react";
 import type { ModalState } from "./types";
 
 type ModalContextValue = {
-  openAdd: (kind: "task" | "project" | "routine" | "habit") => void;
+  openAdd: () => void;
   openEdit: (state: Extract<ModalState, { mode: "edit" }>) => void;
 };
 

@@ -12,6 +12,7 @@ import RoutinesView from "./RoutinesView";
 import HabitsView from "./HabitsView";
 import DayView from "./DayView";
 import ItemModal from "./ItemModal";
+import SettingsModal from "./SettingsModal";
 
 export default function TaskbookApp({ data }: { data: TaskbookData }) {
   const [area, setArea] = useState<AreaKey>("tasks");
@@ -19,10 +20,11 @@ export default function TaskbookApp({ data }: { data: TaskbookData }) {
   const [dayOpen, setDayOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [modal, setModal] = useState<ModalState>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const modalActions = useMemo(
     () => ({
-      openAdd: (kind: "task" | "project" | "routine" | "habit") => setModal({ mode: "add", kind } as ModalState),
+      openAdd: () => setModal({ mode: "add" }),
       openEdit: (state: Extract<ModalState, { mode: "edit" }>) => setModal(state),
     }),
     []
@@ -34,13 +36,11 @@ export default function TaskbookApp({ data }: { data: TaskbookData }) {
   }
 
   // Looks up the entity a voice-capture notice points at, so "Edit" can reopen its normal
-  // edit form instead of needing a bespoke voice-capture editing UI.
+  // edit form instead of needing a bespoke voice-capture editing UI. Tasks are edited inline
+  // on their row rather than through a modal, so "Edit" just jumps to the Tasks tab.
   function openEditForCapture(kind: CapturedKind, entityId: string) {
     if (kind === "task") {
-      for (const g of data.taskGroups) {
-        const item = g.tasks.find((t) => t.id === entityId);
-        if (item) return setModal({ mode: "edit", kind: "task", item });
-      }
+      setArea("tasks");
     } else if (kind === "project") {
       const item = data.projectCards.find((p) => p.id === entityId);
       if (item) setModal({ mode: "edit", kind: "project", item });
@@ -77,15 +77,27 @@ export default function TaskbookApp({ data }: { data: TaskbookData }) {
           onQueryChange={setQuery}
           pendingCaptures={data.pendingCaptures}
           onEditCapture={openEditForCapture}
+          onOpenSettings={() => setSettingsOpen(true)}
         />
 
         <div className="flex min-h-0 flex-1">
           <div className="flex-1 overflow-y-auto px-11 py-8 pb-10">
             {area === "tasks" && (
-              <TasksView groups={data.taskGroups} remainingToday={data.tasksRemainingToday} query={query} />
+              <TasksView
+                groups={data.taskGroups}
+                remainingToday={data.tasksRemainingToday}
+                query={query}
+                categoryOptions={data.categoryOptions}
+                projectOptions={data.projectOptions}
+              />
             )}
             {area === "projects" && (
-              <ProjectsView cards={data.projectCards} activeCount={data.activeProjectCount} query={query} />
+              <ProjectsView
+                cards={data.projectCards}
+                activeCount={data.activeProjectCount}
+                query={query}
+                categoryOptions={data.categoryOptions}
+              />
             )}
             {area === "routines" && (
               <RoutinesView
@@ -138,6 +150,10 @@ export default function TaskbookApp({ data }: { data: TaskbookData }) {
           categoryOptions={data.categoryOptions}
           onClose={() => setModal(null)}
         />
+      )}
+
+      {settingsOpen && (
+        <SettingsModal categoryOptions={data.categoryOptions} onClose={() => setSettingsOpen(false)} />
       )}
     </ModalContext.Provider>
   );

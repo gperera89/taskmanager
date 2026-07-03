@@ -7,11 +7,20 @@ export type TaskItemVM = {
   category: string;
   description: string | null;
   dueDateValue: string; // yyyy-mm-dd for the edit form's <input type="date">, "" if none
-  dueLabel: string | null; // e.g. "Fri 3 Jul"
+  dueTimeValue: string; // HH:MM for the edit form's <input type="time">, "" if no time set
+  dueLabel: string | null; // e.g. "Fri 3 Jul" or "Fri 3 Jul · 6:00 PM" when a time is set
   projectId: string | null;
   projectName: string | null;
   subtasksDone: number;
   subtasksTotal: number;
+  repeatFrequency: "DAILY" | "WEEKLY" | "MONTHLY" | null; // null = does not repeat
+  repeatInterval: number;
+  repeatDaysOfWeek: number[];
+  repeatMonthlyMode: "DATE" | "WEEKDAY";
+  repeatDayOfMonth: number | null;
+  repeatMonthlyOrdinal: number | null;
+  repeatMonthlyWeekday: number | null;
+  repeatLabel: string | null; // e.g. "Every week · Mon, Wed", null when repeatFrequency is null
 };
 
 export type TaskGroupVM = {
@@ -32,6 +41,7 @@ export type ProjectCardVM = {
   name: string;
   description: string | null;
   dueDateValue: string;
+  dueLabel: string | null;
   done: number;
   total: number;
   progressPct: number;
@@ -39,12 +49,13 @@ export type ProjectCardVM = {
   moreCount: number;
 };
 
+export type HabitIntervalUnit = "DAY" | "WEEK" | "MONTH";
+
 export type HabitCardVM = {
   id: string;
   title: string;
-  frequency: "DAILY" | "WEEKLY" | "FORTNIGHTLY" | "MONTHLY" | "CUSTOM";
-  frequencyLabel: string;
-  customIntervalDays: number | null;
+  intervalValue: number;
+  intervalUnit: HabitIntervalUnit;
   currentStreak: number;
   longestStreak: number;
   atRisk: boolean;
@@ -52,16 +63,25 @@ export type HabitCardVM = {
   detailLabel: string;
 };
 
+export type SubroutineVM = { id: string; title: string };
+
 export type RoutineItemVM = {
   id: string;
   title: string;
   reminderTime: string;
   frequency: "DAILY" | "WEEKLY" | "MONTHLY";
+  interval: number;
   daysOfWeek: number[];
+  monthlyMode: "DATE" | "WEEKDAY";
   dayOfMonth: number | null;
+  monthlyOrdinal: number | null;
+  monthlyWeekday: number | null;
   isActive: boolean;
   isTicked: boolean;
   scheduleLabel: string;
+  // Grouped under this routine so they fire as one clustered notification and tick off
+  // together, e.g. "Wake Up Routine" -> "Make coffee", "Brush teeth", "Shave".
+  subroutines: SubroutineVM[];
 };
 
 export type DayDetailVM = {
@@ -121,12 +141,9 @@ export type TaskbookData = {
 
 export type AreaKey = "tasks" | "projects" | "routines" | "habits" | "day";
 
+// Tasks are edited inline on their row (see TasksView) rather than through this modal.
 export type ModalState =
-  | { mode: "add"; kind: "task" }
-  | { mode: "add"; kind: "project" }
-  | { mode: "add"; kind: "routine" }
-  | { mode: "add"; kind: "habit" }
-  | { mode: "edit"; kind: "task"; item: TaskItemVM }
+  | { mode: "add" }
   | { mode: "edit"; kind: "project"; item: ProjectCardVM }
   | { mode: "edit"; kind: "routine"; item: RoutineItemVM }
   | { mode: "edit"; kind: "habit"; item: HabitCardVM }

@@ -13,13 +13,6 @@ const KIND_LABEL: Record<CapturedKind, string> = {
   habit: "Habit",
 };
 
-const ADD_KINDS: { kind: "task" | "project" | "routine" | "habit"; name: string }[] = [
-  { kind: "task", name: "Task" },
-  { kind: "project", name: "Project" },
-  { kind: "routine", name: "Routine" },
-  { kind: "habit", name: "Habit" },
-];
-
 // MediaRecorder's default mimeType varies by browser; pick a file extension Whisper recognizes.
 function extensionFor(mimeType: string): string {
   if (mimeType.includes("mp4")) return "mp4";
@@ -33,16 +26,17 @@ export default function Header({
   onQueryChange,
   pendingCaptures,
   onEditCapture,
+  onOpenSettings,
 }: {
   todayLabel: string;
   query: string;
   onQueryChange: (v: string) => void;
   pendingCaptures: VoiceCaptureVM[];
   onEditCapture: (kind: CapturedKind, entityId: string) => void;
+  onOpenSettings: () => void;
 }) {
   const router = useRouter();
   const { openAdd } = useModalActions();
-  const [showAdd, setShowAdd] = useState(false);
   const [showNotif, setShowNotif] = useState(false);
   const [listening, setListening] = useState(false);
   const [processing, setProcessing] = useState(false);
@@ -109,7 +103,7 @@ export default function Header({
         <button
           type="button"
           onClick={() => {
-            setShowAdd((v) => !v);
+            openAdd();
             setShowNotif(false);
           }}
           className="flex items-center gap-2 rounded-full bg-[#17399b] py-2 pl-3 pr-3.5 text-white cursor-pointer"
@@ -118,9 +112,6 @@ export default function Header({
             <path d="M12 5v14M5 12h14" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
           </svg>
           <span className="text-sm">Add</span>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" className="ml-px">
-            <path d="M6 9l6 6 6-6" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
         </button>
 
         <button
@@ -150,25 +141,6 @@ export default function Header({
           <span className="text-[12.5px] italic text-[#8a4040]">{captureError}</span>
         )}
 
-        {showAdd && (
-          <div className="absolute left-0 top-[50px] z-30 w-49 rounded-[11px] border border-[#ddd4c1] bg-white p-1.5 shadow-[0_14px_34px_rgba(70,55,30,.22)]">
-            {ADD_KINDS.map((k) => (
-              <div
-                key={k.kind}
-                onClick={() => {
-                  openAdd(k.kind);
-                  setShowAdd(false);
-                }}
-                className="flex cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-[15px] text-[#2a2622] hover:bg-[#f6f1e6]"
-              >
-                <svg width="15" height="15" viewBox="0 0 24 24">
-                  <path d="M12 5v14M5 12h14" stroke="#17399b" strokeWidth="2" strokeLinecap="round" />
-                </svg>
-                New {k.name}
-              </div>
-            ))}
-          </div>
-        )}
       </div>
 
       <div className="flex items-center gap-4">
@@ -187,13 +159,31 @@ export default function Header({
 
         <span className="text-[13px] text-[#8a8069]">{todayLabel}</span>
 
+        <button
+          type="button"
+          title="Settings"
+          onClick={onOpenSettings}
+          className="flex h-9 w-9 cursor-pointer items-center justify-center"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+            <path
+              d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"
+              stroke="#557694"
+              strokeWidth="1.6"
+            />
+            <path
+              d="M19.4 13.5c.1-.5.1-1 0-1.5l1.6-1.4-1.5-2.6-2 .6a7.6 7.6 0 0 0-1.3-.75L15.8 6h-3l-.4 2c-.47.19-.9.44-1.3.75l-2-.6-1.5 2.6 1.6 1.4c-.1.5-.1 1 0 1.5l-1.6 1.4 1.5 2.6 2-.6c.4.3.83.55 1.3.75l.4 2h3l.4-2c.47-.2.9-.45 1.3-.75l2 .6 1.5-2.6-1.6-1.4Z"
+              stroke="#557694"
+              strokeWidth="1.6"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
+
         <div className="relative">
           <button
             type="button"
-            onClick={() => {
-              setShowNotif((v) => !v);
-              setShowAdd(false);
-            }}
+            onClick={() => setShowNotif((v) => !v)}
             className="relative flex h-9 w-9 cursor-pointer items-center justify-center"
           >
             <svg width="19" height="19" viewBox="0 0 24 24" fill="none">

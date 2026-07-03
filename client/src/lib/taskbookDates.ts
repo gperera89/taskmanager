@@ -8,6 +8,12 @@ export function pad2(n: number): string {
   return n.toString().padStart(2, "0");
 }
 
+// Today's calendar date as a yyyy-mm-dd string, for defaulting <input type="date"> values.
+export function todayInputValue(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
 // The calendar date a stored `dueDate` represents (its UTC Y/M/D), as a local Date at
 // midnight — safe to format with Intl without a timezone re-shifting it by a day.
 export function calendarDateFromDue(due: Date): Date {
@@ -40,6 +46,32 @@ export function formatShortDate(d: Date): string {
 
 export function formatLongDate(d: Date): string {
   return `${WEEKDAY_LONG.format(d)}, ${d.getDate()} ${MONTH_LONG.format(d)}`;
+}
+
+const TIME_FORMAT = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: "UTC" });
+
+// A Task's due date, with a clock time appended when one was actually set. Date-only due
+// dates are encoded as UTC midnight (see api.ts's combineDueDateTime), so midnight here means
+// "no time was specified" rather than a real due time of 00:00.
+export function formatDueLabel(due: Date): string {
+  const dateLabel = formatShortDate(calendarDateFromDue(due));
+  if (due.getUTCHours() === 0 && due.getUTCMinutes() === 0) return dateLabel;
+  return `${dateLabel} · ${TIME_FORMAT.format(due)}`;
+}
+
+// Due-date clock times are entered in Australia/Perth (UTC+8, no DST — see the notification
+// settings question this answers) but stored as a face-value UTC timestamp (api.ts's
+// combineDueDateTime comment: typing "18:00" stores 18:00 UTC, not the real UTC instant of
+// 18:00 Perth time). PERTH_UTC_OFFSET_MS converts that face value into the real instant it
+// represents, so the notification cron fires at the moment the user actually meant.
+export const PERTH_UTC_OFFSET_MS = 8 * 60 * 60 * 1000;
+
+// The real UTC instant a stored due date represents. Date-only due dates (no time picked)
+// default to 8am Perth, whose UTC instant is exactly UTC midnight of that date — already what's
+// stored — so only due dates with an explicit time need the offset applied.
+export function dueInstant(due: Date): Date {
+  const hasExplicitTime = due.getUTCHours() !== 0 || due.getUTCMinutes() !== 0;
+  return hasExplicitTime ? new Date(due.getTime() - PERTH_UTC_OFFSET_MS) : due;
 }
 
 export type DueBucket = "overdue" | "today" | "tomorrow" | "week" | "later" | "none";

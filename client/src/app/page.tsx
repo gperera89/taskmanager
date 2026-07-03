@@ -15,12 +15,14 @@ import {
   calendarDateFromDue,
   daysUntil,
   bucketForDue,
+  formatDueLabel,
   formatLongDate,
   formatShortDate,
   localDaysUntil,
   pad2,
   type DueBucket,
 } from "@/lib/taskbookDates";
+import { describeTaskRepeat } from "@/lib/taskRecurrence";
 import TaskbookApp from "@/components/taskbook/TaskbookApp";
 import type {
   DayDetailVM,
@@ -34,13 +36,11 @@ import type {
   VoiceCaptureVM,
 } from "@/components/taskbook/types";
 
-const HABIT_FREQUENCY_LABELS: Record<string, string> = {
-  DAILY: "Daily",
-  WEEKLY: "Weekly",
-  FORTNIGHTLY: "Fortnightly",
-  MONTHLY: "Monthly",
-  CUSTOM: "Custom",
-};
+const HABIT_UNIT_WORD: Record<string, string> = { DAY: "day", WEEK: "week", MONTH: "month" };
+function habitIntervalLabel(value: number, unit: string): string {
+  const word = HABIT_UNIT_WORD[unit] ?? unit.toLowerCase();
+  return value === 1 ? `Every ${word}` : `Every ${value} ${word}s`;
+}
 const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const DOW_ABBR = WEEKDAY_NAMES;
 
@@ -48,10 +48,23 @@ function toDateInputValue(date: Date | null): string {
   return date ? date.toISOString().slice(0, 10) : "";
 }
 
+// "" when the due date has no time set (i.e. it's UTC midnight — see api.ts's combineDueDateTime).
+function toTimeInputValue(date: Date | null): string {
+  if (!date || (date.getUTCHours() === 0 && date.getUTCMinutes() === 0)) return "";
+  return `${pad2(date.getUTCHours())}:${pad2(date.getUTCMinutes())}`;
+}
+
 function ordinal(n: number): string {
   const s = ["th", "st", "nd", "rd"];
   const v = n % 100;
   return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`;
+}
+
+const ORDINAL_WORDS: Record<number, string> = { 1: "First", 2: "Second", 3: "Third", 4: "Fourth", 5: "Fifth", [-1]: "Last" };
+const WEEKDAY_FULL_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+function intervalWord(n: number, unit: string): string {
+  return n === 1 ? `Every ${unit}` : `Every ${n} ${unit}s`;
 }
 
 function relativeDaysAgoLabel(d: Date, now: Date): string {
@@ -71,7 +84,7 @@ export default async function Home() {
   let tasks: Awaited<ReturnType<typeof getTasks>> | undefined;
   let projects: Awaited<ReturnType<typeof getProjects>> | undefined;
   let habitStatuses: Awaited<ReturnType<typeof getHabitsWithStatus>> | undefined;
-  let routines: Routine[] | undefined;
+  let routines: Awaited<ReturnType<typeof getRoutines>> | undefined;
   let categories: Awaited<ReturnType<typeof getCategories>> | undefined;
   let apiError: string | null = null;
 
@@ -221,7 +234,18 @@ export default async function Home() {
   type TaskWithSubtasks = Awaited<ReturnType<typeof getTasks>>[number];
   const projectNameById = new Map(projects!.map((p) => [p.id, p.name]));
   function toTaskVM(t: TaskWithSubtasks): TaskItemVM {
-    const dueLabel = t.dueDate ? formatShortDate(calendarDateFromDue(t.dueDate)) : null;
+    const dueLabel = t.dueDate ? formatDueLabel(t.dueDate) : null;
+    const repeatLabel = t.repeatFrequency
+      ? describeTaskRepeat({
+          frequency: t.repeatFrequency,
+          interval: t.repeatInterval ?? 1,
+          daysOfWeek: t.repeatDaysOfWeek,
+          monthlyMode: t.repeatMonthlyMode ?? "DATE",
+          dayOfMonth: t.repeatDayOfMonth,
+          monthlyOrdinal: t.repeatMonthlyOrdinal,
+          monthlyWeekday: t.repeatMonthlyWeekday,
+        })
+      : null;
     return {
       id: t.id,
       title: t.title,
@@ -229,11 +253,20 @@ export default async function Home() {
       category: t.category,
       description: t.description,
       dueDateValue: toDateInputValue(t.dueDate),
+      dueTimeValue: toTimeInputValue(t.dueDate),
       dueLabel,
       projectId: t.projectId,
       projectName: t.projectId ? projectNameById.get(t.projectId) ?? null : null,
       subtasksDone: t.subtasks.filter((s) => s.isCompleted).length,
       subtasksTotal: t.subtasks.length,
+      repeatFrequency: t.repeatFrequency,
+      repeatInterval: t.repeatInterval ?? 1,
+      repeatDaysOfWeek: t.repeatDaysOfWeek,
+      repeatMonthlyMode: t.repeatMonthlyMode ?? "DATE",
+      repeatDayOfMonth: t.repeatDayOfMonth,
+      repeatMonthlyOrdinal: t.repeatMonthlyOrdinal,
+      repeatMonthlyWeekday: t.repeatMonthlyWeekday,
+      repeatLabel,
     };
   }
 
@@ -292,6 +325,7 @@ export default async function Home() {
       name: p.name,
       description: p.description,
       dueDateValue: toDateInputValue(p.dueDate),
+      dueLabel: p.dueDate ? formatShortDate(calendarDateFromDue(p.dueDate)) : null,
       done,
       total,
       progressPct,
@@ -303,34 +337,47 @@ export default async function Home() {
 
   // --- Routines tab ---
   function scheduleLabel(r: Routine): string {
+    if (r.frequency === "DAILY") {
+      return r.interval === 1 ? "" : intervalWord(r.interval, "day");
+    }
     if (r.frequency === "WEEKLY") {
-      const days = r.daysOfWeek.length ? r.daysOfWeek.map((d) => DOW_ABBR[d]).join(", ") : "";
-      return days ? `Weekly · ${days}` : "Weekly";
+      const weekPart = intervalWord(r.interval, "week");
+      const days = r.daysOfWeek.length
+        ? [...r.daysOfWeek].sort((a, b) => a - b).map((d) => DOW_ABBR[d]).join(", ")
+        : "";
+      return days ? `${weekPart} · ${days}` : weekPart;
     }
-    if (r.frequency === "MONTHLY") {
-      return r.dayOfMonth ? `Monthly · ${ordinal(r.dayOfMonth)}` : "Monthly";
+    const monthPart = intervalWord(r.interval, "month");
+    if (r.monthlyMode === "WEEKDAY" && r.monthlyOrdinal != null && r.monthlyWeekday != null) {
+      return `${monthPart} · ${ORDINAL_WORDS[r.monthlyOrdinal] ?? r.monthlyOrdinal} ${WEEKDAY_FULL_NAMES[r.monthlyWeekday]}`;
     }
-    return "";
+    if (r.dayOfMonth === -1) return `${monthPart} · Last day`;
+    return r.dayOfMonth ? `${monthPart} · ${ordinal(r.dayOfMonth)}` : monthPart;
   }
   const routineVMs: RoutineItemVM[] = routines!.map((r) => ({
     id: r.id,
     title: r.title,
     reminderTime: r.reminderTime,
     frequency: r.frequency,
+    interval: r.interval,
     daysOfWeek: r.daysOfWeek,
+    monthlyMode: r.monthlyMode,
     dayOfMonth: r.dayOfMonth,
+    monthlyOrdinal: r.monthlyOrdinal,
+    monthlyWeekday: r.monthlyWeekday,
     isActive: r.isActive,
     isTicked: isRoutineTickedNow(r),
     scheduleLabel: scheduleLabel(r),
+    subroutines: r.subroutines.map((s) => ({ id: s.id, title: s.title })),
   }));
-  const routineDaily = routineVMs.filter((r) => r.frequency === "DAILY");
-  const routineScheduled = routineVMs.filter((r) => r.frequency !== "DAILY");
+  const routineDaily = routineVMs.filter((r) => r.frequency === "DAILY" && r.interval === 1);
+  const routineScheduled = routineVMs.filter((r) => r.frequency !== "DAILY" || r.interval !== 1);
   const routineTotalCount = routineVMs.length;
 
   // --- Habits tab ---
   type HabitStatusItem = Awaited<ReturnType<typeof getHabitsWithStatus>>[number];
   function habitDetailLabel(hs: HabitStatusItem): string {
-    const freqLabel = HABIT_FREQUENCY_LABELS[hs.habit.frequency];
+    const freqLabel = habitIntervalLabel(hs.habit.intervalValue, hs.habit.intervalUnit);
     if (hs.atRisk) {
       const lastDoneLabel = hs.habit.lastCompletedDate ? relativeDaysAgoLabel(hs.habit.lastCompletedDate, now) : "not yet done";
       return `Last done ${lastDoneLabel} · do it today to keep your ${hs.habit.currentStreak}-day streak.`;
@@ -344,9 +391,8 @@ export default async function Home() {
   const habitVMs: HabitCardVM[] = habitStatuses!.map((hs) => ({
     id: hs.habit.id,
     title: hs.habit.title,
-    frequency: hs.habit.frequency,
-    frequencyLabel: HABIT_FREQUENCY_LABELS[hs.habit.frequency],
-    customIntervalDays: hs.habit.customIntervalDays,
+    intervalValue: hs.habit.intervalValue,
+    intervalUnit: hs.habit.intervalUnit,
     currentStreak: hs.habit.currentStreak,
     longestStreak: hs.habit.longestStreak,
     atRisk: hs.atRisk,

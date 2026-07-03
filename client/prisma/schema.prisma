@@ -24,6 +24,9 @@ model Project {
   description String?
   isCompleted Boolean   @default(false)
   dueDate     DateTime?
+  // Set once a due-date push notification has been sent for this dueDate, so the notification
+  // cron never re-sends for the same deadline. Cleared implicitly whenever dueDate changes.
+  notifiedAt  DateTime?
   tasks       Task[]
 }
 
@@ -35,6 +38,20 @@ model Task {
   dueDate     DateTime?
   isCompleted Boolean   @default(false)
   createdAt   DateTime  @default(now())
+  // Set once a due-date push notification has been sent for this dueDate, so the notification
+  // cron never re-sends for the same deadline. Cleared implicitly whenever dueDate changes.
+  notifiedAt  DateTime?
+
+  // Repeating tasks: null repeatFrequency means the task doesn't repeat. Unlike Routines
+  // (which just track "is today active"), a repeating Task has one concrete dueDate that gets
+  // rolled forward to the next occurrence in place when it's completed — no history rows.
+  repeatFrequency      RoutineFrequency?
+  repeatInterval       Int?
+  repeatDaysOfWeek     Int[]               @default([])
+  repeatMonthlyMode    RoutineMonthlyMode?
+  repeatDayOfMonth     Int?
+  repeatMonthlyOrdinal Int?
+  repeatMonthlyWeekday Int?
 
   projectId   String?
   project     Project?  @relation(fields: [projectId], references: [id])
@@ -43,6 +60,17 @@ model Task {
   parentId    String?
   parent      Task?     @relation("TaskSubtasks", fields: [parentId], references: [id], onDelete: Cascade)
   subtasks    Task[]    @relation("TaskSubtasks")
+}
+
+// A device's Web Push registration (one per browser/device the user has enabled notifications
+// on — e.g. one for their phone, one for their desktop). endpoint uniquely identifies the
+// device+browser's push channel with the browser vendor's push service.
+model PushSubscription {
+  id        String   @id @default(uuid())
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
 }
 
 enum CapturedKind {
@@ -67,23 +95,22 @@ model VoiceCapture {
   createdAt   DateTime     @default(now())
 }
 
-enum HabitFrequency {
-  DAILY
-  WEEKLY
-  FORTNIGHTLY
-  MONTHLY
-  CUSTOM
+enum HabitIntervalUnit {
+  DAY
+  WEEK
+  MONTH
 }
 
 model Habit {
-  id                 String         @id @default(uuid())
-  title              String
-  frequency          HabitFrequency @default(DAILY)
-  // Only used when frequency = CUSTOM, e.g. 2 for "every second day".
-  customIntervalDays Int?
-  currentStreak      Int            @default(0)
-  longestStreak      Int            @default(0)
-  lastCompletedDate  DateTime?
+  id                String            @id @default(uuid())
+  title             String
+  // The habit repeats every `intervalValue` `intervalUnit`s, e.g. 1 DAY, 3 DAYS, 2 WEEKS,
+  // 1 MONTH — a single number+unit pair covers what used to be five fixed frequency options.
+  intervalValue     Int               @default(1)
+  intervalUnit      HabitIntervalUnit @default(DAY)
+  currentStreak     Int               @default(0)
+  longestStreak     Int               @default(0)
+  lastCompletedDate DateTime?
 }
 
 enum RoutineFrequency {
@@ -92,16 +119,42 @@ enum RoutineFrequency {
   MONTHLY
 }
 
+// MONTHLY routines recur either on a fixed date ("Each" — the 12th, or the last day) or on
+// the Nth weekday of the month ("On the" — e.g. the first Wednesday).
+enum RoutineMonthlyMode {
+  DATE
+  WEEKDAY
+}
+
 model Routine {
   id           String           @id @default(uuid())
   title        String
   reminderTime String
   frequency    RoutineFrequency @default(DAILY)
-  // Used when frequency = WEEKLY; 0=Sunday..6=Saturday. Supports "a particular day of the week".
+  // Recurs every `interval` `frequency` units, e.g. interval=2, frequency=WEEKLY = "every 2 weeks".
+  interval     Int              @default(1)
+  // Used when frequency = WEEKLY; 0=Sunday..6=Saturday. Supports multiple days per week.
   daysOfWeek   Int[]            @default([])
   // Used when frequency = MONTHLY.
-  dayOfMonth   Int?
+  monthlyMode    RoutineMonthlyMode @default(DATE)
+  // MONTHLY + monthlyMode=DATE: 1-31, or -1 to mean "the last day of the month".
+  dayOfMonth     Int?
+  // MONTHLY + monthlyMode=WEEKDAY: 1-5 for First..Fifth, -1 for "Last".
+  monthlyOrdinal Int?
+  // MONTHLY + monthlyMode=WEEKDAY: 0=Sunday..6=Saturday.
+  monthlyWeekday Int?
   isActive     Boolean          @default(true)
   // When it was last ticked; ticking auto-expires after 1 hour and resets on the next scheduled occurrence.
   lastCompletedAt DateTime?
+  // Set once a push notification has gone out for today's scheduled occurrence, so the cron
+  // doesn't resend until the calendar date rolls over. Only meaningful on top-level routines
+  // (parentId = null) — sub-routines fire as part of their parent's single grouped notification.
+  notifiedAt   DateTime?
+
+  // Sub-routines group under a parent so the whole cluster fires as one notification and is
+  // ticked off together (e.g. "Wake Up Routine" -> "Make coffee", "Brush teeth", "Shave").
+  // A child has no schedule of its own — it always follows its parent's reminderTime/frequency.
+  parentId    String?
+  parent      Routine?  @relation("RoutineSubroutines", fields: [parentId], references: [id], onDelete: Cascade)
+  subroutines Routine[] @relation("RoutineSubroutines")
 }

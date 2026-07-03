@@ -1,0 +1,39 @@
+"use client";
+
+import CategoryManager from "./CategoryManager";
+import NotificationSetup from "./NotificationSetup";
+import type { CategoryOption } from "./types";
+
+export default function SettingsModal({
+  categoryOptions,
+  onClose,
+}: {
+  categoryOptions: CategoryOption[];
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-[rgba(42,38,34,.35)] p-6" onClick={onClose}>
+      <div
+        className="w-full max-w-105 rounded-2xl border border-[#ddd4c1] bg-[#faf7ef] p-6 shadow-[0_20px_60px_rgba(70,55,30,.3)] font-serif"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-xl text-[#2a2622]">Settings</h2>
+          <button type="button" onClick={onClose} className="cursor-pointer text-[#8a8069]">
+            ✕
+          </button>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label className="mb-1 block text-[11px] uppercase tracking-[0.14em] text-[#8a8069]">Categories</label>
+          <CategoryManager categoryOptions={categoryOptions} />
+        </div>
+
+        <div className="mt-4 flex flex-col gap-1.5">
+          <label className="mb-1 block text-[11px] uppercase tracking-[0.14em] text-[#8a8069]">Notifications</label>
+          <NotificationSetup />
+        </div>
+      </div>
+    </div>
+  );
+}

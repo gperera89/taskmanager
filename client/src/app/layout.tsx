@@ -15,7 +15,7 @@ const pinyon = Pinyon_Script({
 });
 
 export const metadata: Metadata = {
-  title: "Taskbook",
+  title: "Cura - Gayan Perera",
   description: "Tasks, projects, routines and habits in one place.",
 };
 
