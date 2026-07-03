@@ -13,6 +13,8 @@ import {
   deleteRoutine,
   deleteTask,
   type HabitFrequency,
+  updateHabit,
+  updateProject,
   updateRoutine,
   updateTask,
 } from "@/lib/api";
@@ -30,9 +32,23 @@ export async function addTask(formData: FormData) {
   const title = String(formData.get("title") ?? "").trim();
   const category = String(formData.get("category") ?? "").trim();
   const dueDate = String(formData.get("dueDate") ?? "").trim();
+  const projectId = String(formData.get("projectId") ?? "").trim();
   if (!title || !category) return;
 
-  await createTask({ title, category, dueDate: dueDate || null });
+  await createTask({ title, category, dueDate: dueDate || null, projectId: projectId || null });
+  revalidatePath("/");
+}
+
+export async function editTask(id: string, formData: FormData) {
+  await requireSession();
+
+  const title = String(formData.get("title") ?? "").trim();
+  const category = String(formData.get("category") ?? "").trim();
+  const dueDate = String(formData.get("dueDate") ?? "").trim();
+  const projectId = String(formData.get("projectId") ?? "").trim();
+  if (!title || !category) return;
+
+  await updateTask(id, { title, category, dueDate: dueDate || null, projectId: projectId || null });
   revalidatePath("/");
 }
 
@@ -59,6 +75,17 @@ export async function addProject(formData: FormData) {
   revalidatePath("/");
 }
 
+export async function editProject(id: string, formData: FormData) {
+  await requireSession();
+
+  const name = String(formData.get("name") ?? "").trim();
+  const description = String(formData.get("description") ?? "").trim();
+  if (!name) return;
+
+  await updateProject(id, { name, description: description || null });
+  revalidatePath("/");
+}
+
 export async function removeProject(id: string) {
   await requireSession();
   await deleteProject(id);
@@ -73,6 +100,17 @@ export async function addHabit(formData: FormData) {
   if (!title || !HABIT_FREQUENCIES.includes(frequency)) return;
 
   await createHabit({ title, frequency });
+  revalidatePath("/");
+}
+
+export async function editHabit(id: string, formData: FormData) {
+  await requireSession();
+
+  const title = String(formData.get("title") ?? "").trim();
+  const frequency = String(formData.get("frequency") ?? "") as HabitFrequency;
+  if (!title || !HABIT_FREQUENCIES.includes(frequency)) return;
+
+  await updateHabit(id, { title, frequency });
   revalidatePath("/");
 }
 
@@ -96,6 +134,17 @@ export async function addRoutine(formData: FormData) {
   if (!title || !reminderTime) return;
 
   await createRoutine({ title, reminderTime });
+  revalidatePath("/");
+}
+
+export async function editRoutine(id: string, formData: FormData) {
+  await requireSession();
+
+  const title = String(formData.get("title") ?? "").trim();
+  const reminderTime = String(formData.get("reminderTime") ?? "").trim();
+  if (!title || !reminderTime) return;
+
+  await updateRoutine(id, { title, reminderTime });
   revalidatePath("/");
 }
 

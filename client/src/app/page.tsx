@@ -5,6 +5,10 @@ import {
   addProject,
   addRoutine,
   addTask,
+  editHabit,
+  editProject,
+  editRoutine,
+  editTask,
   markHabitDone,
   removeHabit,
   removeProject,
@@ -59,6 +63,12 @@ export default async function Home() {
     calendarErrors = ["Could not load the calendar."];
   }
 
+  const projectNameById = new Map(projects!.map((project) => [project.id, project.name]));
+  const taskCountByProject = new Map<string, number>();
+  for (const task of tasks!) {
+    if (task.projectId) taskCountByProject.set(task.projectId, (taskCountByProject.get(task.projectId) ?? 0) + 1);
+  }
+
   return (
     <div className="flex flex-col flex-1 bg-zinc-50 dark:bg-black">
       <main className="flex flex-1 w-full max-w-3xl mx-auto flex-col gap-10 py-16 px-6">
@@ -96,27 +106,18 @@ export default async function Home() {
 
         <Section title="Tasks">
           <form action={addTask} className="flex flex-wrap gap-2">
-            <input
-              name="title"
-              placeholder="Title"
-              required
-              className="min-w-0 flex-1 rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800 dark:bg-transparent"
-            />
-            <input
-              name="category"
-              placeholder="Category"
-              required
-              className="w-32 rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800 dark:bg-transparent"
-            />
-            <input
-              name="dueDate"
-              type="date"
-              className="rounded-lg border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800 dark:bg-transparent"
-            />
-            <button
-              type="submit"
-              className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white dark:bg-zinc-50 dark:text-black"
-            >
+            <input name="title" placeholder="Title" required className={inputClass + " min-w-0 flex-1"} />
+            <input name="category" placeholder="Category" required className={inputClass + " w-32"} />
+            <input name="dueDate" type="date" className={inputClass} />
+            <select name="projectId" defaultValue="" className={inputClass}>
+              <option value="">No project</option>
+              {projects!.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+            <button type="submit" className={buttonClass}>
               Add
             </button>
           </form>
@@ -126,33 +127,47 @@ export default async function Home() {
             {tasks!.map((task) => (
               <li
                 key={task.id}
-                className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-800"
+                className="flex flex-col gap-2 rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-800"
               >
-                <form action={toggleTask.bind(null, task.id, task.isCompleted)}>
-                  <button
-                    type="submit"
-                    className={
-                      task.isCompleted
-                        ? "line-through text-zinc-400"
-                        : "text-left text-zinc-900 dark:text-zinc-50"
-                    }
-                  >
-                    {task.title}
-                  </button>
-                </form>
-                <div className="flex items-center gap-3">
-                  <span className="text-xs uppercase tracking-wide text-zinc-400">
-                    {task.category}
-                  </span>
-                  <form action={removeTask.bind(null, task.id)}>
+                <div className="flex items-center justify-between gap-3">
+                  <form action={toggleTask.bind(null, task.id, task.isCompleted)}>
                     <button
                       type="submit"
-                      className="text-xs text-zinc-400 hover:text-red-500"
+                      className={
+                        task.isCompleted
+                          ? "line-through text-zinc-400"
+                          : "text-left text-zinc-900 dark:text-zinc-50"
+                      }
                     >
-                      Delete
+                      {task.title}
                     </button>
                   </form>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs uppercase tracking-wide text-zinc-400">
+                      {task.category}
+                      {task.projectId && ` · ${projectNameById.get(task.projectId) ?? ""}`}
+                    </span>
+                    <DeleteButton action={removeTask.bind(null, task.id)} />
+                  </div>
                 </div>
+                <EditDisclosure>
+                  <form action={editTask.bind(null, task.id)} className="flex flex-wrap gap-2">
+                    <input name="title" defaultValue={task.title} required className={inputClass + " min-w-0 flex-1"} />
+                    <input name="category" defaultValue={task.category} required className={inputClass + " w-32"} />
+                    <input name="dueDate" type="date" defaultValue={toDateInputValue(task.dueDate)} className={inputClass} />
+                    <select name="projectId" defaultValue={task.projectId ?? ""} className={inputClass}>
+                      <option value="">No project</option>
+                      {projects!.map((project) => (
+                        <option key={project.id} value={project.id}>
+                          {project.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button type="submit" className={buttonClass}>
+                      Save
+                    </button>
+                  </form>
+                </EditDisclosure>
               </li>
             ))}
           </ul>
@@ -178,23 +193,40 @@ export default async function Home() {
             {habits!.map((habit) => (
               <li
                 key={habit.id}
-                className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-800"
+                className="flex flex-col gap-2 rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-800"
               >
-                <div className="flex flex-col">
-                  <span className="text-zinc-900 dark:text-zinc-50">{habit.title}</span>
-                  <span className="text-xs text-zinc-400">
-                    {HABIT_FREQUENCY_LABELS[habit.frequency]} · streak {habit.currentStreak}
-                    {habit.longestStreak > habit.currentStreak && ` (best ${habit.longestStreak})`}
-                  </span>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex flex-col">
+                    <span className="text-zinc-900 dark:text-zinc-50">{habit.title}</span>
+                    <span className="text-xs text-zinc-400">
+                      {HABIT_FREQUENCY_LABELS[habit.frequency]} · streak {habit.currentStreak}
+                      {habit.longestStreak > habit.currentStreak && ` (best ${habit.longestStreak})`}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <form action={markHabitDone.bind(null, habit.id)}>
+                      <button type="submit" className={buttonClass}>
+                        Done
+                      </button>
+                    </form>
+                    <DeleteButton action={removeHabit.bind(null, habit.id)} />
+                  </div>
                 </div>
-                <div className="flex items-center gap-3">
-                  <form action={markHabitDone.bind(null, habit.id)}>
+                <EditDisclosure>
+                  <form action={editHabit.bind(null, habit.id)} className="flex flex-wrap gap-2">
+                    <input name="title" defaultValue={habit.title} required className={inputClass + " flex-1"} />
+                    <select name="frequency" defaultValue={habit.frequency} className={inputClass}>
+                      {Object.entries(HABIT_FREQUENCY_LABELS).map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
                     <button type="submit" className={buttonClass}>
-                      Done
+                      Save
                     </button>
                   </form>
-                  <DeleteButton action={removeHabit.bind(null, habit.id)} />
-                </div>
+                </EditDisclosure>
               </li>
             ))}
           </ul>
@@ -211,15 +243,39 @@ export default async function Home() {
 
           {projects!.length === 0 && <Empty />}
           <ul className="flex flex-col gap-2">
-            {projects!.map((project) => (
-              <li
-                key={project.id}
-                className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 px-4 py-3 text-zinc-900 dark:border-zinc-800 dark:text-zinc-50"
-              >
-                {project.name}
-                <DeleteButton action={removeProject.bind(null, project.id)} />
-              </li>
-            ))}
+            {projects!.map((project) => {
+              const taskCount = taskCountByProject.get(project.id) ?? 0;
+              return (
+                <li
+                  key={project.id}
+                  className="flex flex-col gap-2 rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-800"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex flex-col">
+                      <span className="text-zinc-900 dark:text-zinc-50">{project.name}</span>
+                      <span className="text-xs text-zinc-400">
+                        {taskCount} task{taskCount === 1 ? "" : "s"}
+                        {project.description && ` · ${project.description}`}
+                      </span>
+                    </div>
+                    <DeleteButton action={removeProject.bind(null, project.id)} />
+                  </div>
+                  <EditDisclosure>
+                    <form action={editProject.bind(null, project.id)} className="flex flex-wrap gap-2">
+                      <input name="name" defaultValue={project.name} required className={inputClass + " flex-1"} />
+                      <input
+                        name="description"
+                        defaultValue={project.description ?? ""}
+                        className={inputClass + " flex-1"}
+                      />
+                      <button type="submit" className={buttonClass}>
+                        Save
+                      </button>
+                    </form>
+                  </EditDisclosure>
+                </li>
+              );
+            })}
           </ul>
         </Section>
 
@@ -237,24 +293,40 @@ export default async function Home() {
             {routines!.map((routine) => (
               <li
                 key={routine.id}
-                className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-800"
+                className="flex flex-col gap-2 rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-800"
               >
-                <form action={toggleRoutine.bind(null, routine.id, routine.isActive)}>
-                  <button
-                    type="submit"
-                    className={
-                      routine.isActive
-                        ? "text-left text-zinc-900 dark:text-zinc-50"
-                        : "text-left text-zinc-400 line-through"
-                    }
-                  >
-                    {routine.title}
-                  </button>
-                </form>
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-zinc-400">{routine.reminderTime}</span>
-                  <DeleteButton action={removeRoutine.bind(null, routine.id)} />
+                <div className="flex items-center justify-between gap-3">
+                  <form action={toggleRoutine.bind(null, routine.id, routine.isActive)}>
+                    <button
+                      type="submit"
+                      className={
+                        routine.isActive
+                          ? "text-left text-zinc-900 dark:text-zinc-50"
+                          : "text-left text-zinc-400 line-through"
+                      }
+                    >
+                      {routine.title}
+                    </button>
+                  </form>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-zinc-400">{routine.reminderTime}</span>
+                    <DeleteButton action={removeRoutine.bind(null, routine.id)} />
+                  </div>
                 </div>
+                <EditDisclosure>
+                  <form action={editRoutine.bind(null, routine.id)} className="flex flex-wrap gap-2">
+                    <input name="title" defaultValue={routine.title} required className={inputClass + " flex-1"} />
+                    <input
+                      name="reminderTime"
+                      defaultValue={routine.reminderTime}
+                      required
+                      className={inputClass + " w-24"}
+                    />
+                    <button type="submit" className={buttonClass}>
+                      Save
+                    </button>
+                  </form>
+                </EditDisclosure>
               </li>
             ))}
           </ul>
@@ -301,4 +373,19 @@ function DeleteButton({ action }: { action: () => Promise<void> }) {
       </button>
     </form>
   );
+}
+
+function EditDisclosure({ children }: { children: React.ReactNode }) {
+  return (
+    <details>
+      <summary className="cursor-pointer text-xs text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-50">
+        Edit
+      </summary>
+      <div className="mt-2">{children}</div>
+    </details>
+  );
+}
+
+function toDateInputValue(date: Date | null) {
+  return date ? date.toISOString().slice(0, 10) : "";
 }

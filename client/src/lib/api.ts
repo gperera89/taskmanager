@@ -30,19 +30,35 @@ async function notFoundAsError<T>(notFoundMessage: string, fn: () => Promise<T>)
 
 export const getTasks = () => prisma.task.findMany();
 
-export function createTask(input: { title: string; category: string; dueDate?: string | null }) {
+export function createTask(input: {
+  title: string;
+  category: string;
+  dueDate?: string | null;
+  projectId?: string | null;
+}) {
   const title = input.title.trim();
   const category = input.category.trim();
   if (!title || !category) throw new Error("Title and category are required");
 
   return prisma.task.create({
-    data: { title, category, dueDate: input.dueDate ? new Date(input.dueDate) : null },
+    data: {
+      title,
+      category,
+      dueDate: input.dueDate ? new Date(input.dueDate) : null,
+      projectId: input.projectId || null,
+    },
   });
 }
 
 export function updateTask(
   id: string,
-  input: Partial<{ title: string; category: string; dueDate: string | null; isCompleted: boolean }>
+  input: Partial<{
+    title: string;
+    category: string;
+    dueDate: string | null;
+    isCompleted: boolean;
+    projectId: string | null;
+  }>
 ) {
   return notFoundAsError("Task not found", () =>
     prisma.task.update({
@@ -50,8 +66,10 @@ export function updateTask(
       data: {
         title: input.title,
         category: input.category,
-        dueDate: input.dueDate ? new Date(input.dueDate) : undefined,
+        // undefined = field not provided (leave as-is); null/"" = explicitly cleared.
+        dueDate: input.dueDate === undefined ? undefined : input.dueDate ? new Date(input.dueDate) : null,
         isCompleted: input.isCompleted,
+        projectId: input.projectId === undefined ? undefined : input.projectId || null,
       },
     })
   );
@@ -68,6 +86,10 @@ export function createProject(input: { name: string; description?: string | null
   if (!name) throw new Error("Name is required");
 
   return prisma.project.create({ data: { name, description: input.description } });
+}
+
+export function updateProject(id: string, input: Partial<{ name: string; description: string | null }>) {
+  return notFoundAsError("Project not found", () => prisma.project.update({ where: { id }, data: input }));
 }
 
 export function deleteProject(id: string) {
@@ -113,6 +135,14 @@ export async function completeHabit(id: string): Promise<Habit> {
       lastCompletedDate: now,
     },
   });
+}
+
+export function updateHabit(id: string, input: Partial<{ title: string; frequency: HabitFrequency }>) {
+  if (input.frequency !== undefined && !HABIT_FREQUENCIES.includes(input.frequency)) {
+    throw new Error(`frequency must be one of: ${HABIT_FREQUENCIES.join(", ")}`);
+  }
+
+  return notFoundAsError("Habit not found", () => prisma.habit.update({ where: { id }, data: input }));
 }
 
 export function deleteHabit(id: string) {

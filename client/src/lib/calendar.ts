@@ -1,6 +1,7 @@
 import "server-only";
 import ical from "node-ical";
 import type { EventInstance, ParameterValue } from "node-ical";
+import { unstable_cache } from "next/cache";
 
 function paramValueToString(value: ParameterValue | undefined): string | null {
   if (value === undefined) return null;
@@ -51,7 +52,7 @@ async function getSourceEvents(
 }
 
 // Fetches every configured calendar independently so one broken feed doesn't blank out the rest.
-export async function getCalendarEvents(): Promise<{ events: CalendarEvent[]; errors: string[] }> {
+async function fetchCalendarEvents(): Promise<{ events: CalendarEvent[]; errors: string[] }> {
   const sources = getCalendarSources();
   if (sources.length === 0) {
     return {
@@ -79,3 +80,10 @@ export async function getCalendarEvents(): Promise<{ events: CalendarEvent[]; er
 
   return { events, errors };
 }
+
+// Cached independently of task/habit/project/routine mutations: those call revalidatePath("/"),
+// which would otherwise force this (two live network fetches + parsing ~1000+ events) to redo
+// on every single button press. A 5-minute staleness window is fine for a read-only sync.
+export const getCalendarEvents = unstable_cache(fetchCalendarEvents, ["calendar-events"], {
+  revalidate: 300,
+});
