@@ -30,13 +30,20 @@ model Task {
   project     Project?  @relation(fields: [projectId], references: [id])
 }
 
+enum HabitFrequency {
+  DAILY
+  WEEKLY
+  FORTNIGHTLY
+  MONTHLY
+}
+
 model Habit {
-  id                   String    @id @default(uuid())
-  title                String
-  currentStreak        Int       @default(0)
-  longestStreak        Int       @default(0)
-  daysSinceLastDone    Int       @default(0)
-  lastCompletedDate    DateTime?
+  id                String         @id @default(uuid())
+  title             String
+  frequency         HabitFrequency @default(DAILY)
+  currentStreak     Int            @default(0)
+  longestStreak     Int            @default(0)
+  lastCompletedDate DateTime?
 }
 
 model Routine {
