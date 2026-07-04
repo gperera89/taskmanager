@@ -1,21 +1,20 @@
 "use client";
 
 import { useState } from "react";
-import { addCategory, removeCategory, renameCategory } from "@/app/actions";
+import { useTaskbook } from "./store";
 import type { CategoryOption } from "./types";
 
 export default function CategoryManager({ categoryOptions }: { categoryOptions: CategoryOption[] }) {
+  const { actions } = useTaskbook();
   const [newName, setNewName] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
 
-  async function handleAdd() {
+  function handleAdd() {
     const name = newName.trim();
     if (!name) return;
-    const fd = new FormData();
-    fd.set("name", name);
     setNewName("");
-    await addCategory(fd);
+    actions.addCategory(name);
   }
 
   function startEditing(c: CategoryOption) {
@@ -23,13 +22,11 @@ export default function CategoryManager({ categoryOptions }: { categoryOptions: 
     setEditValue(c.name);
   }
 
-  async function commitEdit(id: string) {
+  function commitEdit(id: string) {
     const name = editValue.trim();
     setEditingId(null);
     if (!name) return;
-    const fd = new FormData();
-    fd.set("name", name);
-    await renameCategory(id, fd);
+    actions.renameCategory(id, name);
   }
 
   return (
@@ -73,7 +70,7 @@ export default function CategoryManager({ categoryOptions }: { categoryOptions: 
                   </button>
                   <button
                     type="button"
-                    onClick={() => removeCategory(c.id)}
+                    onClick={() => actions.removeCategory(c.id)}
                     disabled={categoryOptions.length <= 1}
                     className="cursor-pointer text-xs text-[#b3a988] hover:text-[#8a4040] disabled:cursor-not-allowed disabled:opacity-40"
                   >

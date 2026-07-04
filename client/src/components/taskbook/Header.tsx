@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useModalActions } from "./ModalContext";
-import { dismissCapture } from "@/app/actions";
+import { useTaskbook } from "./store";
 import type { CapturedKind, VoiceCaptureVM } from "./types";
 
 const KIND_LABEL: Record<CapturedKind, string> = {
@@ -37,6 +37,7 @@ export default function Header({
 }) {
   const router = useRouter();
   const { openAdd } = useModalActions();
+  const { actions } = useTaskbook();
   const [showNotif, setShowNotif] = useState(false);
   const [listening, setListening] = useState(false);
   const [processing, setProcessing] = useState(false);
@@ -94,7 +95,7 @@ export default function Header({
   function handleEditCapture(capture: VoiceCaptureVM) {
     onEditCapture(capture.kind, capture.entityId);
     setShowNotif(false);
-    void dismissCapture(capture.id);
+    actions.dismissCapture(capture.id);
   }
 
   return (
@@ -221,6 +222,7 @@ export default function Header({
 }
 
 function CapturedItem({ capture, onEdit }: { capture: VoiceCaptureVM; onEdit: (capture: VoiceCaptureVM) => void }) {
+  const { actions } = useTaskbook();
   return (
     <div className="rounded-lg border border-[#ddd4c1] bg-[#faf7ef] p-2.5">
       <div className="mb-0.5 text-[11px] uppercase tracking-[0.14em] text-[#a49a82]">{KIND_LABEL[capture.kind]}</div>
@@ -232,11 +234,13 @@ function CapturedItem({ capture, onEdit }: { capture: VoiceCaptureVM; onEdit: (c
       )}
       <div className="mt-1.5 text-[11px] italic text-[#a49a82]">&ldquo;{capture.transcript}&rdquo;</div>
       <div className="mt-2 flex justify-end gap-3">
-        <form action={dismissCapture.bind(null, capture.id)}>
-          <button type="submit" className="cursor-pointer text-xs text-[#b3a988] hover:text-[#8a4040]">
-            Mark as read
-          </button>
-        </form>
+        <button
+          type="button"
+          onClick={() => actions.dismissCapture(capture.id)}
+          className="cursor-pointer text-xs text-[#b3a988] hover:text-[#8a4040]"
+        >
+          Mark as read
+        </button>
         <button type="button" onClick={() => onEdit(capture)} className="cursor-pointer text-xs text-[#17399b]">
           Edit
         </button>

@@ -1,8 +1,17 @@
 "use client";
 
 import { useState } from "react";
-import { addHabit, addProject, addRoutine, addTask, editHabit, editProject, editRoutine } from "@/app/actions";
 import { todayInputValue } from "@/lib/taskbookDates";
+import { useTaskbook } from "./store";
+import {
+  isValidHabitForm,
+  isValidRoutineForm,
+  isValidTaskForm,
+  parseHabitForm,
+  parseProjectForm,
+  parseRoutineForm,
+  parseTaskForm,
+} from "./formParse";
 import CategoryManager from "./CategoryManager";
 import RepeatFields from "./RepeatFields";
 import type { CategoryOption, HabitCardVM, ModalState, ProjectCardVM, ProjectOption, RoutineItemVM } from "./types";
@@ -149,10 +158,19 @@ function TaskForm({
   onClose: () => void;
   shared?: SharedTitleProps & SharedDescriptionProps;
 }) {
+  const { actions } = useTaskbook();
   const [showManageCategories, setShowManageCategories] = useState(false);
 
   return (
-    <form action={addTask} onSubmit={onClose} className="flex flex-col gap-3">
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        const input = parseTaskForm(new FormData(e.currentTarget));
+        if (isValidTaskForm(input)) actions.addTask(input);
+        onClose();
+      }}
+      className="flex flex-col gap-3"
+    >
       <div>
         <label className={labelTextClass}>Title</label>
         {shared ? (
@@ -241,10 +259,21 @@ function ProjectForm({
   onClose: () => void;
   shared?: SharedTitleProps & SharedDescriptionProps;
 }) {
-  const action = item ? editProject.bind(null, item.id) : addProject;
+  const { actions } = useTaskbook();
 
   return (
-    <form action={action} onSubmit={onClose} className="flex flex-col gap-3">
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        const input = parseProjectForm(new FormData(e.currentTarget));
+        if (input.name) {
+          if (item) actions.editProject(item.id, input);
+          else actions.addProject(input);
+        }
+        onClose();
+      }}
+      className="flex flex-col gap-3"
+    >
       <div>
         <label className={labelTextClass}>Name</label>
         {shared ? (
@@ -292,7 +321,7 @@ function RoutineForm({
   onClose: () => void;
   shared?: SharedTitleProps;
 }) {
-  const action = item ? editRoutine.bind(null, item.id) : addRoutine;
+  const { actions } = useTaskbook();
   const [frequency, setFrequency] = useState(item?.frequency ?? "DAILY");
   const [intervalStr, setIntervalStr] = useState(String(item?.interval ?? 1));
   const [daysOfWeek, setDaysOfWeek] = useState<number[]>(item?.daysOfWeek ?? []);
@@ -303,7 +332,18 @@ function RoutineForm({
   const isSingular = intervalStr === "1";
 
   return (
-    <form action={action} onSubmit={onClose} className="flex flex-col gap-3">
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        const input = parseRoutineForm(new FormData(e.currentTarget));
+        if (isValidRoutineForm(input)) {
+          if (item) actions.editRoutine(item.id, input);
+          else actions.addRoutine(input);
+        }
+        onClose();
+      }}
+      className="flex flex-col gap-3"
+    >
       <div>
         <label className={labelTextClass}>Title</label>
         {shared ? (
@@ -485,13 +525,24 @@ function HabitForm({
   onClose: () => void;
   shared?: SharedTitleProps;
 }) {
-  const action = item ? editHabit.bind(null, item.id) : addHabit;
+  const { actions } = useTaskbook();
   const [intervalValue, setIntervalValue] = useState(String(item?.intervalValue ?? 1));
   const [intervalUnit, setIntervalUnit] = useState<"DAY" | "WEEK" | "MONTH">(item?.intervalUnit ?? "DAY");
   const isSingular = intervalValue === "1";
 
   return (
-    <form action={action} onSubmit={onClose} className="flex flex-col gap-3">
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        const input = parseHabitForm(new FormData(e.currentTarget));
+        if (isValidHabitForm(input)) {
+          if (item) actions.editHabit(item.id, input);
+          else actions.addHabit(input);
+        }
+        onClose();
+      }}
+      className="flex flex-col gap-3"
+    >
       <div>
         <label className={labelTextClass}>Title</label>
         {shared ? (

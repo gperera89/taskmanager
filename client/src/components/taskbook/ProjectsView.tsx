@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { addTask, removeProject, renameProject, toggleTask, updateProjectDescription, updateProjectDueDate } from "@/app/actions";
 import { todayInputValue } from "@/lib/taskbookDates";
+import { useTaskbook } from "./store";
+import { parseTaskForm } from "./formParse";
 import { Chip, RowDeleteButton, labelClass } from "./shared";
 import type { CategoryOption, ProjectCardVM } from "./types";
 
@@ -47,6 +48,7 @@ export default function ProjectsView({
 }
 
 function ProjectCard({ project, categoryOptions }: { project: ProjectCardVM; categoryOptions: CategoryOption[] }) {
+  const { actions } = useTaskbook();
   const [editingName, setEditingName] = useState(false);
   const [editingDescription, setEditingDescription] = useState(false);
   const [editingDueDate, setEditingDueDate] = useState(false);
@@ -56,7 +58,15 @@ function ProjectCard({ project, categoryOptions }: { project: ProjectCardVM; cat
     <div className="group rounded-xl border border-[#e1d8c4] bg-[#f2ecdf] px-5.5 pb-5 pt-5.5">
       <div className="flex items-baseline justify-between gap-2">
         {editingName ? (
-          <form action={renameProject.bind(null, project.id)} onSubmit={() => setEditingName(false)} className="min-w-0 flex-1">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              const name = String(new FormData(e.currentTarget).get("name") ?? "").trim();
+              if (name) actions.renameProject(project.id, name);
+              setEditingName(false);
+            }}
+            className="min-w-0 flex-1"
+          >
             <input
               name="name"
               required
@@ -79,12 +89,19 @@ function ProjectCard({ project, categoryOptions }: { project: ProjectCardVM; cat
           <span className="text-[13px] text-[#557694]">
             {project.done} / {project.total}
           </span>
-          <RowDeleteButton action={removeProject.bind(null, project.id)} />
+          <RowDeleteButton action={() => actions.removeProject(project.id)} />
         </div>
       </div>
 
       {editingDescription ? (
-        <form action={updateProjectDescription.bind(null, project.id)} onSubmit={() => setEditingDescription(false)} className="mt-1.5">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            actions.setProjectDescription(project.id, String(new FormData(e.currentTarget).get("description") ?? ""));
+            setEditingDescription(false);
+          }}
+          className="mt-1.5"
+        >
           <textarea
             name="description"
             rows={2}
@@ -106,7 +123,14 @@ function ProjectCard({ project, categoryOptions }: { project: ProjectCardVM; cat
 
       <div className="mt-2">
         {editingDueDate ? (
-          <form action={updateProjectDueDate.bind(null, project.id)} onSubmit={() => setEditingDueDate(false)} className="inline-block">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              actions.setProjectDueDate(project.id, String(new FormData(e.currentTarget).get("dueDate") ?? ""));
+              setEditingDueDate(false);
+            }}
+            className="inline-block"
+          >
             <input
               type="date"
               name="dueDate"
@@ -154,7 +178,15 @@ function ProjectCard({ project, categoryOptions }: { project: ProjectCardVM; cat
         ))}
         {project.total === 0 &&
           (addingTask ? (
-            <form action={addTask} onSubmit={() => setAddingTask(false)} className="flex items-center gap-2">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const input = parseTaskForm(new FormData(e.currentTarget));
+                if (input.title && input.category) actions.addTask(input);
+                setAddingTask(false);
+              }}
+              className="flex items-center gap-2"
+            >
               <input type="hidden" name="projectId" value={project.id} />
               <input type="hidden" name="category" value={categoryOptions[0]?.name ?? ""} />
               <input
@@ -197,22 +229,22 @@ function ProjectCard({ project, categoryOptions }: { project: ProjectCardVM; cat
 }
 
 function ProjectTaskCheck({ taskId, isCompleted }: { taskId: string; isCompleted: boolean }) {
+  const { actions } = useTaskbook();
   return (
-    <form action={toggleTask.bind(null, taskId, isCompleted)} className="flex-none">
-      <button
-        type="submit"
-        className="flex h-5 w-5 cursor-pointer items-center justify-center rounded"
-        style={{
-          border: `1.5px solid ${isCompleted ? "#17399b" : "#b3a988"}`,
-          background: isCompleted ? "rgba(23,57,155,.06)" : "transparent",
-        }}
-      >
-        {isCompleted && (
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-            <path d="M4 13.5 L9.5 18.5 L20 5.5" stroke="#17399b" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        )}
-      </button>
-    </form>
+    <button
+      type="button"
+      onClick={() => actions.toggleTask(taskId, isCompleted)}
+      className="flex h-5 w-5 flex-none cursor-pointer items-center justify-center rounded"
+      style={{
+        border: `1.5px solid ${isCompleted ? "#17399b" : "#b3a988"}`,
+        background: isCompleted ? "rgba(23,57,155,.06)" : "transparent",
+      }}
+    >
+      {isCompleted && (
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+          <path d="M4 13.5 L9.5 18.5 L20 5.5" stroke="#17399b" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      )}
+    </button>
   );
 }

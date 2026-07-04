@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { markHabitDone, removeHabit } from "@/app/actions";
 import { useModalActions } from "./ModalContext";
+import { useTaskbook } from "./store";
 import { RowDeleteButton, labelClass } from "./shared";
 import type { HabitCardVM } from "./types";
 
@@ -19,6 +19,7 @@ export default function HabitsView({
   atRiskCount: number;
   query: string;
 }) {
+  const { actions } = useTaskbook();
   const [skippedId, setSkippedId] = useState<string | null>(null);
   const q = query.trim().toLowerCase();
   const showFeatured = featured && featured.id !== skippedId && (!q || featured.title.toLowerCase().includes(q));
@@ -50,11 +51,13 @@ export default function HabitsView({
               <div className="mt-0.5 text-sm italic text-[#8a8069]">{featured.detailLabel}</div>
             </div>
             <div className="flex flex-none gap-2.5">
-              <form action={markHabitDone.bind(null, featured.id)}>
-                <button type="submit" className="cursor-pointer rounded-full bg-[#17399b] px-5 py-2 text-sm text-white">
-                  Done today
-                </button>
-              </form>
+              <button
+                type="button"
+                onClick={() => actions.markHabitDone(featured.id)}
+                className="cursor-pointer rounded-full bg-[#17399b] px-5 py-2 text-sm text-white"
+              >
+                Done today
+              </button>
               <button
                 type="button"
                 onClick={() => setSkippedId(featured.id)}
@@ -91,6 +94,7 @@ export default function HabitsView({
 
 function HabitRow({ habit }: { habit: HabitCardVM }) {
   const { openEdit } = useModalActions();
+  const { actions } = useTaskbook();
   return (
     <div className="group flex items-center justify-between gap-3 border-b border-[#e1d8c4] py-3.5">
       <div className="min-w-0 cursor-pointer" onClick={() => openEdit({ mode: "edit", kind: "habit", item: habit })}>
@@ -102,7 +106,7 @@ function HabitRow({ habit }: { habit: HabitCardVM }) {
           <div className="text-[17px] font-semibold text-[#557694]">{habit.currentStreak}</div>
           <div className="text-[9px] uppercase tracking-[0.16em] text-[#a49a82]">streak</div>
         </div>
-        <RowDeleteButton action={removeHabit.bind(null, habit.id)} />
+        <RowDeleteButton action={() => actions.removeHabit(habit.id)} />
       </div>
     </div>
   );

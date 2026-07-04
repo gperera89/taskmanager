@@ -1,10 +1,11 @@
 "use client";
 
-import { toggleTask } from "@/app/actions";
+import { useTaskbook } from "./store";
 import { Chip, labelClass } from "./shared";
 import type { DayDetailVM } from "./types";
 
 export default function DayView({ detail, onBack }: { detail: DayDetailVM; onBack: () => void }) {
+  const { actions } = useTaskbook();
   const isEmpty = detail.tasks.length === 0 && detail.projects.length === 0 && detail.events.length === 0;
 
   return (
@@ -28,22 +29,21 @@ export default function DayView({ detail, onBack }: { detail: DayDetailVM; onBac
             </div>
             {detail.tasks.map((t) => (
               <div key={t.id} className="flex gap-3.5 border-b border-[#e1d8c4] py-3.5">
-                <form action={toggleTask.bind(null, t.id, t.isCompleted)} className="flex-none">
-                  <button
-                    type="submit"
-                    className="mt-0.5 flex h-[22px] w-[22px] cursor-pointer items-center justify-center rounded"
-                    style={{
-                      border: `1.5px solid ${t.isCompleted ? "#17399b" : "#b3a988"}`,
-                      background: t.isCompleted ? "rgba(23,57,155,.06)" : "transparent",
-                    }}
-                  >
-                    {t.isCompleted && (
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                        <path d="M4 13.5 L9.5 18.5 L20 5.5" stroke="#17399b" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    )}
-                  </button>
-                </form>
+                <button
+                  type="button"
+                  onClick={() => actions.toggleTask(t.id, t.isCompleted)}
+                  className="mt-0.5 flex h-[22px] w-[22px] flex-none cursor-pointer items-center justify-center rounded"
+                  style={{
+                    border: `1.5px solid ${t.isCompleted ? "#17399b" : "#b3a988"}`,
+                    background: t.isCompleted ? "rgba(23,57,155,.06)" : "transparent",
+                  }}
+                >
+                  {t.isCompleted && (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                      <path d="M4 13.5 L9.5 18.5 L20 5.5" stroke="#17399b" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  )}
+                </button>
                 <div className="flex-1">
                   <div
                     className="text-[17px]"

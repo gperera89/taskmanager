@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { AreaKey, CapturedKind, HabitCardVM, ModalState, TaskbookData } from "./types";
+import type { AreaKey, CapturedKind, HabitCardVM, ModalState } from "./types";
+import { useTaskbook } from "./store";
 import { ModalContext } from "./ModalContext";
 import Header from "./Header";
 import BottomTabs from "./BottomTabs";
@@ -18,7 +19,8 @@ import SettingsModal from "./SettingsModal";
 // instead of a swipeable panel, so it is dropped from the content flow there.
 const CAROUSEL_VIEWS: AreaKey[] = ["tasks", "projects", "routines", "habits", "calendar"];
 
-export default function TaskbookApp({ data }: { data: TaskbookData }) {
+export default function TaskbookApp() {
+  const { data } = useTaskbook();
   const [area, setArea] = useState<AreaKey>("tasks");
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
   const [dayOpen, setDayOpen] = useState(false);
@@ -77,16 +79,15 @@ export default function TaskbookApp({ data }: { data: TaskbookData }) {
   }
 
   // On entering mobile (initial mount or rotating to portrait), line the carousel up
-  // with the currently active view without animating. On growing to desktop, the calendar
-  // is the side rail rather than a main view, so fall back to Tasks if it was active.
+  // with the currently active view without animating (a DOM side effect).
   useEffect(() => {
-    if (isMobile) {
-      if (CAROUSEL_VIEWS.includes(area)) scrollToArea(area, "auto");
-    } else if (area === "calendar") {
-      setArea("tasks");
-    }
+    if (isMobile && CAROUSEL_VIEWS.includes(area)) scrollToArea(area, "auto");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isMobile]);
+
+  // On desktop the calendar is the side rail, not a main view — never leave it as the active
+  // area there. Corrected during render (React's adjust-state-on-change pattern).
+  if (!isMobile && area === "calendar") setArea("tasks");
 
   // Looks up the entity a voice-capture notice points at, so "Edit" can reopen its normal
   // edit form instead of needing a bespoke voice-capture editing UI. Tasks are edited inline

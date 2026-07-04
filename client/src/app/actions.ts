@@ -1,6 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import {
   completeHabit,
@@ -28,6 +27,13 @@ import {
   updateRoutine,
   updateTask,
 } from "@/lib/api";
+
+// NOTE ON REVALIDATION: these actions no longer call revalidatePath("/"). The client applies
+// every change optimistically (see components/taskbook/store.tsx) and reconciles with server
+// truth by calling router.refresh() when the tab regains focus (or if a write fails). That
+// keeps a click's server work to a single write instead of re-rendering the whole page — which
+// was the ~8s "click to update" lag. Create actions return the new row's id so the client can
+// swap its temporary optimistic id for the real one.
 
 const HABIT_INTERVAL_UNITS: HabitIntervalUnit[] = ["DAY", "WEEK", "MONTH"];
 const ROUTINE_FREQUENCIES: RoutineFrequency[] = ["DAILY", "WEEKLY", "MONTHLY"];
@@ -62,7 +68,7 @@ async function requireSession() {
   if (!session) throw new Error("Not authenticated");
 }
 
-export async function addTask(formData: FormData) {
+export async function addTask(formData: FormData): Promise<string | undefined> {
   await requireSession();
 
   const title = String(formData.get("title") ?? "").trim();
@@ -74,7 +80,7 @@ export async function addTask(formData: FormData) {
   const parentId = String(formData.get("parentId") ?? "").trim();
   if (!title || !category) return;
 
-  await createTask({
+  const task = await createTask({
     title,
     category,
     description: description || null,
@@ -84,7 +90,7 @@ export async function addTask(formData: FormData) {
     parentId: parentId || null,
     repeat: parseTaskRepeat(formData),
   });
-  revalidatePath("/");
+  return task.id;
 }
 
 // Toggling a repeating task doesn't mark it complete — it rolls the due date forward to the
@@ -92,13 +98,11 @@ export async function addTask(formData: FormData) {
 export async function toggleTask(id: string, isCompleted: boolean) {
   await requireSession();
   await toggleTaskCompletion(id, isCompleted);
-  revalidatePath("/");
 }
 
 export async function removeTask(id: string) {
   await requireSession();
   await deleteTask(id);
-  revalidatePath("/");
 }
 
 export async function renameTask(id: string, formData: FormData) {
@@ -106,14 +110,12 @@ export async function renameTask(id: string, formData: FormData) {
   const title = String(formData.get("title") ?? "").trim();
   if (!title) return;
   await updateTask(id, { title });
-  revalidatePath("/");
 }
 
 export async function updateTaskDescription(id: string, formData: FormData) {
   await requireSession();
   const description = String(formData.get("description") ?? "").trim();
   await updateTask(id, { description: description || null });
-  revalidatePath("/");
 }
 
 export async function updateTaskDueDate(id: string, formData: FormData) {
@@ -121,7 +123,6 @@ export async function updateTaskDueDate(id: string, formData: FormData) {
   const dueDate = String(formData.get("dueDate") ?? "").trim();
   const dueTime = String(formData.get("dueTime") ?? "").trim();
   await updateTask(id, { dueDate: dueDate || null, dueTime: dueTime || null });
-  revalidatePath("/");
 }
 
 export async function updateTaskCategory(id: string, formData: FormData) {
@@ -129,23 +130,20 @@ export async function updateTaskCategory(id: string, formData: FormData) {
   const category = String(formData.get("category") ?? "").trim();
   if (!category) return;
   await updateTask(id, { category });
-  revalidatePath("/");
 }
 
 export async function updateTaskProject(id: string, formData: FormData) {
   await requireSession();
   const projectId = String(formData.get("projectId") ?? "").trim();
   await updateTask(id, { projectId: projectId || null });
-  revalidatePath("/");
 }
 
 export async function updateTaskRepeat(id: string, formData: FormData) {
   await requireSession();
   await updateTask(id, { repeat: parseTaskRepeat(formData) });
-  revalidatePath("/");
 }
 
-export async function addProject(formData: FormData) {
+export async function addProject(formData: FormData): Promise<string | undefined> {
   await requireSession();
 
   const name = String(formData.get("name") ?? "").trim();
@@ -153,8 +151,8 @@ export async function addProject(formData: FormData) {
   const dueDate = String(formData.get("dueDate") ?? "").trim();
   if (!name) return;
 
-  await createProject({ name, description: description || null, dueDate: dueDate || null });
-  revalidatePath("/");
+  const project = await createProject({ name, description: description || null, dueDate: dueDate || null });
+  return project.id;
 }
 
 export async function editProject(id: string, formData: FormData) {
@@ -166,7 +164,6 @@ export async function editProject(id: string, formData: FormData) {
   if (!name) return;
 
   await updateProject(id, { name, description: description || null, dueDate: dueDate || null });
-  revalidatePath("/");
 }
 
 export async function renameProject(id: string, formData: FormData) {
@@ -174,36 +171,31 @@ export async function renameProject(id: string, formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return;
   await updateProject(id, { name });
-  revalidatePath("/");
 }
 
 export async function updateProjectDescription(id: string, formData: FormData) {
   await requireSession();
   const description = String(formData.get("description") ?? "").trim();
   await updateProject(id, { description: description || null });
-  revalidatePath("/");
 }
 
 export async function updateProjectDueDate(id: string, formData: FormData) {
   await requireSession();
   const dueDate = String(formData.get("dueDate") ?? "").trim();
   await updateProject(id, { dueDate: dueDate || null });
-  revalidatePath("/");
 }
 
 export async function toggleProject(id: string, isCompleted: boolean) {
   await requireSession();
   await updateProject(id, { isCompleted: !isCompleted });
-  revalidatePath("/");
 }
 
 export async function removeProject(id: string) {
   await requireSession();
   await deleteProject(id);
-  revalidatePath("/");
 }
 
-export async function addHabit(formData: FormData) {
+export async function addHabit(formData: FormData): Promise<string | undefined> {
   await requireSession();
 
   const title = String(formData.get("title") ?? "").trim();
@@ -211,8 +203,8 @@ export async function addHabit(formData: FormData) {
   const intervalUnit = String(formData.get("intervalUnit") ?? "") as HabitIntervalUnit;
   if (!title || !intervalValue || !HABIT_INTERVAL_UNITS.includes(intervalUnit)) return;
 
-  await createHabit({ title, intervalValue, intervalUnit });
-  revalidatePath("/");
+  const habit = await createHabit({ title, intervalValue, intervalUnit });
+  return habit.id;
 }
 
 export async function editHabit(id: string, formData: FormData) {
@@ -224,19 +216,16 @@ export async function editHabit(id: string, formData: FormData) {
   if (!title || !intervalValue || !HABIT_INTERVAL_UNITS.includes(intervalUnit)) return;
 
   await updateHabit(id, { title, intervalValue, intervalUnit });
-  revalidatePath("/");
 }
 
 export async function markHabitDone(id: string) {
   await requireSession();
   await completeHabit(id);
-  revalidatePath("/");
 }
 
 export async function removeHabit(id: string) {
   await requireSession();
   await deleteHabit(id);
-  revalidatePath("/");
 }
 
 function parseDaysOfWeek(formData: FormData): number[] {
@@ -264,7 +253,7 @@ function parseRoutineRecurrence(formData: FormData) {
   };
 }
 
-export async function addRoutine(formData: FormData) {
+export async function addRoutine(formData: FormData): Promise<string | undefined> {
   await requireSession();
 
   const title = String(formData.get("title") ?? "").trim();
@@ -272,8 +261,8 @@ export async function addRoutine(formData: FormData) {
   const recurrence = parseRoutineRecurrence(formData);
   if (!title || !reminderTime || !ROUTINE_FREQUENCIES.includes(recurrence.frequency)) return;
 
-  await createRoutine({ title, reminderTime, ...recurrence });
-  revalidatePath("/");
+  const routine = await createRoutine({ title, reminderTime, ...recurrence });
+  return routine.id;
 }
 
 export async function editRoutine(id: string, formData: FormData) {
@@ -285,44 +274,40 @@ export async function editRoutine(id: string, formData: FormData) {
   if (!title || !reminderTime || !ROUTINE_FREQUENCIES.includes(recurrence.frequency)) return;
 
   await updateRoutine(id, { title, reminderTime, ...recurrence });
-  revalidatePath("/");
 }
 
 export async function toggleRoutine(id: string, isActive: boolean) {
   await requireSession();
   await updateRoutine(id, { isActive: !isActive });
-  revalidatePath("/");
 }
 
 // Ticks the whole cluster (this routine plus every sibling under the same parent) done together.
 export async function tickRoutine(id: string) {
   await requireSession();
   await completeRoutineCluster(id);
-  revalidatePath("/");
 }
 
 export async function removeRoutine(id: string) {
   await requireSession();
   await deleteRoutine(id);
-  revalidatePath("/");
 }
 
-export async function addSubroutine(parentId: string, formData: FormData) {
+export async function addSubroutine(parentId: string, formData: FormData): Promise<string | undefined> {
   await requireSession();
 
   const title = String(formData.get("title") ?? "").trim();
   if (!title) return;
 
-  await createSubroutine(parentId, title);
-  revalidatePath("/");
+  const subroutine = await createSubroutine(parentId, title);
+  return subroutine.id;
 }
 
-export async function addCategory(formData: FormData) {
+export async function addCategory(formData: FormData): Promise<string | undefined> {
   await requireSession();
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return;
-  await createCategory(name);
-  revalidatePath("/");
+  const category = await createCategory(name);
+  return category.id;
 }
 
 export async function renameCategory(id: string, formData: FormData) {
@@ -330,17 +315,14 @@ export async function renameCategory(id: string, formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return;
   await updateCategory(id, name);
-  revalidatePath("/");
 }
 
 export async function removeCategory(id: string) {
   await requireSession();
   await deleteCategory(id);
-  revalidatePath("/");
 }
 
 export async function dismissCapture(id: string) {
   await requireSession();
   await dismissVoiceCapture(id);
-  revalidatePath("/");
 }

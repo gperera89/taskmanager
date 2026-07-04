@@ -1,16 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import {
-  removeTask,
-  renameTask,
-  toggleTask,
-  updateTaskCategory,
-  updateTaskDescription,
-  updateTaskDueDate,
-  updateTaskProject,
-  updateTaskRepeat,
-} from "@/app/actions";
+import { useTaskbook } from "./store";
+import { parseTaskRepeat } from "./formParse";
 import { CheckSquare, RowDeleteButton, labelClass } from "./shared";
 import RepeatFields from "./RepeatFields";
 import type { CategoryOption, ProjectOption, TaskGroupVM, TaskItemVM } from "./types";
@@ -104,6 +96,7 @@ function TaskRow({
   categoryOptions: CategoryOption[];
   projectOptions: ProjectOption[];
 }) {
+  const { actions } = useTaskbook();
   const hasSubtasks = task.subtasksTotal > 0;
   const progressPct = hasSubtasks ? Math.round((task.subtasksDone / task.subtasksTotal) * 100) : 0;
 
@@ -116,7 +109,7 @@ function TaskRow({
   const [dueTimeDraft, setDueTimeDraft] = useState(task.dueTimeValue);
   const [repeatOpen, setRepeatOpen] = useState(false);
 
-  async function commitTitle() {
+  function commitTitle() {
     setEditingTitle(false);
     const trimmed = titleDraft.trim();
     if (!trimmed) {
@@ -124,44 +117,30 @@ function TaskRow({
       return;
     }
     if (trimmed === task.title) return;
-    const fd = new FormData();
-    fd.set("title", trimmed);
-    await renameTask(task.id, fd);
+    actions.renameTask(task.id, trimmed);
   }
 
-  async function commitDescription() {
+  function commitDescription() {
     setEditingDescription(false);
     if (descriptionDraft === (task.description ?? "")) return;
-    const fd = new FormData();
-    fd.set("description", descriptionDraft);
-    await updateTaskDescription(task.id, fd);
+    actions.setTaskDescription(task.id, descriptionDraft);
   }
 
-  async function commitCategory(name: string) {
-    const fd = new FormData();
-    fd.set("category", name);
-    await updateTaskCategory(task.id, fd);
+  function commitCategory(name: string) {
+    actions.setTaskCategory(task.id, name);
   }
 
-  async function commitProject(projectId: string) {
-    const fd = new FormData();
-    fd.set("projectId", projectId);
-    await updateTaskProject(task.id, fd);
+  function commitProject(projectId: string) {
+    actions.setTaskProject(task.id, projectId);
   }
 
-  async function commitDue() {
-    const fd = new FormData();
-    fd.set("dueDate", dueDateDraft);
-    fd.set("dueTime", dueTimeDraft);
-    await updateTaskDueDate(task.id, fd);
+  function commitDue() {
+    actions.setTaskDue(task.id, dueDateDraft, dueTimeDraft);
     setDueOpen(false);
   }
 
-  async function clearDue() {
-    const fd = new FormData();
-    fd.set("dueDate", "");
-    fd.set("dueTime", "");
-    await updateTaskDueDate(task.id, fd);
+  function clearDue() {
+    actions.setTaskDue(task.id, "", "");
     setDueDateDraft("");
     setDueTimeDraft("");
     setDueOpen(false);
@@ -169,7 +148,7 @@ function TaskRow({
 
   return (
     <div className="group flex gap-3.5 border-b border-[#e1d8c4] py-3.5 px-0.5">
-      <CheckSquare action={toggleTask.bind(null, task.id, task.isCompleted)} checked={task.isCompleted} />
+      <CheckSquare action={() => actions.toggleTask(task.id, task.isCompleted)} checked={task.isCompleted} />
       <div className="min-w-0 flex-1">
         {editingTitle ? (
           <input
@@ -311,10 +290,9 @@ function TaskRow({
 
         {repeatOpen && (
           <form
-            onSubmit={async (e) => {
+            onSubmit={(e) => {
               e.preventDefault();
-              const fd = new FormData(e.currentTarget);
-              await updateTaskRepeat(task.id, fd);
+              actions.setTaskRepeat(task.id, parseTaskRepeat(new FormData(e.currentTarget)));
               setRepeatOpen(false);
             }}
             className="mt-2 rounded-lg border border-[#d3c9b3] bg-white p-3"
@@ -354,7 +332,7 @@ function TaskRow({
         )}
       </div>
       <div className="flex flex-none items-start pt-0.5">
-        <RowDeleteButton action={removeTask.bind(null, task.id)} />
+        <RowDeleteButton action={() => actions.removeTask(task.id)} />
       </div>
     </div>
   );
