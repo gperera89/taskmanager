@@ -11,8 +11,15 @@ import {
 import { parseCaptureFromTranscript, transcribeAudio } from "@/lib/voice";
 
 export async function POST(request: Request) {
-  const session = await auth();
-  if (!session) return Response.json({ error: "Not authenticated" }, { status: 401 });
+  // The iPhone Shortcut can't do Google OAuth, so it authenticates with a shared secret header
+  // instead. The in-app recorder still uses the normal Google session.
+  const shortcutSecret = process.env.SHORTCUT_SECRET;
+  const providedSecret = request.headers.get("x-shortcut-secret");
+  const viaShortcutSecret = !!shortcutSecret && providedSecret === shortcutSecret;
+  if (!viaShortcutSecret) {
+    const session = await auth();
+    if (!session) return Response.json({ error: "Not authenticated" }, { status: 401 });
+  }
 
   const formData = await request.formData();
   const audio = formData.get("audio");

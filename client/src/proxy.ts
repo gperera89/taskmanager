@@ -10,5 +10,7 @@ export default auth((req) => {
 });
 
 export const config = {
-	matcher: ["/((?!api/auth|api/cron|_next/static|_next/image|favicon.ico|icon.png|apple-icon.png).*)"],
+	// api/voice-capture is exempt because it does its own auth (Google session OR X-Shortcut-Secret,
+	// for the iPhone Shortcut which can't hold a login cookie), same as api/cron's secret check.
+	matcher: ["/((?!api/auth|api/cron|api/voice-capture|_next/static|_next/image|favicon.ico|icon.png|apple-icon.png).*)"],
 };

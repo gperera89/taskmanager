@@ -59,12 +59,31 @@ function normalizeTime(v: unknown): string | null {
   return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
 }
 
+// Whisper picks its decoder from the upload's filename extension, so we make sure the file we send
+// has one that matches its actual container. The in-app recorder sends webm; the iPhone Shortcut
+// sends m4a (audio/mp4). If the incoming File already has a real extension we keep it.
+function whisperFilename(file: File): string {
+  if (file.name && /\.[a-z0-9]+$/i.test(file.name)) return file.name;
+  const byType: Record<string, string> = {
+    "audio/webm": "webm",
+    "audio/mp4": "m4a",
+    "audio/x-m4a": "m4a",
+    "audio/m4a": "m4a",
+    "audio/aac": "m4a",
+    "audio/mpeg": "mp3",
+    "audio/wav": "wav",
+    "audio/x-wav": "wav",
+  };
+  const ext = byType[file.type] ?? "m4a";
+  return `recording.${ext}`;
+}
+
 // Sends the recorded clip to OpenAI's Whisper API and returns the transcribed text.
 export async function transcribeAudio(file: File): Promise<string> {
   const apiKey = requireApiKey();
 
   const form = new FormData();
-  form.append("file", file, file.name || "recording.webm");
+  form.append("file", file, whisperFilename(file));
   form.append("model", "whisper-1");
 
   const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
