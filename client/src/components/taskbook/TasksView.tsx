@@ -20,6 +20,7 @@ export default function TasksView({
   projectOptions: ProjectOption[];
 }) {
   const [showCompleted, setShowCompleted] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const q = query.trim().toLowerCase();
 
   const matchesQuery = (t: TaskItemVM) => !q || t.title.toLowerCase().includes(q);
@@ -42,16 +43,33 @@ export default function TasksView({
             {q ? "No tasks match your search." : "Nothing here yet."}
           </p>
         )}
-        {filtered.map((group) => (
-          <div key={group.key}>
-            <div className={labelClass} style={{ margin: "20px 0 4px" }}>
-              {group.label}
+        {filtered.map((group) => {
+          const isExpanded = q.length > 0 || (expandedGroups[group.key] ?? false);
+          const visibleTasks = isExpanded ? group.tasks : group.tasks.slice(0, GROUP_PREVIEW_COUNT);
+          const hiddenCount = group.tasks.length - visibleTasks.length;
+          return (
+            <div key={group.key}>
+              <div
+                className={labelClass}
+                style={{ margin: "20px 0 4px", display: "flex", alignItems: "center", justifyContent: "space-between" }}
+              >
+                <span>{group.label}</span>
+                {!q && group.tasks.length > GROUP_PREVIEW_COUNT && (
+                  <button
+                    type="button"
+                    onClick={() => setExpandedGroups((prev) => ({ ...prev, [group.key]: !isExpanded }))}
+                    className="cursor-pointer normal-case tracking-normal text-[#8a8069] underline decoration-dotted underline-offset-2"
+                  >
+                    {isExpanded ? "Show less" : `+${hiddenCount} more`}
+                  </button>
+                )}
+              </div>
+              {visibleTasks.map((task) => (
+                <TaskRow key={task.id} task={task} categoryOptions={categoryOptions} projectOptions={projectOptions} />
+              ))}
             </div>
-            {group.tasks.map((task) => (
-              <TaskRow key={task.id} task={task} categoryOptions={categoryOptions} projectOptions={projectOptions} />
-            ))}
-          </div>
-        ))}
+          );
+        })}
 
         {completedTasks.length > 0 && (
           <div>
@@ -82,6 +100,8 @@ export default function TasksView({
     </div>
   );
 }
+
+const GROUP_PREVIEW_COUNT = 4;
 
 const chipSelectClass =
   "cursor-pointer whitespace-nowrap rounded-full border-none px-2.5 py-0.5 text-[11.5px] outline-none";

@@ -84,6 +84,7 @@ export type RoutineItemVM = {
   scheduleLabel: string;
   pausedUntil: string; // yyyy-mm-dd for the date-input, "" if not paused
   nextNotificationLabel: string; // e.g. "tomorrow" or "Mon 14 Jul"
+  nextOccurrenceMs: number; // sort key for the chronological routines list
   // Grouped under this routine so they fire as one clustered notification and tick off
   // together, e.g. "Wake Up Routine" -> "Make coffee", "Brush teeth", "Shave".
   subroutines: SubroutineVM[];
@@ -129,8 +130,7 @@ export type TaskbookData = {
   tasksRemainingToday: number;
   projectCards: ProjectCardVM[];
   activeProjectCount: number;
-  routineDaily: RoutineItemVM[];
-  routineScheduled: RoutineItemVM[];
+  routineList: RoutineItemVM[]; // chronological by next occurrence
   routineTotalCount: number;
   habitFeatured: HabitCardVM | null;
   habitSuggested: HabitCardVM[];

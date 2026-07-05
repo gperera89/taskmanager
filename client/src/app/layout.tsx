@@ -34,7 +34,7 @@ export default async function RootLayout({
       <body className="flex h-screen flex-col overflow-hidden font-serif bg-[#efe9dc]">
         {session?.user && (
           <div className="flex flex-none items-center justify-end gap-3 border-b border-[#ddd4c1] bg-[#e6ded0] px-6 py-2.5 text-xs text-[#8a8069]">
-            <span>{session.user.email}</span>
+            <span>{session.user.name ?? session.user.email}</span>
             <form
               action={async () => {
                 "use server";

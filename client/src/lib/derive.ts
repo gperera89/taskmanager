@@ -64,8 +64,7 @@ export type DerivedEntities = {
   tasksRemainingToday: number;
   projectCards: ProjectCardVM[];
   activeProjectCount: number;
-  routineDaily: RoutineItemVM[];
-  routineScheduled: RoutineItemVM[];
+  routineList: RoutineItemVM[];
   routineTotalCount: number;
   habitFeatured: HabitCardVM | null;
   habitSuggested: HabitCardVM[];
@@ -326,11 +325,11 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
       scheduleLabel: scheduleLabel(r),
       pausedUntil: toDateInputValue(r.pausedUntil),
       nextNotificationLabel: diffDays === 1 ? "tomorrow" : formatShortDate(calendarDateFromDue(nextDate)),
+      nextOccurrenceMs: nextDate.getTime(),
       subroutines: r.subroutines.map((s) => ({ id: s.id, title: s.title })),
     };
   });
-  const routineDaily = routineVMs.filter((r) => r.frequency === "DAILY" && r.interval === 1);
-  const routineScheduled = routineVMs.filter((r) => r.frequency !== "DAILY" || r.interval !== 1);
+  const routineList = [...routineVMs].sort((a, b) => a.nextOccurrenceMs - b.nextOccurrenceMs);
   const routineTotalCount = routineVMs.length;
 
   // Habits — status computed, then ranked by urgency (soonest to break its streak first).
@@ -356,7 +355,8 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
       return `Last done ${lastDoneLabel} · do it today to keep your ${hs.habit.currentStreak}-day streak.`;
     }
     if (hs.isDoneThisPeriod) return `${freqLabel} · done today`;
-    const daysLabel = hs.daysRemaining <= 1 ? "due tomorrow" : `due in ${Math.ceil(hs.daysRemaining)} days`;
+    const daysLabel =
+      hs.daysRemaining <= 1 ? "1 day left to complete" : `${Math.ceil(hs.daysRemaining)} days left to complete`;
     return `${freqLabel} · ${daysLabel}`;
   }
 
@@ -398,8 +398,7 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
     tasksRemainingToday,
     projectCards,
     activeProjectCount,
-    routineDaily,
-    routineScheduled,
+    routineList,
     routineTotalCount,
     habitFeatured,
     habitSuggested,

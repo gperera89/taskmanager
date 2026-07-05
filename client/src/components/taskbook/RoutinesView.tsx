@@ -3,23 +3,20 @@
 import { useState } from "react";
 import { useModalActions } from "./ModalContext";
 import { useTaskbook } from "./store";
-import { Chip, RowDeleteButton, labelClass } from "./shared";
+import { Chip, RowDeleteButton } from "./shared";
 import type { RoutineItemVM } from "./types";
 
 export default function RoutinesView({
-  daily,
-  scheduled,
+  routines,
   total,
   query,
 }: {
-  daily: RoutineItemVM[];
-  scheduled: RoutineItemVM[];
+  routines: RoutineItemVM[];
   total: number;
   query: string;
 }) {
   const q = query.trim().toLowerCase();
-  const filteredDaily = q ? daily.filter((r) => r.title.toLowerCase().includes(q)) : daily;
-  const filteredScheduled = q ? scheduled.filter((r) => r.title.toLowerCase().includes(q)) : scheduled;
+  const filtered = q ? routines.filter((r) => r.title.toLowerCase().includes(q)) : routines;
 
   return (
     <div>
@@ -30,33 +27,20 @@ export default function RoutinesView({
       <div className="my-5 mb-6 h-px bg-[#d5cbb4]" />
 
       {total === 0 && <p className="py-8 text-[15px] italic text-[#a49a82]">Nothing here yet.</p>}
-      {total > 0 && filteredDaily.length === 0 && filteredScheduled.length === 0 && (
+      {total > 0 && filtered.length === 0 && (
         <p className="py-8 text-[15px] italic text-[#a49a82]">No routines match your search.</p>
       )}
 
-      <div className="grid max-w-[900px] grid-cols-1 gap-8 lg:grid-cols-2 lg:gap-11">
-        {filteredDaily.length > 0 && (
-          <div>
-            <div className={`${labelClass} mb-1.5`}>Every day</div>
-            {filteredDaily.map((r) => (
-              <RoutineRow key={r.id} routine={r} />
-            ))}
-          </div>
-        )}
-        {filteredScheduled.length > 0 && (
-          <div>
-            <div className={`${labelClass} mb-1.5`}>On a schedule</div>
-            {filteredScheduled.map((r) => (
-              <RoutineRow key={r.id} routine={r} showChip />
-            ))}
-          </div>
-        )}
+      <div className="max-w-140">
+        {filtered.map((r) => (
+          <RoutineRow key={r.id} routine={r} />
+        ))}
       </div>
     </div>
   );
 }
 
-function RoutineRow({ routine, showChip = false }: { routine: RoutineItemVM; showChip?: boolean }) {
+function RoutineRow({ routine }: { routine: RoutineItemVM }) {
   const { openEdit } = useModalActions();
   const { actions } = useTaskbook();
   const [addingStep, setAddingStep] = useState(false);
@@ -88,9 +72,11 @@ function RoutineRow({ routine, showChip = false }: { routine: RoutineItemVM; sho
             >
               {routine.title}
             </span>
-            {showChip && routine.scheduleLabel && <Chip>{routine.scheduleLabel}</Chip>}
+            {routine.scheduleLabel && <Chip>{routine.scheduleLabel}</Chip>}
           </div>
-          {routine.isTicked && !showChip && <div className="mt-0.5 text-xs italic text-[#b3a988]">auto-resets within the hour</div>}
+          {routine.isTicked && !routine.scheduleLabel && (
+            <div className="mt-0.5 text-xs italic text-[#b3a988]">auto-resets within the hour</div>
+          )}
           <div className="mt-1 flex items-center gap-2.5" onClick={(e) => e.stopPropagation()}>
             {editingPause ? (
               <input

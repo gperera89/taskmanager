@@ -20,6 +20,7 @@ export default function HabitsView({
   query: string;
 }) {
   const { actions } = useTaskbook();
+  const { openEdit } = useModalActions();
   const [skippedId, setSkippedId] = useState<string | null>(null);
   const q = query.trim().toLowerCase();
   const showFeatured = featured && featured.id !== skippedId && (!q || featured.title.toLowerCase().includes(q));
@@ -40,17 +41,20 @@ export default function HabitsView({
       <div className="max-w-[920px]">
         {showFeatured && featured && (
           <div
-            className="flex items-center justify-between gap-6 rounded-xl px-6 py-5"
+            className="group flex items-center justify-between gap-6 rounded-xl px-6 py-5"
             style={{ border: featured.atRisk ? "1.5px solid #17399b" : "1.5px solid #e1d8c4" }}
           >
-            <div>
+            <div
+              className="min-w-0 cursor-pointer"
+              onClick={() => openEdit({ mode: "edit", kind: "habit", item: featured })}
+            >
               <div className={labelClass} style={{ color: featured.atRisk ? "#17399b" : "#8a8069" }}>
                 {featured.atRisk ? "Keep the streak" : "Up next"}
               </div>
               <div className="mt-1.5 text-[22px] text-[#2a2622]">{featured.title}</div>
               <div className="mt-0.5 text-sm italic text-[#8a8069]">{featured.detailLabel}</div>
             </div>
-            <div className="flex flex-none gap-2.5">
+            <div className="flex flex-none items-center gap-2.5">
               <button
                 type="button"
                 onClick={() => actions.markHabitDone(featured.id)}
@@ -65,11 +69,12 @@ export default function HabitsView({
               >
                 Skip
               </button>
+              <RowDeleteButton action={() => actions.removeHabit(featured.id)} />
             </div>
           </div>
         )}
 
-        <div className="mt-6.5 grid grid-cols-2 gap-11">
+        <div className="mt-6.5 grid grid-cols-1 gap-11 lg:grid-cols-2">
           {filteredSuggested.length > 0 && (
             <div>
               <div className={`${labelClass} mb-1.5`}>Suggested next</div>

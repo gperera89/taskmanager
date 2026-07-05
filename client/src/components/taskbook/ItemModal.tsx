@@ -111,16 +111,24 @@ export default function ItemModal({
           // tab keeps whatever was already typed into it, since nothing unmounts).
           <div className="grid grid-cols-1">
             <div className={`col-start-1 row-start-1 ${addKind === "task" ? "" : "invisible"}`}>
-              <TaskForm projectOptions={projectOptions} categoryOptions={categoryOptions} onClose={onClose} shared={sharedWithDescription} />
+              <fieldset disabled={addKind !== "task"} className="contents">
+                <TaskForm projectOptions={projectOptions} categoryOptions={categoryOptions} onClose={onClose} shared={sharedWithDescription} />
+              </fieldset>
             </div>
             <div className={`col-start-1 row-start-1 ${addKind === "project" ? "" : "invisible"}`}>
-              <ProjectForm item={null} onClose={onClose} shared={sharedWithDescription} />
+              <fieldset disabled={addKind !== "project"} className="contents">
+                <ProjectForm item={null} onClose={onClose} shared={sharedWithDescription} />
+              </fieldset>
             </div>
             <div className={`col-start-1 row-start-1 ${addKind === "routine" ? "" : "invisible"}`}>
-              <RoutineForm item={null} onClose={onClose} shared={shared} />
+              <fieldset disabled={addKind !== "routine"} className="contents">
+                <RoutineForm item={null} onClose={onClose} shared={shared} />
+              </fieldset>
             </div>
             <div className={`col-start-1 row-start-1 ${addKind === "habit" ? "" : "invisible"}`}>
-              <HabitForm item={null} onClose={onClose} shared={shared} />
+              <fieldset disabled={addKind !== "habit"} className="contents">
+                <HabitForm item={null} onClose={onClose} shared={shared} />
+              </fieldset>
             </div>
           </div>
         ) : (
@@ -223,7 +231,7 @@ function TaskForm({
           <textarea name="description" rows={2} className={inputClass} />
         )}
       </div>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+      <div className="flex flex-wrap gap-3">
         <div>
           <label className={labelTextClass}>Due date</label>
           <input name="dueDate" type="date" defaultValue={todayInputValue()} className={inputClass} />
@@ -232,7 +240,7 @@ function TaskForm({
           <label className={labelTextClass}>Due time</label>
           <input name="dueTime" type="time" className={inputClass} />
         </div>
-        <div className="col-span-2 sm:col-span-1">
+        <div className="min-w-35 flex-1">
           <label className={labelTextClass}>Project</label>
           <select name="projectId" defaultValue="" className={inputClass}>
             <option value="">No project</option>

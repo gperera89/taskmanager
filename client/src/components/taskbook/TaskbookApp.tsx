@@ -138,7 +138,7 @@ export default function TaskbookApp() {
       const item = data.projectCards.find((p) => p.id === entityId);
       if (item) setModal({ mode: "edit", kind: "project", item });
     } else if (kind === "routine") {
-      const item = [...data.routineDaily, ...data.routineScheduled].find((r) => r.id === entityId);
+      const item = data.routineList.find((r) => r.id === entityId);
       if (item) setModal({ mode: "edit", kind: "routine", item });
     } else if (kind === "habit") {
       const all = [data.habitFeatured, ...data.habitSuggested, ...data.habitOnTrack].filter(
@@ -201,8 +201,7 @@ export default function TaskbookApp() {
       case "routines":
         return (
           <RoutinesView
-            daily={data.routineDaily}
-            scheduled={data.routineScheduled}
+            routines={data.routineList}
             total={data.routineTotalCount}
             query={query}
           />
