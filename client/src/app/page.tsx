@@ -15,57 +15,50 @@ import TaskbookApp from "@/components/taskbook/TaskbookApp";
 import { StoreProvider, type ServerCalendarData } from "@/components/taskbook/store";
 
 export default async function Home() {
-  let tasks: Awaited<ReturnType<typeof getTasks>> | undefined;
-  let projects: Awaited<ReturnType<typeof getProjects>> | undefined;
-  let habits: Awaited<ReturnType<typeof getHabits>> | undefined;
-  let routines: Awaited<ReturnType<typeof getRoutines>> | undefined;
-  let categories: Awaited<ReturnType<typeof getCategories>> | undefined;
-  let apiError: string | null = null;
+  // Every fetch below is independent, so kick them all off at once and await each with its own
+  // fallback — the calendar (ICS parse of ~1000 events), voice captures, settings, and dismissed
+  // events no longer sit behind the entity queries in a serial waterfall. Each non-critical fetch
+  // resolves to a safe default on failure so a single failing section can't take down the page.
+  const entitiesPromise = Promise.all([getTasks(), getProjects(), getHabits(), getRoutines(), getCategories()]);
+  const calendarPromise = getCalendarEvents().catch((err) => {
+    console.error("[page] failed to load calendar events:", err);
+    return { events: [] as Awaited<ReturnType<typeof getCalendarEvents>>["events"], errors: ["Could not load the calendar."] };
+  });
+  const capturesPromise = getUnreadVoiceCaptures().catch((err) => {
+    console.error("[page] failed to load pending voice captures:", err);
+    return [] as Awaited<ReturnType<typeof getUnreadVoiceCaptures>>;
+  });
+  const settingsPromise = getAppSettings().catch((err) => {
+    console.error("[page] failed to load app settings:", err);
+    return { timeZone: "Asia/Shanghai" };
+  });
+  const dismissedPromise = getDismissedCalendarEventIds().catch((err) => {
+    console.error("[page] failed to load dismissed events:", err);
+    return [] as string[];
+  });
 
+  let tasks: Awaited<ReturnType<typeof getTasks>>;
+  let projects: Awaited<ReturnType<typeof getProjects>>;
+  let habits: Awaited<ReturnType<typeof getHabits>>;
+  let routines: Awaited<ReturnType<typeof getRoutines>>;
+  let categories: Awaited<ReturnType<typeof getCategories>>;
   try {
-    [tasks, projects, habits, routines, categories] = await Promise.all([
-      getTasks(),
-      getProjects(),
-      getHabits(),
-      getRoutines(),
-      getCategories(),
-    ]);
+    [tasks, projects, habits, routines, categories] = await entitiesPromise;
   } catch (err) {
     console.error("[page] failed to load tasks/projects/habits/routines/categories:", err);
-    apiError = "Could not reach the database. Check DATABASE_URL in .env.local.";
-  }
-
-  if (apiError) {
+    // Settle the other in-flight promises so their rejections (if any) don't go unhandled.
+    await Promise.allSettled([calendarPromise, capturesPromise, settingsPromise, dismissedPromise]);
     return (
       <div className="flex flex-1 items-center justify-center bg-[#efe9dc]">
-        <p className="font-serif text-[#8a8069]">{apiError}</p>
+        <p className="font-serif text-[#8a8069]">Could not reach the database. Check DATABASE_URL in .env.local.</p>
       </div>
     );
   }
 
-  let calendarEvents: Awaited<ReturnType<typeof getCalendarEvents>>["events"] = [];
-  let calendarErrors: string[] = [];
-  try {
-    ({ events: calendarEvents, errors: calendarErrors } = await getCalendarEvents());
-  } catch (err) {
-    console.error("[page] failed to load calendar events:", err);
-    calendarErrors = ["Could not load the calendar."];
-  }
-
-  let captures: Awaited<ReturnType<typeof getUnreadVoiceCaptures>> = [];
-  try {
-    captures = await getUnreadVoiceCaptures();
-  } catch (err) {
-    console.error("[page] failed to load pending voice captures:", err);
-  }
-
-  let timeZone = "Asia/Shanghai";
-  let dismissedEventIds: string[] = [];
-  try {
-    [{ timeZone }, dismissedEventIds] = await Promise.all([getAppSettings(), getDismissedCalendarEventIds()]);
-  } catch (err) {
-    console.error("[page] failed to load app settings/dismissed events:", err);
-  }
+  const { events: calendarEvents, errors: calendarErrors } = await calendarPromise;
+  const captures = await capturesPromise;
+  const { timeZone } = await settingsPromise;
+  const dismissedEventIds = await dismissedPromise;
 
   const now = new Date();
   const nowMs = now.getTime();
@@ -75,11 +68,11 @@ export default async function Home() {
   // component rendered on the server too — so it can react instantly to optimistic edits, month
   // navigation, and timezone changes rather than needing a page refresh (see lib/derive.ts).
   const raw: RawState = {
-    tasks: tasks!,
-    projects: projects!,
-    habits: habits!,
-    routines: routines!,
-    categories: categories!,
+    tasks,
+    projects,
+    habits,
+    routines,
+    categories,
     captures,
     timeZone,
     dismissedEventIds,

@@ -4,8 +4,11 @@ import { checkAndNotifyDueItems } from "@/lib/notifications";
 // notification setup notes for why this isn't Vercel's own Cron (Hobby plan caps it at 1/day).
 // Authenticated with a shared secret rather than a user session since the caller is a machine.
 export async function GET(request: Request) {
+  // Guard against a missing secret: without this, an unset CRON_SECRET would make the expected
+  // header literally "Bearer undefined", which any caller could send to pass the check.
+  const secret = process.env.CRON_SECRET;
   const authHeader = request.headers.get("authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!secret || authHeader !== `Bearer ${secret}`) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
