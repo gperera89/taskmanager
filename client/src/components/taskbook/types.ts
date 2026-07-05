@@ -48,8 +48,7 @@ export type ProjectCardVM = {
   done: number;
   total: number;
   progressPct: number;
-  preview: TaskItemVM[];
-  moreCount: number;
+  tasks: TaskItemVM[]; // all tasks in the project, incomplete first
 };
 
 export type HabitIntervalUnit = "DAY" | "WEEK" | "MONTH";

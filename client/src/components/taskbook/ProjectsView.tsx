@@ -11,6 +11,40 @@ import type { CategoryOption, ProjectCardVM, ProjectOption } from "./types";
 const fieldInputClass =
   "w-full rounded-md border border-[#d3c9b3] bg-[#faf7ef] px-2 py-1 text-[13.5px] text-[#2a2622] outline-none focus:border-[#17399b]";
 
+const VIEW_MODES = ["unchecked", "all", "none"] as const;
+type ProjectViewMode = (typeof VIEW_MODES)[number];
+const VIEW_MODE_LABEL: Record<ProjectViewMode, string> = {
+  unchecked: "Showing unchecked tasks — click to show all",
+  all: "Showing all tasks — click to collapse",
+  none: "Collapsed — click to show unchecked tasks",
+};
+
+function ProjectExpandToggle({ mode, onCycle }: { mode: ProjectViewMode; onCycle: () => void }) {
+  const label = VIEW_MODE_LABEL[mode];
+  return (
+    <button
+      type="button"
+      onClick={onCycle}
+      title={label}
+      aria-label={label}
+      className="flex flex-none cursor-pointer items-center justify-center text-[#a49a82]"
+    >
+      <svg
+        width="11"
+        height="9"
+        viewBox="0 0 24 24"
+        fill="none"
+        style={{ transform: mode === "none" ? "none" : "rotate(90deg)", transition: "transform .15s" }}
+      >
+        <path d="M8 5l8 7-8 7" stroke="#a49a82" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+        {mode === "all" && (
+          <path d="M2 5l8 7-8 7" stroke="#a49a82" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+        )}
+      </svg>
+    </button>
+  );
+}
+
 export default function ProjectsView({
   cards,
   activeCount,
@@ -64,6 +98,11 @@ function ProjectCard({
   const [editingDescription, setEditingDescription] = useState(false);
   const [editingDueDate, setEditingDueDate] = useState(false);
   const [addingTask, setAddingTask] = useState(false);
+  const [viewMode, setViewMode] = useState<ProjectViewMode>("unchecked");
+  const cycleViewMode = () =>
+    setViewMode((mode) => VIEW_MODES[(VIEW_MODES.indexOf(mode) + 1) % VIEW_MODES.length]);
+  const visibleTasks =
+    viewMode === "none" ? [] : viewMode === "unchecked" ? project.tasks.filter((t) => !t.isCompleted) : project.tasks;
 
   return (
     <div className="group rounded-xl border border-[#e1d8c4] bg-[#f2ecdf] px-5.5 pb-5 pt-5.5">
@@ -100,6 +139,7 @@ function ProjectCard({
           <span className="text-[13px] text-[#557694]">
             {project.done} / {project.total}
           </span>
+          <ProjectExpandToggle mode={viewMode} onCycle={cycleViewMode} />
           <RowDeleteButton action={() => actions.removeProject(project.id)} />
         </div>
       </div>
@@ -166,10 +206,15 @@ function ProjectCard({
         <div className="h-full rounded-full bg-[#17399b]" style={{ width: `${project.progressPct}%` }} />
       </div>
       <div className="flex flex-col gap-3">
-        {project.preview.map((item) => (
+        {visibleTasks.map((item) => (
           <TaskRow key={item.id} task={item} categoryOptions={categoryOptions} projectOptions={projectOptions} />
         ))}
-        {project.moreCount > 0 && <div className="pl-8 text-[13px] italic text-[#a49a82]">+ {project.moreCount} more</div>}
+        {viewMode === "none" && project.total > 0 && (
+          <div className="pl-8 text-[13px] italic text-[#a49a82]">{project.total} tasks hidden</div>
+        )}
+        {viewMode === "unchecked" && visibleTasks.length === 0 && project.total > 0 && (
+          <div className="pl-8 text-[13px] italic text-[#a49a82]">All tasks complete</div>
+        )}
         {addingTask ? (
           <form
             onSubmit={(e) => {

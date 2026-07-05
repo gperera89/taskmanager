@@ -273,9 +273,9 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
     const done = items.filter((t) => t.isCompleted).length;
     const total = items.length;
     const progressPct = total ? Math.round((done / total) * 100) : 0;
-    const previewSource = [...items].sort((a, b) => Number(a.isCompleted) - Number(b.isCompleted));
-    const preview = previewSource.slice(0, 3).map((t) => toTaskVM(t, projectNameById));
-    const moreCount = Math.max(0, total - preview.length);
+    const tasks = [...items]
+      .sort((a, b) => Number(a.isCompleted) - Number(b.isCompleted))
+      .map((t) => toTaskVM(t, projectNameById));
     return {
       id: p.id,
       name: p.name,
@@ -285,8 +285,7 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
       done,
       total,
       progressPct,
-      preview,
-      moreCount,
+      tasks,
     };
   });
   const activeProjectCount = raw.projects.filter((p) => !p.isCompleted).length;
