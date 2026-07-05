@@ -2,24 +2,19 @@ import "server-only";
 import ical from "node-ical";
 import type { EventInstance, ParameterValue } from "node-ical";
 import { unstable_cache } from "next/cache";
+import type { CalendarEvent } from "@/components/taskbook/types";
+
+export type { CalendarEvent };
 
 function paramValueToString(value: ParameterValue | undefined): string | null {
   if (value === undefined) return null;
   return typeof value === "string" ? value : value.val;
 }
 
-export type CalendarEvent = {
-  id: string;
-  title: string;
-  start: string;
-  end: string;
-  allDay: boolean;
-  location: string | null;
-  source: string;
-};
-
-// Read-only sync from ICS feeds, e.g. Google/Outlook's "secret address" links.
-const CALENDAR_WINDOW_DAYS = 14;
+// Read-only sync from ICS feeds, e.g. Google/Outlook's "secret address" links. Wide enough to
+// cover the month-navigation view browsing a month or two ahead — feeds only carry upcoming
+// instances, so browsing backward in time never shows ICS events, only task/project due dates.
+const CALENDAR_WINDOW_DAYS = 60;
 
 function getCalendarSources() {
   return [

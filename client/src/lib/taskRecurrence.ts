@@ -80,7 +80,7 @@ function nthWeekdayMatches(date: Date, weekday: number, ordinal: number): boolea
 }
 
 // Whether a routine's recurrence pattern lands on `at`'s calendar day. `at` should be a
-// Perth-wall-clock instant (see notifications.ts / PERTH_UTC_OFFSET_MS) whose UTC getters are
+// configured-timezone wall-clock instant (see taskbookDates.ts's zonedNow) whose UTC getters are
 // read as the local calendar day/weekday, matching the face-value-as-UTC convention used
 // throughout this codebase. Ignores `interval`: unlike Task's nextOccurrence (which rolls
 // forward from a concrete previous due date), routines have no anchor date to count cycles
@@ -97,6 +97,26 @@ export function isRoutineDueToday(rule: TaskRepeatRule, at: Date): boolean {
     return at.getUTCDate() === new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth() + 1, 0)).getUTCDate();
   }
   return rule.dayOfMonth === at.getUTCDate();
+}
+
+// The next date a routine will notify, for display (e.g. "Next: tomorrow"). Always starts
+// strictly after `at`'s calendar day — even for a routine due today, "next" means the
+// upcoming one, not today's (already-fired-or-firing) occurrence — so an unpaused daily
+// routine reads "tomorrow" no matter what time of day it's checked. `pausedUntil`, if in the
+// future, pushes the search start out to that date (the routine resumes on/after it).
+export function nextRoutineOccurrence(rule: TaskRepeatRule, at: Date, pausedUntil: Date | null): Date {
+  const today = Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate());
+  let candidate = today + 86_400_000;
+  if (pausedUntil) {
+    const paused = Date.UTC(pausedUntil.getUTCFullYear(), pausedUntil.getUTCMonth(), pausedUntil.getUTCDate());
+    if (paused > candidate) candidate = paused;
+  }
+  for (let i = 0; i < 400; i++) {
+    const date = new Date(candidate);
+    if (isRoutineDueToday(rule, date)) return date;
+    candidate += 86_400_000;
+  }
+  return new Date(candidate);
 }
 
 // Mirrors api.ts's resolveRoutineRecurrence: nulls out whichever recurrence fields don't apply

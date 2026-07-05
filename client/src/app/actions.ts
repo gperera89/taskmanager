@@ -15,6 +15,7 @@ import {
   deleteProject,
   deleteRoutine,
   deleteTask,
+  dismissCalendarEvent as dismissCalendarEventApi,
   dismissVoiceCapture,
   type HabitIntervalUnit,
   type RoutineFrequency,
@@ -26,6 +27,7 @@ import {
   updateProject,
   updateRoutine,
   updateTask,
+  updateTimeZone as updateTimeZoneApi,
 } from "@/lib/api";
 
 // NOTE ON REVALIDATION: these actions no longer call revalidatePath("/"). The client applies
@@ -276,6 +278,12 @@ export async function editRoutine(id: string, formData: FormData) {
   await updateRoutine(id, { title, reminderTime, ...recurrence });
 }
 
+export async function updateRoutinePause(id: string, formData: FormData) {
+  await requireSession();
+  const pausedUntil = String(formData.get("pausedUntil") ?? "").trim();
+  await updateRoutine(id, { pausedUntil: pausedUntil || null });
+}
+
 export async function toggleRoutine(id: string, isActive: boolean) {
   await requireSession();
   await updateRoutine(id, { isActive: !isActive });
@@ -325,4 +333,14 @@ export async function removeCategory(id: string) {
 export async function dismissCapture(id: string) {
   await requireSession();
   await dismissVoiceCapture(id);
+}
+
+export async function updateTimeZone(timeZone: string) {
+  await requireSession();
+  await updateTimeZoneApi(timeZone);
+}
+
+export async function dismissCalendarEvent(eventId: string) {
+  await requireSession();
+  await dismissCalendarEventApi(eventId);
 }

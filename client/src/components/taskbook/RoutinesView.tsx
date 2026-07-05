@@ -60,6 +60,7 @@ function RoutineRow({ routine, showChip = false }: { routine: RoutineItemVM; sho
   const { openEdit } = useModalActions();
   const { actions } = useTaskbook();
   const [addingStep, setAddingStep] = useState(false);
+  const [editingPause, setEditingPause] = useState(false);
 
   return (
     <div className="group border-b border-[#e1d8c4] py-3.5">
@@ -90,6 +91,34 @@ function RoutineRow({ routine, showChip = false }: { routine: RoutineItemVM; sho
             {showChip && routine.scheduleLabel && <Chip>{routine.scheduleLabel}</Chip>}
           </div>
           {routine.isTicked && !showChip && <div className="mt-0.5 text-xs italic text-[#b3a988]">auto-resets within the hour</div>}
+          <div className="mt-1 flex items-center gap-2.5" onClick={(e) => e.stopPropagation()}>
+            {editingPause ? (
+              <input
+                type="date"
+                autoFocus
+                defaultValue={routine.pausedUntil}
+                onChange={(e) => {
+                  actions.setRoutinePause(routine.id, e.target.value);
+                  setEditingPause(false);
+                }}
+                onBlur={() => setEditingPause(false)}
+                className="rounded-md border border-[#d3c9b3] bg-white px-1.5 py-0.5 text-xs text-[#2a2622] outline-none focus:border-[#17399b]"
+              />
+            ) : (
+              <button type="button" onClick={() => setEditingPause(true)} className="cursor-pointer text-xs text-[#8a8069]">
+                Next: {routine.nextNotificationLabel}
+              </button>
+            )}
+            {routine.pausedUntil && (
+              <button
+                type="button"
+                onClick={() => actions.setRoutinePause(routine.id, "")}
+                className="cursor-pointer text-xs text-[#b3a988] hover:text-[#8a4040]"
+              >
+                Clear pause
+              </button>
+            )}
+          </div>
         </div>
         <RowDeleteButton action={() => actions.removeRoutine(routine.id)} />
       </div>

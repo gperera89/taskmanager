@@ -1,4 +1,14 @@
-import type { MonthCell } from "@/lib/taskbookDates";
+// Mirrors the ICS sync's shape (lib/calendar.ts, which is "server-only" and re-exports this
+// type rather than defining it, since derive.ts needs it and can't import server-only code).
+export type CalendarEvent = {
+  id: string;
+  title: string;
+  start: string;
+  end: string;
+  allDay: boolean;
+  location: string | null;
+  source: string;
+};
 
 export type TaskItemVM = {
   id: string;
@@ -29,13 +39,6 @@ export type TaskGroupVM = {
   tasks: TaskItemVM[];
 };
 
-export type ProjectItemPreviewVM = {
-  id: string;
-  title: string;
-  isCompleted: boolean;
-  dueLabel: string | null;
-};
-
 export type ProjectCardVM = {
   id: string;
   name: string;
@@ -45,7 +48,7 @@ export type ProjectCardVM = {
   done: number;
   total: number;
   progressPct: number;
-  preview: ProjectItemPreviewVM[];
+  preview: TaskItemVM[];
   moreCount: number;
 };
 
@@ -79,6 +82,8 @@ export type RoutineItemVM = {
   isActive: boolean;
   isTicked: boolean;
   scheduleLabel: string;
+  pausedUntil: string; // yyyy-mm-dd for the date-input, "" if not paused
+  nextNotificationLabel: string; // e.g. "tomorrow" or "Mon 14 Jul"
   // Grouped under this routine so they fire as one clustered notification and tick off
   // together, e.g. "Wake Up Routine" -> "Make coffee", "Brush teeth", "Shave".
   subroutines: SubroutineVM[];
@@ -90,7 +95,7 @@ export type DayDetailVM = {
   dateLabel: string;
   tasks: { id: string; title: string; isCompleted: boolean; projectName: string | null }[];
   projects: { id: string; name: string }[];
-  events: { id: string; title: string; metaLabel: string }[];
+  events: { id: string; title: string; metaLabel: string; allDay: boolean }[];
 };
 
 export type UpcomingItemVM = {
@@ -115,13 +120,11 @@ export type VoiceCaptureVM = {
   parseError: boolean;
 };
 
+// The calendar view (monthLabel/year/monthCells/dayDetails/upcoming) is NOT part of this type —
+// it's computed separately by deriveCalendarView (lib/derive.ts) and owned by TaskbookApp, since
+// it depends on the viewed month, which this store doesn't track (see CalendarViewVM).
 export type TaskbookData = {
   todayLabel: string;
-  monthLabel: string;
-  year: number;
-  monthCells: MonthCell[];
-  dayDetails: Record<number, DayDetailVM>;
-  upcoming: UpcomingItemVM[];
   taskGroups: TaskGroupVM[];
   tasksRemainingToday: number;
   projectCards: ProjectCardVM[];
@@ -141,9 +144,11 @@ export type TaskbookData = {
 
 export type AreaKey = "tasks" | "projects" | "routines" | "habits" | "calendar" | "day";
 
+export type ItemKind = "task" | "project" | "routine" | "habit";
+
 // Tasks are edited inline on their row (see TasksView) rather than through this modal.
 export type ModalState =
-  | { mode: "add" }
+  | { mode: "add"; initialKind?: ItemKind }
   | { mode: "edit"; kind: "project"; item: ProjectCardVM }
   | { mode: "edit"; kind: "routine"; item: RoutineItemVM }
   | { mode: "edit"; kind: "habit"; item: HabitCardVM }

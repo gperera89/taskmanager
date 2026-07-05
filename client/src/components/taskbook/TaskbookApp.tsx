@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { AreaKey, CapturedKind, HabitCardVM, ModalState } from "./types";
+import type { AreaKey, CapturedKind, HabitCardVM, ItemKind, ModalState } from "./types";
+import { deriveCalendarView } from "@/lib/derive";
 import { useTaskbook } from "./store";
 import { ModalContext } from "./ModalContext";
 import Header from "./Header";
@@ -19,8 +20,19 @@ import SettingsModal from "./SettingsModal";
 // instead of a swipeable panel, so it is dropped from the content flow there.
 const CAROUSEL_VIEWS: AreaKey[] = ["tasks", "projects", "routines", "habits", "calendar"];
 
+// Which Add-modal tab the current view should default to — so tapping "+ Add" from Projects
+// opens straight to the Project form instead of always defaulting to Task.
+const AREA_TO_KIND: Record<AreaKey, ItemKind> = {
+  tasks: "task",
+  projects: "project",
+  routines: "routine",
+  habits: "habit",
+  calendar: "task",
+  day: "task",
+};
+
 export default function TaskbookApp() {
-  const { data } = useTaskbook();
+  const { data, actions, raw, calendarEvents, nowMs } = useTaskbook();
   const [area, setArea] = useState<AreaKey>("tasks");
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
   const [dayOpen, setDayOpen] = useState(false);
@@ -32,6 +44,33 @@ export default function TaskbookApp() {
   // While we programmatically snap the carousel to a tapped tab, ignore the scroll
   // events it emits so they don't fight the target we're animating toward.
   const snappingRef = useRef(false);
+
+  // The viewed month for the calendar rail/panel — independent of "now", so the prev/next
+  // arrows can browse other months. Defaults to the current month (lazy initializer: only
+  // evaluated once, on mount, so later `nowMs` ticks don't yank the view back to today).
+  const [viewYear, setViewYear] = useState(() => new Date(nowMs).getFullYear());
+  const [viewMonth0, setViewMonth0] = useState(() => new Date(nowMs).getMonth());
+
+  function goToMonth(year: number, month0: number) {
+    setViewYear(year);
+    setViewMonth0(month0);
+    // A selected day belongs to whichever month it was picked in — stale once the view moves.
+    setSelectedDay(null);
+    setDayOpen(false);
+  }
+  function goPrevMonth() {
+    goToMonth(viewMonth0 === 0 ? viewYear - 1 : viewYear, viewMonth0 === 0 ? 11 : viewMonth0 - 1);
+  }
+  function goNextMonth() {
+    goToMonth(viewMonth0 === 11 ? viewYear + 1 : viewYear, viewMonth0 === 11 ? 0 : viewMonth0 + 1);
+  }
+
+  // The calendar view (month grid, day details, "Coming up") — reactive to optimistic edits,
+  // dismissals, timezone changes, and month navigation (see lib/derive.ts's deriveCalendarView).
+  const calendarView = useMemo(
+    () => deriveCalendarView(raw, calendarEvents, nowMs, viewYear, viewMonth0),
+    [raw, calendarEvents, nowMs, viewYear, viewMonth0]
+  );
 
   // Mirror the lg breakpoint (1024px) used for the layout: below it we swipe a carousel,
   // at or above it we show the fixed content + calendar rail.
@@ -45,10 +84,10 @@ export default function TaskbookApp() {
 
   const modalActions = useMemo(
     () => ({
-      openAdd: () => setModal({ mode: "add" }),
+      openAdd: () => setModal({ mode: "add", initialKind: AREA_TO_KIND[area] }),
       openEdit: (state: Extract<ModalState, { mode: "edit" }>) => setModal(state),
     }),
-    []
+    [area]
   );
 
   function scrollToArea(key: AreaKey, behavior: ScrollBehavior = "smooth") {
@@ -120,7 +159,22 @@ export default function TaskbookApp() {
     }
   }
 
-  const dayDetail = selectedDay != null ? data.dayDetails[selectedDay] : undefined;
+  // Clicking one of the greyed leading/trailing days from an adjacent month (shown for grid
+  // continuity) navigates to that month and selects the day directly, rather than requiring a
+  // separate prev/next click first.
+  function clickAdjacentDay(direction: "prev" | "next", day: number) {
+    if (direction === "prev") {
+      setViewYear(viewMonth0 === 0 ? viewYear - 1 : viewYear);
+      setViewMonth0(viewMonth0 === 0 ? 11 : viewMonth0 - 1);
+    } else {
+      setViewYear(viewMonth0 === 11 ? viewYear + 1 : viewYear);
+      setViewMonth0(viewMonth0 === 11 ? 0 : viewMonth0 + 1);
+    }
+    setSelectedDay(day);
+    setDayOpen(false);
+  }
+
+  const dayDetail = selectedDay != null ? calendarView.dayDetails[selectedDay] : undefined;
 
   function viewFor(key: AreaKey) {
     switch (key) {
@@ -141,6 +195,7 @@ export default function TaskbookApp() {
             activeCount={data.activeProjectCount}
             query={query}
             categoryOptions={data.categoryOptions}
+            projectOptions={data.projectOptions}
           />
         );
       case "routines":
@@ -166,14 +221,18 @@ export default function TaskbookApp() {
         return (
           <CalendarRail
             variant="panel"
-            monthLabel={data.monthLabel}
-            year={data.year}
-            cells={data.monthCells}
+            monthLabel={calendarView.monthLabel}
+            year={calendarView.year}
+            cells={calendarView.monthCells}
             selectedDay={selectedDay}
             dayOpen={dayOpen}
             dayDetail={dayDetail}
-            upcoming={data.upcoming}
+            upcoming={calendarView.upcoming}
             onClickDay={clickDay}
+            onClickAdjacentDay={clickAdjacentDay}
+            onPrevMonth={goPrevMonth}
+            onNextMonth={goNextMonth}
+            onDismissEvent={actions.dismissEvent}
           />
         );
       default:
@@ -225,14 +284,18 @@ export default function TaskbookApp() {
             </div>
 
             <CalendarRail
-              monthLabel={data.monthLabel}
-              year={data.year}
-              cells={data.monthCells}
+              monthLabel={calendarView.monthLabel}
+              year={calendarView.year}
+              cells={calendarView.monthCells}
               selectedDay={selectedDay}
               dayOpen={dayOpen}
               dayDetail={dayDetail}
-              upcoming={data.upcoming}
+              upcoming={calendarView.upcoming}
               onClickDay={clickDay}
+              onClickAdjacentDay={clickAdjacentDay}
+              onPrevMonth={goPrevMonth}
+              onNextMonth={goNextMonth}
+              onDismissEvent={actions.dismissEvent}
             />
           </div>
         )}
@@ -244,7 +307,7 @@ export default function TaskbookApp() {
           activeProjectCount={data.activeProjectCount}
           routineTotalCount={data.routineTotalCount}
           habitAtRiskCount={data.habitAtRiskCount}
-          monthLabel={data.monthLabel}
+          monthLabel={calendarView.monthLabel}
         />
       </div>
 
@@ -258,7 +321,12 @@ export default function TaskbookApp() {
       )}
 
       {settingsOpen && (
-        <SettingsModal categoryOptions={data.categoryOptions} onClose={() => setSettingsOpen(false)} />
+        <SettingsModal
+          categoryOptions={data.categoryOptions}
+          timeZone={raw.timeZone}
+          onSetTimeZone={actions.setTimeZone}
+          onClose={() => setSettingsOpen(false)}
+        />
       )}
     </ModalContext.Provider>
   );

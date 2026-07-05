@@ -1,6 +1,7 @@
 import {
+  getAppSettings,
   getCategories,
-  getDueItems,
+  getDismissedCalendarEventIds,
   getHabits,
   getProjects,
   getRoutines,
@@ -8,27 +9,10 @@ import {
   getUnreadVoiceCaptures,
 } from "@/lib/api";
 import { getCalendarEvents } from "@/lib/calendar";
-import {
-  buildMonthCells,
-  calendarDateFromDue,
-  daysUntil,
-  formatLongDate,
-  formatShortDate,
-  localDaysUntil,
-  pad2,
-} from "@/lib/taskbookDates";
+import { formatLongDate } from "@/lib/taskbookDates";
 import type { RawState } from "@/lib/derive";
 import TaskbookApp from "@/components/taskbook/TaskbookApp";
 import { StoreProvider, type ServerCalendarData } from "@/components/taskbook/store";
-import type { DayDetailVM, UpcomingItemVM } from "@/components/taskbook/types";
-
-const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-
-function relativeLabel(diff: number, displayDate: Date): string {
-  if (diff === 0) return "Today";
-  if (diff === 1) return "Tomorrow";
-  return `${WEEKDAY_NAMES[displayDate.getDay()]} ${displayDate.getDate()}`;
-}
 
 export default async function Home() {
   let tasks: Awaited<ReturnType<typeof getTasks>> | undefined;
@@ -75,112 +59,21 @@ export default async function Home() {
     console.error("[page] failed to load pending voice captures:", err);
   }
 
+  let timeZone = "Asia/Shanghai";
+  let dismissedEventIds: string[] = [];
+  try {
+    [{ timeZone }, dismissedEventIds] = await Promise.all([getAppSettings(), getDismissedCalendarEventIds()]);
+  } catch (err) {
+    console.error("[page] failed to load app settings/dismissed events:", err);
+  }
+
   const now = new Date();
   const nowMs = now.getTime();
-  const year = now.getFullYear();
-  const month0 = now.getMonth();
-  const todayDay = now.getDate();
 
-  // --- Calendar rail (month grid, day details, upcoming) — computed server-side and refreshed
-  // on focus; not part of the optimistic fast-interaction path. ---
-  const monthStart = new Date(Date.UTC(year, month0, 1));
-  const monthEnd = new Date(Date.UTC(year, month0 + 1, 0, 23, 59, 59, 999));
-  let dueTasks: Awaited<ReturnType<typeof getDueItems>>["tasks"] = [];
-  let dueProjects: Awaited<ReturnType<typeof getDueItems>>["projects"] = [];
-  try {
-    ({ tasks: dueTasks, projects: dueProjects } = await getDueItems(monthStart, monthEnd));
-  } catch (err) {
-    console.error("[page] failed to load due tasks/projects for the month:", err);
-  }
-
-  const monthPrefix = `${year}-${pad2(month0 + 1)}`;
-  const dayDetails: Record<number, DayDetailVM> = {};
-  const dotDays = new Set<number>();
-
-  function ensureDay(day: number): DayDetailVM {
-    if (!dayDetails[day]) {
-      const d = new Date(year, month0, day);
-      dayDetails[day] = {
-        day,
-        weekday: WEEKDAY_NAMES[d.getDay()],
-        dateLabel: formatShortDate(d),
-        tasks: [],
-        projects: [],
-        events: [],
-      };
-    }
-    return dayDetails[day];
-  }
-
-  for (const t of dueTasks) {
-    if (!t.dueDate) continue;
-    const key = t.dueDate.toISOString().slice(0, 10);
-    if (!key.startsWith(monthPrefix)) continue;
-    const day = Number(key.slice(8, 10));
-    ensureDay(day).tasks.push({ id: t.id, title: t.title, isCompleted: t.isCompleted, projectName: t.project?.name ?? null });
-    dotDays.add(day);
-  }
-  for (const p of dueProjects) {
-    if (!p.dueDate) continue;
-    const key = p.dueDate.toISOString().slice(0, 10);
-    if (!key.startsWith(monthPrefix)) continue;
-    const day = Number(key.slice(8, 10));
-    ensureDay(day).projects.push({ id: p.id, name: p.name });
-    dotDays.add(day);
-  }
-  for (const e of calendarEvents) {
-    const start = new Date(e.start);
-    if (start.getFullYear() !== year || start.getMonth() !== month0) continue;
-    const day = start.getDate();
-    const metaLabel = `${e.allDay ? "All day" : start.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })} · ${e.source}`;
-    ensureDay(day).events.push({ id: e.id, title: e.title, metaLabel });
-    dotDays.add(day);
-  }
-
-  const monthCells = buildMonthCells(year, month0, todayDay, dotDays);
-  const monthLabel = new Intl.DateTimeFormat("en-US", { month: "long" }).format(now);
-
-  // Upcoming panel: the next few due tasks/projects/events, regardless of month.
-  type UpcomingSource = { sortKey: number; item: UpcomingItemVM };
-  const upcomingSources: UpcomingSource[] = [];
-  for (const t of tasks!) {
-    if (t.isCompleted || !t.dueDate) continue;
-    const diff = daysUntil(t.dueDate, now);
-    if (diff < 0) continue;
-    const d = calendarDateFromDue(t.dueDate);
-    upcomingSources.push({
-      sortKey: d.getTime(),
-      item: { key: `t-${t.id}`, a: relativeLabel(diff, d), b: t.title, c: t.category, hasC: true },
-    });
-  }
-  for (const p of projects!) {
-    if (p.isCompleted || !p.dueDate) continue;
-    const diff = daysUntil(p.dueDate, now);
-    if (diff < 0) continue;
-    const d = calendarDateFromDue(p.dueDate);
-    upcomingSources.push({
-      sortKey: d.getTime(),
-      item: { key: `p-${p.id}`, a: relativeLabel(diff, d), b: p.name, c: "Project", hasC: true },
-    });
-  }
-  for (const e of calendarEvents) {
-    const start = new Date(e.start);
-    const diff = localDaysUntil(start, now);
-    if (start.getTime() < now.getTime() && diff !== 0) continue;
-    upcomingSources.push({
-      sortKey: start.getTime(),
-      item: {
-        key: `e-${e.id}`,
-        a: relativeLabel(diff, start),
-        b: e.title,
-        c: `${e.allDay ? "All day" : start.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })} · ${e.source}`,
-        hasC: true,
-      },
-    });
-  }
-  upcomingSources.sort((a, b) => a.sortKey - b.sortKey);
-  const upcoming = upcomingSources.slice(0, 3).map((s) => s.item);
-
+  // The calendar view (month grid, day details, "Coming up") is computed client-side by
+  // TaskbookApp via deriveCalendarView — including for this initial render, since it's a client
+  // component rendered on the server too — so it can react instantly to optimistic edits, month
+  // navigation, and timezone changes rather than needing a page refresh (see lib/derive.ts).
   const raw: RawState = {
     tasks: tasks!,
     projects: projects!,
@@ -188,20 +81,17 @@ export default async function Home() {
     routines: routines!,
     categories: categories!,
     captures,
+    timeZone,
+    dismissedEventIds,
   };
 
   const serverData: ServerCalendarData = {
     todayLabel: formatLongDate(now),
-    monthLabel,
-    year,
-    monthCells,
-    dayDetails,
-    upcoming,
     calendarErrors,
   };
 
   return (
-    <StoreProvider initialRaw={raw} serverData={serverData} nowMs={nowMs}>
+    <StoreProvider initialRaw={raw} serverData={serverData} calendarEvents={calendarEvents} nowMs={nowMs}>
       <TaskbookApp />
     </StoreProvider>
   );

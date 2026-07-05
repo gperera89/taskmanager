@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useTaskbook } from "./store";
-import { parseTaskRepeat } from "./formParse";
 import { CheckSquare, RowDeleteButton, labelClass } from "./shared";
 import RepeatFields from "./RepeatFields";
 import type { CategoryOption, ProjectOption, TaskGroupVM, TaskItemVM } from "./types";
@@ -87,7 +86,7 @@ export default function TasksView({
 const chipSelectClass =
   "cursor-pointer whitespace-nowrap rounded-full border-none px-2.5 py-0.5 text-[11.5px] outline-none";
 
-function TaskRow({
+export function TaskRow({
   task,
   categoryOptions,
   projectOptions,
@@ -134,15 +133,16 @@ function TaskRow({
     actions.setTaskProject(task.id, projectId);
   }
 
-  function commitDue() {
-    actions.setTaskDue(task.id, dueDateDraft, dueTimeDraft);
-    setDueOpen(false);
+  function commitDue(nextDate: string, nextTime: string) {
+    setDueDateDraft(nextDate);
+    setDueTimeDraft(nextTime);
+    actions.setTaskDue(task.id, nextDate, nextTime);
   }
 
   function clearDue() {
-    actions.setTaskDue(task.id, "", "");
     setDueDateDraft("");
     setDueTimeDraft("");
+    actions.setTaskDue(task.id, "", "");
     setDueOpen(false);
   }
 
@@ -265,38 +265,28 @@ function TaskRow({
             <input
               type="date"
               value={dueDateDraft}
-              onChange={(e) => setDueDateDraft(e.target.value)}
+              onChange={(e) => commitDue(e.target.value, dueTimeDraft)}
               className="rounded border border-[#d3c9b3] px-1.5 py-1 text-xs text-[#2a2622] outline-none focus:border-[#17399b]"
             />
             <input
               type="time"
               value={dueTimeDraft}
-              onChange={(e) => setDueTimeDraft(e.target.value)}
+              onChange={(e) => commitDue(dueDateDraft, e.target.value)}
               className="rounded border border-[#d3c9b3] px-1.5 py-1 text-xs text-[#2a2622] outline-none focus:border-[#17399b]"
             />
-            <button type="button" onClick={commitDue} className="cursor-pointer rounded-md bg-[#17399b] px-2.5 py-1 text-xs text-white">
-              Save
-            </button>
             {task.dueDateValue && (
               <button type="button" onClick={clearDue} className="cursor-pointer text-xs text-[#b3a988] hover:text-[#8a4040]">
                 Clear
               </button>
             )}
             <button type="button" onClick={() => setDueOpen(false)} className="cursor-pointer text-xs text-[#8a8069]">
-              Cancel
+              Done
             </button>
           </div>
         )}
 
         {repeatOpen && (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              actions.setTaskRepeat(task.id, parseTaskRepeat(new FormData(e.currentTarget)));
-              setRepeatOpen(false);
-            }}
-            className="mt-2 rounded-lg border border-[#d3c9b3] bg-white p-3"
-          >
+          <div className="mt-2 rounded-lg border border-[#d3c9b3] bg-white p-3">
             <RepeatFields
               initial={{
                 frequency: task.repeatFrequency,
@@ -308,16 +298,29 @@ function TaskRow({
                 monthlyWeekday: task.repeatMonthlyWeekday,
               }}
               anchorDate={task.dueDateValue ? new Date(`${task.dueDateValue}T00:00:00`) : undefined}
+              onChange={(rule) =>
+                actions.setTaskRepeat(
+                  task.id,
+                  rule.frequency
+                    ? {
+                        frequency: rule.frequency,
+                        interval: rule.interval,
+                        daysOfWeek: rule.daysOfWeek,
+                        monthlyMode: rule.monthlyMode,
+                        dayOfMonth: rule.dayOfMonth,
+                        monthlyOrdinal: rule.monthlyOrdinal,
+                        monthlyWeekday: rule.monthlyWeekday,
+                      }
+                    : null
+                )
+              }
             />
-            <div className="mt-3 flex justify-end gap-2.5">
+            <div className="mt-3 flex justify-end">
               <button type="button" onClick={() => setRepeatOpen(false)} className="cursor-pointer text-xs text-[#8a8069]">
-                Cancel
-              </button>
-              <button type="submit" className="cursor-pointer rounded-md bg-[#17399b] px-3 py-1.5 text-xs text-white">
-                Save
+                Done
               </button>
             </div>
-          </form>
+          </div>
         )}
 
         {hasSubtasks && (

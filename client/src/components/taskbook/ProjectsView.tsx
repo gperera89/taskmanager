@@ -5,7 +5,8 @@ import { todayInputValue } from "@/lib/taskbookDates";
 import { useTaskbook } from "./store";
 import { parseTaskForm } from "./formParse";
 import { Chip, RowDeleteButton, labelClass } from "./shared";
-import type { CategoryOption, ProjectCardVM } from "./types";
+import { TaskRow } from "./TasksView";
+import type { CategoryOption, ProjectCardVM, ProjectOption } from "./types";
 
 const fieldInputClass =
   "w-full rounded-md border border-[#d3c9b3] bg-white px-2 py-1 text-[13.5px] text-[#2a2622] outline-none focus:border-[#17399b]";
@@ -15,11 +16,13 @@ export default function ProjectsView({
   activeCount,
   query,
   categoryOptions,
+  projectOptions,
 }: {
   cards: ProjectCardVM[];
   activeCount: number;
   query: string;
   categoryOptions: CategoryOption[];
+  projectOptions: ProjectOption[];
 }) {
   const q = query.trim().toLowerCase();
   const filtered = q ? cards.filter((c) => c.name.toLowerCase().includes(q)) : cards;
@@ -40,14 +43,22 @@ export default function ProjectsView({
 
       <div className="grid max-w-[940px] grid-cols-1 gap-5.5 lg:grid-cols-2">
         {filtered.map((project) => (
-          <ProjectCard key={project.id} project={project} categoryOptions={categoryOptions} />
+          <ProjectCard key={project.id} project={project} categoryOptions={categoryOptions} projectOptions={projectOptions} />
         ))}
       </div>
     </div>
   );
 }
 
-function ProjectCard({ project, categoryOptions }: { project: ProjectCardVM; categoryOptions: CategoryOption[] }) {
+function ProjectCard({
+  project,
+  categoryOptions,
+  projectOptions,
+}: {
+  project: ProjectCardVM;
+  categoryOptions: CategoryOption[];
+  projectOptions: ProjectOption[];
+}) {
   const { actions } = useTaskbook();
   const [editingName, setEditingName] = useState(false);
   const [editingDescription, setEditingDescription] = useState(false);
@@ -156,95 +167,55 @@ function ProjectCard({ project, categoryOptions }: { project: ProjectCardVM; cat
       </div>
       <div className="flex flex-col gap-3">
         {project.preview.map((item) => (
-          <div key={item.id} className="flex items-center gap-3">
-            <ProjectTaskCheck taskId={item.id} isCompleted={item.isCompleted} />
-            <div className="min-w-0 flex-1">
-              <span
-                className="text-[15px]"
-                style={{
-                  color: item.isCompleted ? "#a49a82" : "#2a2622",
-                  textDecoration: item.isCompleted ? "line-through" : "none",
-                }}
-              >
-                {item.title}
-              </span>
-              {item.dueLabel && (
-                <span className="ml-2">
-                  <Chip>{item.dueLabel}</Chip>
-                </span>
-              )}
-            </div>
-          </div>
+          <TaskRow key={item.id} task={item} categoryOptions={categoryOptions} projectOptions={projectOptions} />
         ))}
-        {project.total === 0 &&
-          (addingTask ? (
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                const input = parseTaskForm(new FormData(e.currentTarget));
-                if (input.title && input.category) actions.addTask(input);
-                setAddingTask(false);
-              }}
-              className="flex items-center gap-2"
-            >
-              <input type="hidden" name="projectId" value={project.id} />
-              <input type="hidden" name="category" value={categoryOptions[0]?.name ?? ""} />
-              <input
-                name="title"
-                required
-                autoFocus
-                placeholder="Task name"
-                onBlur={(e) => {
-                  const next = e.relatedTarget as Node | null;
-                  if (!next || !e.currentTarget.form?.contains(next)) setAddingTask(false);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Escape") setAddingTask(false);
-                }}
-                className="min-w-0 flex-1 border-b border-[#17399b] bg-transparent text-[15px] text-[#2a2622] outline-none"
-              />
-              <input
-                type="date"
-                name="dueDate"
-                defaultValue={todayInputValue()}
-                onBlur={(e) => {
-                  const next = e.relatedTarget as Node | null;
-                  if (!next || !e.currentTarget.form?.contains(next)) setAddingTask(false);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Escape") setAddingTask(false);
-                }}
-                className="flex-none rounded-md border border-[#d3c9b3] bg-white px-1.5 py-0.5 text-[12px] text-[#8a8069] outline-none"
-              />
-            </form>
-          ) : (
-            <div className={`${labelClass} cursor-pointer`} onClick={() => setAddingTask(true)}>
-              No tasks yet
-            </div>
-          ))}
         {project.moreCount > 0 && <div className="pl-8 text-[13px] italic text-[#a49a82]">+ {project.moreCount} more</div>}
+        {addingTask ? (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              const input = parseTaskForm(new FormData(e.currentTarget));
+              if (input.title && input.category) actions.addTask(input);
+              setAddingTask(false);
+            }}
+            className="flex items-center gap-2"
+          >
+            <input type="hidden" name="projectId" value={project.id} />
+            <input type="hidden" name="category" value={categoryOptions[0]?.name ?? ""} />
+            <input
+              name="title"
+              required
+              autoFocus
+              placeholder="Task name"
+              onBlur={(e) => {
+                const next = e.relatedTarget as Node | null;
+                if (!next || !e.currentTarget.form?.contains(next)) setAddingTask(false);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setAddingTask(false);
+              }}
+              className="min-w-0 flex-1 border-b border-[#17399b] bg-transparent text-[15px] text-[#2a2622] outline-none"
+            />
+            <input
+              type="date"
+              name="dueDate"
+              defaultValue={todayInputValue()}
+              onBlur={(e) => {
+                const next = e.relatedTarget as Node | null;
+                if (!next || !e.currentTarget.form?.contains(next)) setAddingTask(false);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setAddingTask(false);
+              }}
+              className="flex-none rounded-md border border-[#d3c9b3] bg-white px-1.5 py-0.5 text-[12px] text-[#8a8069] outline-none"
+            />
+          </form>
+        ) : (
+          <div className={`${labelClass} cursor-pointer`} onClick={() => setAddingTask(true)}>
+            + Add task
+          </div>
+        )}
       </div>
     </div>
-  );
-}
-
-function ProjectTaskCheck({ taskId, isCompleted }: { taskId: string; isCompleted: boolean }) {
-  const { actions } = useTaskbook();
-  return (
-    <button
-      type="button"
-      onClick={() => actions.toggleTask(taskId, isCompleted)}
-      className="flex h-5 w-5 flex-none cursor-pointer items-center justify-center rounded"
-      style={{
-        border: `1.5px solid ${isCompleted ? "#17399b" : "#b3a988"}`,
-        background: isCompleted ? "rgba(23,57,155,.06)" : "transparent",
-      }}
-    >
-      {isCompleted && (
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-          <path d="M4 13.5 L9.5 18.5 L20 5.5" stroke="#17399b" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      )}
-    </button>
   );
 }

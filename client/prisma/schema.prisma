@@ -18,6 +18,23 @@ model Category {
   name String @unique
 }
 
+// Single-row app-wide settings (this is a single-user app). Lazily created on first read (see
+// api.ts's getAppSettings) — the fixed id just gives the singleton row something to key on.
+model AppSettings {
+  id       String @id @default("app")
+  // IANA zone name used to interpret due/reminder clock times and display calendar events.
+  timeZone String @default("Asia/Shanghai")
+}
+
+// One row per dismissed calendar (ICS) event instance, so a dismissal survives across
+// devices/browsers. `eventId` mirrors CalendarEvent.id (source-uid-startISO), so a recurring
+// event's individual occurrences are dismissed independently rather than as a whole series.
+model DismissedCalendarEvent {
+  id          String   @id @default(uuid())
+  eventId     String   @unique
+  dismissedAt DateTime @default(now())
+}
+
 model Project {
   id          String    @id @default(uuid())
   name        String
@@ -150,6 +167,10 @@ model Routine {
   // doesn't resend until the calendar date rolls over. Only meaningful on top-level routines
   // (parentId = null) — sub-routines fire as part of their parent's single grouped notification.
   notifiedAt   DateTime?
+  // Skip every scheduled occurrence strictly before this calendar date (e.g. a holiday break),
+  // then resume normally on/after it. Date-only, same UTC-midnight encoding as Task/Project
+  // dueDate. Only meaningful on top-level routines, like notifiedAt above.
+  pausedUntil  DateTime?
 
   // Sub-routines group under a parent so the whole cluster fires as one notification and is
   // ticked off together (e.g. "Wake Up Routine" -> "Make coffee", "Brush teeth", "Shave").

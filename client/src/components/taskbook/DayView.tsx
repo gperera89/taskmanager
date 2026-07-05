@@ -88,6 +88,16 @@ export default function DayView({ detail, onBack }: { detail: DayDetailVM; onBac
                 <span className="ml-1.5 h-2 w-2 flex-none rounded-full bg-[#557694]" />
                 <div className="flex-1 text-[17px] text-[#2a2622]">{e.title}</div>
                 <span className="text-[12.5px] italic text-[#a49a82]">{e.metaLabel}</span>
+                {e.allDay && (
+                  <button
+                    type="button"
+                    onClick={() => actions.dismissEvent(e.id)}
+                    aria-label={`Dismiss ${e.title}`}
+                    className="flex-none cursor-pointer px-1 text-[15px] text-[#b3a988] hover:text-[#8a4040]"
+                  >
+                    ✕
+                  </button>
+                )}
               </div>
             ))}
           </>

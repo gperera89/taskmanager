@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const inputClass =
   "w-full rounded-lg border border-[#d3c9b3] bg-white px-3 py-2 text-sm text-[#2a2622] outline-none focus:border-[#17399b]";
@@ -40,7 +40,17 @@ export type RepeatInitial = {
 // Task recurrence controls — same shape of rule as Routines, but tasks default to "does not
 // repeat" and roll their one dueDate forward on completion rather than tracking a perpetual
 // schedule. Field names (repeatFrequency, repeatInterval, ...) match actions.ts's parseTaskRepeat.
-export default function RepeatFields({ initial, anchorDate }: { initial?: RepeatInitial; anchorDate?: Date }) {
+export default function RepeatFields({
+  initial,
+  anchorDate,
+  onChange,
+}: {
+  initial?: RepeatInitial;
+  anchorDate?: Date;
+  // Fires with the current rule on every change, for callers that want to auto-save instead of
+  // reading the hidden inputs at outer-form submit time (see TasksView's repeat popover).
+  onChange?: (rule: RepeatInitial) => void;
+}) {
   const [frequency, setFrequency] = useState<Frequency>(initial?.frequency ?? "");
   const [intervalStr, setIntervalStr] = useState(String(initial?.interval ?? 1));
   const [daysOfWeek, setDaysOfWeek] = useState<number[]>(initial?.daysOfWeek ?? []);
@@ -49,6 +59,26 @@ export default function RepeatFields({ initial, anchorDate }: { initial?: Repeat
   const [monthlyOrdinal, setMonthlyOrdinal] = useState(initial?.monthlyOrdinal ?? 1);
   const [monthlyWeekday, setMonthlyWeekday] = useState(initial?.monthlyWeekday ?? (anchorDate ?? new Date()).getDay());
   const isSingular = intervalStr === "1";
+
+  // Skip the very first run so opening the popover doesn't immediately re-save the unchanged
+  // rule — only fire once something actually changes.
+  const mounted = useRef(false);
+  useEffect(() => {
+    if (!mounted.current) {
+      mounted.current = true;
+      return;
+    }
+    onChange?.({
+      frequency: frequency || null,
+      interval: Number(intervalStr) || 1,
+      daysOfWeek,
+      monthlyMode,
+      dayOfMonth,
+      monthlyOrdinal,
+      monthlyWeekday,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [frequency, intervalStr, daysOfWeek, monthlyMode, dayOfMonth, monthlyOrdinal, monthlyWeekday]);
 
   return (
     <div className="flex flex-col gap-3">

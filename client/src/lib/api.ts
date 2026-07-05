@@ -2,6 +2,7 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { nextOccurrence, resolveTaskRepeat, type TaskRepeatRule } from "@/lib/taskRecurrence";
+import { DEFAULT_TIME_ZONE, SUPPORTED_TIME_ZONES } from "@/lib/taskbookDates";
 
 export type { Task, Project, Habit, Routine, Category, HabitIntervalUnit, RoutineFrequency, RoutineMonthlyMode, CapturedKind } from "@prisma/client";
 import type { CapturedKind, Habit, HabitIntervalUnit, Routine, RoutineFrequency, RoutineMonthlyMode } from "@prisma/client";
@@ -209,15 +210,6 @@ export function deleteProject(id: string) {
   return notFoundAsError("Project not found", () => prisma.project.delete({ where: { id } }));
 }
 
-// Tasks and projects due within [from, to], for the calendar's day-detail view.
-export async function getDueItems(from: Date, to: Date) {
-  const [tasks, projects] = await Promise.all([
-    prisma.task.findMany({ where: { dueDate: { gte: from, lte: to } }, include: { project: true } }),
-    prisma.project.findMany({ where: { dueDate: { gte: from, lte: to } } }),
-  ]);
-  return { tasks, projects };
-}
-
 export const getHabits = () => prisma.habit.findMany();
 
 export function createHabit(input: { title: string; intervalValue: number; intervalUnit: HabitIntervalUnit }) {
@@ -400,7 +392,7 @@ export async function createSubroutine(parentId: string, title: string) {
 
 export function updateRoutine(
   id: string,
-  input: Partial<{ title: string; reminderTime: string; isActive: boolean } & RoutineRecurrenceInput>
+  input: Partial<{ title: string; reminderTime: string; isActive: boolean; pausedUntil: string | null } & RoutineRecurrenceInput>
 ) {
   const recurrence = input.frequency === undefined ? undefined : resolveRoutineRecurrence(input as RoutineRecurrenceInput);
 
@@ -411,6 +403,7 @@ export function updateRoutine(
         title: input.title,
         reminderTime: input.reminderTime,
         isActive: input.isActive,
+        pausedUntil: input.pausedUntil === undefined ? undefined : input.pausedUntil ? new Date(input.pausedUntil) : null,
         ...recurrence,
       },
     })
@@ -485,6 +478,53 @@ export async function deleteCategory(id: string) {
   return notFoundAsError("Category not found", () => prisma.category.delete({ where: { id } }));
 }
 
+// --- App settings (single-user, single row) ---
+
+const APP_SETTINGS_ID = "app";
+
+// Lazily creates the singleton row on first read, mirroring getCategories' seed-if-empty pattern.
+export async function getAppSettings() {
+  return prisma.appSettings.upsert({
+    where: { id: APP_SETTINGS_ID },
+    update: {},
+    create: { id: APP_SETTINGS_ID, timeZone: DEFAULT_TIME_ZONE },
+  });
+}
+
+export function updateTimeZone(timeZone: string) {
+  if (!SUPPORTED_TIME_ZONES.some((z) => z.id === timeZone)) {
+    throw new Error(`timeZone must be one of: ${SUPPORTED_TIME_ZONES.map((z) => z.id).join(", ")}`);
+  }
+  return prisma.appSettings.upsert({
+    where: { id: APP_SETTINGS_ID },
+    update: { timeZone },
+    create: { id: APP_SETTINGS_ID, timeZone },
+  });
+}
+
+// --- Dismissed calendar (ICS) events ---
+
+// Ids embed the event's start date (see calendar.ts's CalendarEvent.id), so anything older than
+// this is for an event long past — opportunistically swept on read to keep the table bounded.
+const DISMISSED_EVENT_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
+
+export async function getDismissedCalendarEventIds(): Promise<string[]> {
+  await prisma.dismissedCalendarEvent.deleteMany({
+    where: { dismissedAt: { lt: new Date(Date.now() - DISMISSED_EVENT_RETENTION_MS) } },
+  });
+  const rows = await prisma.dismissedCalendarEvent.findMany({ select: { eventId: true } });
+  return rows.map((r) => r.eventId);
+}
+
+// Double-dismissing (e.g. an optimistic retry) is harmless, hence upsert-as-create-or-noop.
+export function dismissCalendarEvent(eventId: string) {
+  return prisma.dismissedCalendarEvent.upsert({
+    where: { eventId },
+    update: {},
+    create: { eventId },
+  });
+}
+
 // Every row is an unread notice pointing at a Task/Project/Routine/Habit that voice capture
 // already created — the notification panel's job is just to surface it for a quick look.
 export const getUnreadVoiceCaptures = () => prisma.voiceCapture.findMany({ orderBy: { createdAt: "desc" } });
@@ -523,10 +563,11 @@ export function deletePushSubscription(endpoint: string) {
 }
 
 // Tasks/projects that *might* be due for a notification, for the due-date notification cron.
-// `until` should be `now + PERTH_UTC_OFFSET_MS` (see taskbookDates.ts's dueInstant) since stored
-// due dates with an explicit time are face-value Perth clock times up to 8h ahead of the real
-// UTC instant — this over-fetches a bit so the caller's precise `dueInstant(due) <= now` check
-// never misses a timed item. notifiedAt is cleared whenever dueDate is edited (see
+// `until` should be `now + getTimeZoneOffsetMs(now, timeZone)` (see taskbookDates.ts's
+// dueInstant/getTimeZoneOffsetMs) since stored due dates with an explicit time are face-value
+// clock times in the configured zone, up to that offset ahead of the real UTC instant — this
+// over-fetches a bit so the caller's precise `dueInstant(due, timeZone) <= now` check never
+// misses a timed item. notifiedAt is cleared whenever dueDate is edited (see
 // updateTask/updateProject) so a rescheduled item can notify again at its new time.
 export function getUnnotifiedDueTasks(until: Date) {
   return prisma.task.findMany({ where: { dueDate: { lte: until }, isCompleted: false, notifiedAt: null } });

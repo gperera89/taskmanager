@@ -19,6 +19,7 @@ import {
   addRoutine as addRoutineAction,
   addSubroutine as addSubroutineAction,
   addTask as addTaskAction,
+  dismissCalendarEvent as dismissCalendarEventAction,
   dismissCapture as dismissCaptureAction,
   editHabit as editHabitAction,
   editProject as editProjectAction,
@@ -37,18 +38,22 @@ import {
   toggleTask as toggleTaskAction,
   updateProjectDescription as updateProjectDescriptionAction,
   updateProjectDueDate as updateProjectDueDateAction,
+  updateRoutinePause as updateRoutinePauseAction,
   updateTaskCategory as updateTaskCategoryAction,
   updateTaskDescription as updateTaskDescriptionAction,
   updateTaskDueDate as updateTaskDueDateAction,
   updateTaskProject as updateTaskProjectAction,
   updateTaskRepeat as updateTaskRepeatAction,
+  updateTimeZone as updateTimeZoneAction,
 } from "@/app/actions";
 import { combineDueDateTime, deriveEntities, type RawState, type RawTask } from "@/lib/derive";
 import { nextOccurrence, resolveTaskRepeat, type TaskRepeatRule } from "@/lib/taskRecurrence";
-import type { TaskbookData } from "./types";
+import type { CalendarEvent, TaskbookData } from "./types";
 
-// Server snapshot fields that this store does NOT derive (calendar rail + labels). Merged over
-// the derived entity fields to reconstruct the full TaskbookData.
+// Server snapshot fields that this store does NOT derive (just labels/errors — the calendar
+// view itself is computed by deriveCalendarView, called from TaskbookApp since it also needs
+// the viewed month, which this store doesn't own). Merged over the derived entity fields to
+// reconstruct the full TaskbookData.
 export type ServerCalendarData = Omit<
   TaskbookData,
   | "taskGroups"
@@ -131,6 +136,7 @@ export type TaskbookActions = {
   editRoutine: (id: string, input: RoutineInput) => void;
   addSubroutine: (parentId: string, title: string) => void;
   tickRoutine: (id: string) => void;
+  setRoutinePause: (id: string, pausedUntil: string) => void;
   removeRoutine: (id: string) => void;
   // Categories
   addCategory: (name: string) => void;
@@ -138,9 +144,20 @@ export type TaskbookActions = {
   removeCategory: (id: string) => void;
   // Voice captures
   dismissCapture: (id: string) => void;
+  // Settings / calendar
+  setTimeZone: (timeZone: string) => void;
+  dismissEvent: (eventId: string) => void;
 };
 
-type TaskbookContextValue = { data: TaskbookData; actions: TaskbookActions };
+// `raw`/`calendarEvents`/`nowMs` are exposed alongside the derived `data` so TaskbookApp can call
+// deriveCalendarView itself with the viewed month it owns (this store doesn't track navigation).
+type TaskbookContextValue = {
+  data: TaskbookData;
+  actions: TaskbookActions;
+  raw: RawState;
+  calendarEvents: CalendarEvent[];
+  nowMs: number;
+};
 
 const TaskbookContext = createContext<TaskbookContextValue | null>(null);
 
@@ -225,11 +242,13 @@ function routineToFd(input: RoutineInput): FormData {
 export function StoreProvider({
   initialRaw,
   serverData,
+  calendarEvents,
   nowMs,
   children,
 }: {
   initialRaw: RawState;
   serverData: ServerCalendarData;
+  calendarEvents: CalendarEvent[];
   nowMs: number;
   children: React.ReactNode;
 }) {
@@ -550,6 +569,7 @@ export function StoreProvider({
                 isActive: true,
                 lastCompletedAt: null,
                 notifiedAt: null,
+                pausedUntil: null,
                 parentId: null,
                 subroutines: [],
               },
@@ -606,6 +626,7 @@ export function StoreProvider({
                 isActive: rt.isActive,
                 lastCompletedAt: null,
                 notifiedAt: null,
+                pausedUntil: null,
                 parentId,
               };
               return { ...rt, subroutines: [...rt.subroutines, child] };
@@ -632,6 +653,17 @@ export function StoreProvider({
             ),
           }),
           () => tickRoutineAction(id)
+        );
+      },
+      setRoutinePause: (id, pausedUntil) => {
+        const fd = new FormData();
+        fd.set("pausedUntil", pausedUntil);
+        mutate(
+          (r) => ({
+            ...r,
+            routines: r.routines.map((rt) => (rt.id === id ? { ...rt, pausedUntil: pausedUntil ? new Date(pausedUntil) : null } : rt)),
+          }),
+          () => updateRoutinePauseAction(id, fd)
         );
       },
       removeRoutine: (id) =>
@@ -680,10 +712,15 @@ export function StoreProvider({
 
       // --- Voice captures ---
       dismissCapture: (id) => mutate((r) => ({ ...r, captures: r.captures.filter((c) => c.id !== id) }), () => dismissCaptureAction(id)),
+
+      // --- Settings / calendar ---
+      setTimeZone: (timeZone) => mutate((r) => ({ ...r, timeZone }), () => updateTimeZoneAction(timeZone)),
+      dismissEvent: (eventId) =>
+        mutate((r) => ({ ...r, dismissedEventIds: [...r.dismissedEventIds, eventId] }), () => dismissCalendarEventAction(eventId)),
     };
   }, [router]);
 
   const data = useMemo<TaskbookData>(() => ({ ...serverData, ...deriveEntities(raw, nowMs) }), [serverData, raw, nowMs]);
 
-  return <TaskbookContext.Provider value={{ data, actions }}>{children}</TaskbookContext.Provider>;
+  return <TaskbookContext.Provider value={{ data, actions, raw, calendarEvents, nowMs }}>{children}</TaskbookContext.Provider>;
 }

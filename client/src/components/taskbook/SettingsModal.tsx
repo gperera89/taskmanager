@@ -1,14 +1,19 @@
 "use client";
 
+import { SUPPORTED_TIME_ZONES } from "@/lib/taskbookDates";
 import CategoryManager from "./CategoryManager";
 import NotificationSetup from "./NotificationSetup";
 import type { CategoryOption } from "./types";
 
 export default function SettingsModal({
   categoryOptions,
+  timeZone,
+  onSetTimeZone,
   onClose,
 }: {
   categoryOptions: CategoryOption[];
+  timeZone: string;
+  onSetTimeZone: (timeZone: string) => void;
   onClose: () => void;
 }) {
   return (
@@ -27,6 +32,30 @@ export default function SettingsModal({
         <div className="flex flex-col gap-1.5">
           <label className="mb-1 block text-[11px] uppercase tracking-[0.14em] text-[#8a8069]">Categories</label>
           <CategoryManager categoryOptions={categoryOptions} />
+        </div>
+
+        <div className="mt-4 flex flex-col gap-1.5">
+          <label className="mb-1 block text-[11px] uppercase tracking-[0.14em] text-[#8a8069]">Timezone</label>
+          <p className="mb-1 text-xs text-[#8a8069]">
+            Governs due-date/reminder times and how calendar events are displayed.
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {SUPPORTED_TIME_ZONES.map((z) => (
+              <button
+                key={z.id}
+                type="button"
+                onClick={() => onSetTimeZone(z.id)}
+                className="cursor-pointer rounded-md border px-2.5 py-1 text-xs"
+                style={
+                  z.id === timeZone
+                    ? { background: "#17399b", borderColor: "#17399b", color: "#fff" }
+                    : { background: "transparent", borderColor: "#d3c9b3", color: "#2a2622" }
+                }
+              >
+                {z.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="mt-4 flex flex-col gap-1.5">

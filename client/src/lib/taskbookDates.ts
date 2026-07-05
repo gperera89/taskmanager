@@ -59,19 +59,122 @@ export function formatDueLabel(due: Date): string {
   return `${dateLabel} · ${TIME_FORMAT.format(due)}`;
 }
 
-// Due-date clock times are entered in Australia/Perth (UTC+8, no DST — see the notification
-// settings question this answers) but stored as a face-value UTC timestamp (api.ts's
-// combineDueDateTime comment: typing "18:00" stores 18:00 UTC, not the real UTC instant of
-// 18:00 Perth time). PERTH_UTC_OFFSET_MS converts that face value into the real instant it
-// represents, so the notification cron fires at the moment the user actually meant.
-export const PERTH_UTC_OFFSET_MS = 8 * 60 * 60 * 1000;
+// --- Configurable timezone (replaces the old hardcoded "Perth" +8h assumption) ---
+//
+// Due/reminder clock times are entered as a face value (e.g. typing "18:00" stores 18:00 UTC,
+// not the real UTC instant of 18:00 in any zone — see api.ts's combineDueDateTime comment) that
+// is meant to be interpreted in the app's *configured* timezone (AppSettings.timeZone), not a
+// fixed offset. The default zone (China, UTC+8, no DST) is arithmetically identical to the old
+// hardcoded Perth offset, so behavior is unchanged unless the user switches zones in Settings.
 
-// The real UTC instant a stored due date represents. Date-only due dates (no time picked)
-// default to 8am Perth, whose UTC instant is exactly UTC midnight of that date — already what's
-// stored — so only due dates with an explicit time need the offset applied.
-export function dueInstant(due: Date): Date {
+export const CHINA_TIME_ZONE = "Asia/Shanghai";
+export const DEFAULT_TIME_ZONE = CHINA_TIME_ZONE;
+
+export const SUPPORTED_TIME_ZONES: { id: string; label: string }[] = [
+  { id: CHINA_TIME_ZONE, label: "China" },
+  { id: "Australia/Melbourne", label: "Melbourne" },
+  { id: "Australia/Brisbane", label: "Brisbane" },
+  { id: "Pacific/Auckland", label: "Auckland" },
+];
+
+// A zone's real (DST-aware) UTC offset, in ms, at a given instant — the standard
+// Intl.DateTimeFormat formatToParts trick, since Intl already carries the IANA tz database.
+export function getTimeZoneOffsetMs(at: Date, timeZone: string): number {
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+  const parts = Object.fromEntries(dtf.formatToParts(at).map((p) => [p.type, p.value]));
+  const asUTC = Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+    Number(parts.hour),
+    Number(parts.minute),
+    Number(parts.second)
+  );
+  return asUTC - at.getTime();
+}
+
+// A Date whose UTC getters read as the current wall clock in `timeZone` — generalizes the old
+// "perthNow" helpers duplicated in derive.ts/notifications.ts. Matches the face-value-as-UTC
+// convention used for due dates and Routine reminderTime strings throughout this codebase.
+export function zonedNow(nowMs: number, timeZone: string): Date {
+  return new Date(nowMs + getTimeZoneOffsetMs(new Date(nowMs), timeZone));
+}
+
+// Converts a face-value wall-clock Date (UTC getters = the intended Y/M/D HH:MM in `timeZone`)
+// into the real UTC instant it represents. Two-pass refinement handles DST-transition edges
+// (the offset can differ slightly between the naive guess and the resolved instant).
+function zonedWallClockToInstant(faceValueUtc: Date, timeZone: string): Date {
+  let instantMs = faceValueUtc.getTime();
+  for (let i = 0; i < 2; i++) {
+    const offset = getTimeZoneOffsetMs(new Date(instantMs), timeZone);
+    instantMs = faceValueUtc.getTime() - offset;
+  }
+  return new Date(instantMs);
+}
+
+// The real UTC instant a stored due date represents, in `timeZone`. Date-only due dates (no
+// time picked) default to 8am in that zone — matching the implicit "8am" default this always
+// had — everything else uses the literal typed HH:MM.
+export function dueInstant(due: Date, timeZone: string): Date {
   const hasExplicitTime = due.getUTCHours() !== 0 || due.getUTCMinutes() !== 0;
-  return hasExplicitTime ? new Date(due.getTime() - PERTH_UTC_OFFSET_MS) : due;
+  const hh = hasExplicitTime ? due.getUTCHours() : 8;
+  const mm = hasExplicitTime ? due.getUTCMinutes() : 0;
+  const faceValue = new Date(Date.UTC(due.getUTCFullYear(), due.getUTCMonth(), due.getUTCDate(), hh, mm));
+  return zonedWallClockToInstant(faceValue, timeZone);
+}
+
+// The calendar day (in `timeZone`) a real instant falls on — for bucketing calendar (ICS)
+// events, whose timestamps are real UTC instants, into the right day/month for the *viewed*
+// zone rather than whatever zone the server process happens to run in.
+export function zonedYMD(at: Date, timeZone: string): { year: number; month0: number; day: number } {
+  const z = zonedNow(at.getTime(), timeZone);
+  return { year: z.getUTCFullYear(), month0: z.getUTCMonth(), day: z.getUTCDate() };
+}
+
+// `at`'s calendar day in `timeZone`, as a local midnight Date — safe to feed into
+// formatShortDate/formatLongDate the same way calendarDateFromDue's local Dates are.
+export function zonedCalendarDate(at: Date, timeZone: string): Date {
+  const { year, month0, day } = zonedYMD(at, timeZone);
+  return new Date(year, month0, day);
+}
+
+// Same as localDaysUntil, but comparing calendar days in `timeZone` instead of the runtime's
+// own local timezone — for calendar (ICS) events, whose real UTC instants need to be judged
+// against whichever zone the user has selected in Settings.
+export function zonedDaysUntil(d: Date, now: Date, timeZone: string): number {
+  const a = zonedCalendarDate(d, timeZone).getTime();
+  const b = zonedCalendarDate(now, timeZone).getTime();
+  return Math.round((a - b) / 86_400_000);
+}
+
+const EVENT_TIME_FORMAT_CACHE = new Map<string, Intl.DateTimeFormat>();
+function eventTimeFormatter(timeZone: string): Intl.DateTimeFormat {
+  let fmt = EVENT_TIME_FORMAT_CACHE.get(timeZone);
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone });
+    EVENT_TIME_FORMAT_CACHE.set(timeZone, fmt);
+  }
+  return fmt;
+}
+
+// A timed calendar event's clock time in `timeZone`, with the China-time equivalent appended in
+// brackets whenever the selected zone isn't China itself (so a non-Chinese-zone user always has
+// a China-time reference point, per the settings requirement).
+export function formatEventTime(startIso: string, timeZone: string): string {
+  const d = new Date(startIso);
+  const primary = eventTimeFormatter(timeZone).format(d);
+  if (timeZone === CHINA_TIME_ZONE) return primary;
+  const china = eventTimeFormatter(CHINA_TIME_ZONE).format(d);
+  return `${primary} (${china} CN)`;
 }
 
 export type DueBucket = "overdue" | "today" | "tomorrow" | "week" | "later" | "none";
@@ -95,14 +198,21 @@ export type MonthCell = {
 };
 
 // Monday-first month grid (matches the design's M T W T F S S header), including leading/
-// trailing days from adjacent months for visual continuity. Only `inMonth` cells are ever
-// selectable — the design's calendar rail doesn't support navigating to other months.
-export function buildMonthCells(year: number, month0: number, todayDay: number, dotDays: Set<number>): MonthCell[] {
+// trailing days from adjacent months for visual continuity. `today` is the real current
+// year/month0/day (independent of which month is being viewed) so "is this actually today" is
+// correct even when the user has navigated to a different month via the prev/next arrows.
+export function buildMonthCells(
+  year: number,
+  month0: number,
+  today: { year: number; month0: number; day: number },
+  dotDays: Set<number>
+): MonthCell[] {
   const first = new Date(year, month0, 1);
   const daysInMonth = new Date(year, month0 + 1, 0).getDate();
   const prevMonthDays = new Date(year, month0, 0).getDate();
   const mondayIndex = (first.getDay() + 6) % 7; // 0 = Monday
   const totalCells = Math.ceil((mondayIndex + daysInMonth) / 7) * 7;
+  const isCurrentMonth = year === today.year && month0 === today.month0;
 
   const cells: MonthCell[] = [];
   for (let i = 0; i < totalCells; i++) {
@@ -115,7 +225,7 @@ export function buildMonthCells(year: number, month0: number, todayDay: number, 
       cells.push({ key: `next-${day}`, day, inMonth: false, isToday: false, hasDot: false });
     } else {
       const day = offset + 1;
-      cells.push({ key: `cur-${day}`, day, inMonth: true, isToday: day === todayDay, hasDot: dotDays.has(day) });
+      cells.push({ key: `cur-${day}`, day, inMonth: true, isToday: isCurrentMonth && day === today.day, hasDot: dotDays.has(day) });
     }
   }
   return cells;

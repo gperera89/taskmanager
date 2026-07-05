@@ -64,7 +64,7 @@ export default function ItemModal({
   onClose: () => void;
 }) {
   const isAdd = state.mode === "add";
-  const [addKind, setAddKind] = useState<Kind>("task");
+  const [addKind, setAddKind] = useState<Kind>(state.mode === "add" ? state.initialKind ?? "task" : "task");
   const [sharedTitle, setSharedTitle] = useState("");
   const [sharedDescription, setSharedDescription] = useState("");
 
@@ -223,7 +223,7 @@ function TaskForm({
           <textarea name="description" rows={2} className={inputClass} />
         )}
       </div>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <div>
           <label className={labelTextClass}>Due date</label>
           <input name="dueDate" type="date" defaultValue={todayInputValue()} className={inputClass} />
@@ -232,7 +232,7 @@ function TaskForm({
           <label className={labelTextClass}>Due time</label>
           <input name="dueTime" type="time" className={inputClass} />
         </div>
-        <div>
+        <div className="col-span-2 sm:col-span-1">
           <label className={labelTextClass}>Project</label>
           <select name="projectId" defaultValue="" className={inputClass}>
             <option value="">No project</option>

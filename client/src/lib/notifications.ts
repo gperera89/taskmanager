@@ -3,6 +3,7 @@ import webpush from "web-push";
 import {
   deletePushSubscription,
   getActiveTopLevelRoutines,
+  getAppSettings,
   getPushSubscriptions,
   getUnnotifiedDueProjects,
   getUnnotifiedDueTasks,
@@ -13,7 +14,7 @@ import {
   ROUTINE_TICK_EXPIRY_MS,
 } from "@/lib/api";
 import { isRoutineDueToday } from "@/lib/taskRecurrence";
-import { dueInstant, pad2, PERTH_UTC_OFFSET_MS } from "@/lib/taskbookDates";
+import { dueInstant, getTimeZoneOffsetMs, pad2, zonedNow } from "@/lib/taskbookDates";
 
 webpush.setVapidDetails(
   process.env.VAPID_SUBJECT!,
@@ -49,16 +50,9 @@ async function sendToAllSubscriptions(payload: PushPayload) {
   );
 }
 
-// Perth wall-clock "now": PERTH_UTC_OFFSET_MS shifts the real instant so its UTC getters read
-// as the local Perth clock face, matching the face-value-as-UTC convention used for due dates
-// and routine reminderTime strings throughout this codebase.
-function perthNow(at: Date): Date {
-  return new Date(at.getTime() + PERTH_UTC_OFFSET_MS);
-}
-
-function perthDateKey(at: Date): string {
-  const p = perthNow(at);
-  return `${p.getUTCFullYear()}-${p.getUTCMonth()}-${p.getUTCDate()}`;
+function zonedDateKey(at: Date, timeZone: string): string {
+  const z = zonedNow(at.getTime(), timeZone);
+  return `${z.getUTCFullYear()}-${z.getUTCMonth()}-${z.getUTCDate()}`;
 }
 
 // The external scheduler is expected to hit /api/cron/check-due roughly once a minute; this is
@@ -73,16 +67,23 @@ const CLOSE_CHECK_WINDOW_MS = 3 * 60 * 1000;
 // "Make coffee · Brush teeth · Shave", and marks it notified so it won't re-fire today. Also
 // finds clusters notified over an hour ago that were never ticked and closes their still-open
 // notification (see the PushPayload.close comment) so a stale reminder doesn't linger forever.
-async function checkAndNotifyDueRoutines(now: Date): Promise<{ notified: number; closed: number }> {
-  const local = perthNow(now);
+async function checkAndNotifyDueRoutines(now: Date, timeZone: string): Promise<{ notified: number; closed: number }> {
+  const local = zonedNow(now.getTime(), timeZone);
   const nowHHMM = `${pad2(local.getUTCHours())}:${pad2(local.getUTCMinutes())}`;
 
   const routines = await getActiveTopLevelRoutines();
 
   const due = routines.filter((r) => {
     if (isRoutineTickedNow(r)) return false;
-    if (r.notifiedAt && perthDateKey(r.notifiedAt) === perthDateKey(now)) return false;
+    if (r.notifiedAt && zonedDateKey(r.notifiedAt, timeZone) === zonedDateKey(now, timeZone)) return false;
     if (nowHHMM < r.reminderTime) return false;
+    // Skip every occurrence strictly before a "paused until" date (e.g. a holiday break);
+    // compare as UTC-midnight instants, not strings, since date-string ordering isn't numeric.
+    if (r.pausedUntil) {
+      const todayUTC = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate());
+      const pausedUTC = Date.UTC(r.pausedUntil.getUTCFullYear(), r.pausedUntil.getUTCMonth(), r.pausedUntil.getUTCDate());
+      if (todayUTC < pausedUTC) return false;
+    }
     return isRoutineDueToday(r, local);
   });
 
@@ -116,15 +117,16 @@ export async function checkAndNotifyDueItems(): Promise<{
   routinesClosed: number;
 }> {
   const now = new Date();
-  const until = new Date(now.getTime() + PERTH_UTC_OFFSET_MS);
+  const { timeZone } = await getAppSettings();
+  const until = new Date(now.getTime() + getTimeZoneOffsetMs(now, timeZone));
 
   const [tasks, projects, routineResult] = await Promise.all([
     getUnnotifiedDueTasks(until),
     getUnnotifiedDueProjects(until),
-    checkAndNotifyDueRoutines(now),
+    checkAndNotifyDueRoutines(now, timeZone),
   ]);
-  const dueTasks = tasks.filter((t) => t.dueDate && dueInstant(t.dueDate) <= now);
-  const dueProjects = projects.filter((p) => p.dueDate && dueInstant(p.dueDate) <= now);
+  const dueTasks = tasks.filter((t) => t.dueDate && dueInstant(t.dueDate, timeZone) <= now);
+  const dueProjects = projects.filter((p) => p.dueDate && dueInstant(p.dueDate, timeZone) <= now);
 
   await Promise.all([
     ...dueTasks.map(async (t) => {
