@@ -9,7 +9,7 @@ import { TaskRow } from "./TasksView";
 import type { CategoryOption, ProjectCardVM, ProjectOption } from "./types";
 
 const fieldInputClass =
-  "w-full rounded-md border border-[#d3c9b3] bg-white px-2 py-1 text-[13.5px] text-[#2a2622] outline-none focus:border-[#17399b]";
+  "w-full rounded-md border border-[#d3c9b3] bg-[#faf7ef] px-2 py-1 text-[13.5px] text-[#2a2622] outline-none focus:border-[#17399b]";
 
 export default function ProjectsView({
   cards,
@@ -152,7 +152,7 @@ function ProjectCard({
               onKeyDown={(e) => {
                 if (e.key === "Escape") setEditingDueDate(false);
               }}
-              className="rounded-md border border-[#d3c9b3] bg-white px-2 py-1 text-[12.5px] text-[#2a2622] outline-none focus:border-[#17399b]"
+              className="rounded-md border border-[#d3c9b3] bg-[#faf7ef] px-2 py-1 text-[12.5px] text-[#2a2622] outline-none focus:border-[#17399b]"
             />
           </form>
         ) : (
@@ -207,7 +207,7 @@ function ProjectCard({
               onKeyDown={(e) => {
                 if (e.key === "Escape") setAddingTask(false);
               }}
-              className="flex-none rounded-md border border-[#d3c9b3] bg-white px-1.5 py-0.5 text-[12px] text-[#8a8069] outline-none"
+              className="flex-none rounded-md border border-[#d3c9b3] bg-[#faf7ef] px-1.5 py-0.5 text-[12px] text-[#8a8069] outline-none"
             />
           </form>
         ) : (

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 const inputClass =
-  "w-full rounded-lg border border-[#d3c9b3] bg-white px-3 py-2 text-sm text-[#2a2622] outline-none focus:border-[#17399b]";
+  "w-full rounded-lg border border-[#d3c9b3] bg-[#faf7ef] px-3 py-2 text-sm text-[#2a2622] outline-none focus:border-[#17399b]";
 const labelTextClass = "mb-1 block text-[11px] uppercase tracking-[0.14em] text-[#8a8069]";
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 // Displayed Monday-first to match how people actually think about a week; daysOfWeek values

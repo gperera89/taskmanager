@@ -30,6 +30,7 @@ import type {
   CategoryOption,
   DayDetailVM,
   HabitCardVM,
+  Mode,
   ProjectCardVM,
   ProjectOption,
   RoutineItemVM,
@@ -80,6 +81,19 @@ export type DerivedEntities = {
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const INTERVAL_UNIT_DAYS: Record<string, number> = { DAY: 1, WEEK: 7, MONTH: 30 };
 export const ROUTINE_TICK_EXPIRY_MS = 60 * 60 * 1000;
+
+// Task.category is free text (seeded with "Work"/"Personal" but user-editable), so the mode
+// filter matches those two labels case-insensitively and leaves everything else visible only in
+// "all". Calendar events are matched by their ICS source label instead, since they have no
+// category — "Outlook" is the YCIS work calendar, "Gmail" the personal one (see lib/calendar.ts).
+function taskMatchesMode(category: string, mode: Mode): boolean {
+  return mode === "all" || category.toLowerCase() === mode;
+}
+
+function eventMatchesMode(source: string, mode: Mode): boolean {
+  if (mode === "all") return true;
+  return mode === "work" ? source === "Outlook" : source === "Gmail";
+}
 
 function habitWindowDays(habit: Pick<Habit, "intervalValue" | "intervalUnit">): number {
   return habit.intervalValue * INTERVAL_UNIT_DAYS[habit.intervalUnit];
@@ -224,16 +238,18 @@ function scheduleLabel(r: Routine): string {
 
 // --- The main derivation ---
 
-export function deriveEntities(raw: RawState, nowMs: number): DerivedEntities {
+export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): DerivedEntities {
   const now = new Date(nowMs);
   const year = now.getFullYear();
   const month0 = now.getMonth();
   const todayDay = now.getDate();
 
-  // Tasks — grouped by due bucket.
+  // Tasks — grouped by due bucket. Projects/routines/habits aren't categorized work/personal,
+  // so the mode filter only narrows the task list (and, below, the calendar).
   const projectNameById = new Map(raw.projects.map((p) => [p.id, p.name]));
   const grouped = new Map<DueBucket, TaskItemVM[]>();
   for (const t of raw.tasks) {
+    if (!taskMatchesMode(t.category, mode)) continue;
     const vm = toTaskVM(t, projectNameById);
     const b = bucketForDue(t.dueDate ? new Date(t.dueDate) : null, now);
     if (!grouped.has(b)) grouped.set(b, []);
@@ -424,11 +440,13 @@ export function deriveCalendarView(
   calendarEvents: CalendarEvent[],
   nowMs: number,
   viewYear: number,
-  viewMonth0: number
+  viewMonth0: number,
+  mode: Mode
 ): CalendarViewVM {
   const now = new Date(nowMs);
   const today = zonedYMD(now, raw.timeZone);
   const dismissed = new Set(raw.dismissedEventIds);
+  const visibleEvents = calendarEvents.filter((e) => eventMatchesMode(e.source, mode));
 
   const dayDetails: Record<number, DayDetailVM> = {};
   const dotDays = new Set<number>();
@@ -444,7 +462,7 @@ export function deriveCalendarView(
   const projectNameById = new Map(raw.projects.map((p) => [p.id, p.name]));
 
   for (const t of raw.tasks) {
-    if (t.isCompleted || !t.dueDate) continue;
+    if (t.isCompleted || !t.dueDate || !taskMatchesMode(t.category, mode)) continue;
     const d = calendarDateFromDue(new Date(t.dueDate));
     if (d.getFullYear() !== viewYear || d.getMonth() !== viewMonth0) continue;
     ensureDay(d.getDate()).tasks.push({
@@ -462,7 +480,7 @@ export function deriveCalendarView(
     ensureDay(d.getDate()).projects.push({ id: p.id, name: p.name });
     dotDays.add(d.getDate());
   }
-  for (const e of calendarEvents) {
+  for (const e of visibleEvents) {
     if (dismissed.has(e.id)) continue;
     const start = new Date(e.start);
     const zoned = zonedYMD(start, raw.timeZone);
@@ -480,7 +498,7 @@ export function deriveCalendarView(
   type UpcomingSource = { sortKey: number; item: UpcomingItemVM };
   const upcomingSources: UpcomingSource[] = [];
   for (const t of raw.tasks) {
-    if (t.isCompleted || !t.dueDate) continue;
+    if (t.isCompleted || !t.dueDate || !taskMatchesMode(t.category, mode)) continue;
     const diff = daysUntil(new Date(t.dueDate), now);
     if (diff < 0) continue;
     const d = calendarDateFromDue(new Date(t.dueDate));
@@ -493,7 +511,7 @@ export function deriveCalendarView(
     const d = calendarDateFromDue(new Date(p.dueDate));
     upcomingSources.push({ sortKey: d.getTime(), item: { key: `p-${p.id}`, a: relativeUpcomingLabel(diff, d), b: p.name, c: "Project", hasC: true } });
   }
-  for (const e of calendarEvents) {
+  for (const e of visibleEvents) {
     if (dismissed.has(e.id)) continue;
     const start = new Date(e.start);
     const diff = zonedDaysUntil(start, now, raw.timeZone);

@@ -165,7 +165,7 @@ export function TaskRow({
                 setEditingTitle(false);
               }
             }}
-            className="w-full rounded border border-[#17399b] bg-white px-1.5 py-0.5 text-[17px] text-[#2a2622] outline-none"
+            className="w-full rounded border border-[#17399b] bg-[#faf7ef] px-1.5 py-0.5 text-[17px] text-[#2a2622] outline-none"
           />
         ) : (
           <div
@@ -190,7 +190,7 @@ export function TaskRow({
                 setEditingDescription(false);
               }
             }}
-            className="mt-1 w-full rounded border border-[#17399b] bg-white px-1.5 py-1 text-[13.5px] text-[#2a2622] outline-none"
+            className="mt-1 w-full rounded border border-[#17399b] bg-[#faf7ef] px-1.5 py-1 text-[13.5px] text-[#2a2622] outline-none"
           />
         ) : task.description ? (
           <div
@@ -261,7 +261,7 @@ export function TaskRow({
         </div>
 
         {dueOpen && (
-          <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-[#d3c9b3] bg-white p-2.5">
+          <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-[#d3c9b3] bg-[#faf7ef] p-2.5">
             <input
               type="date"
               value={dueDateDraft}
@@ -286,7 +286,7 @@ export function TaskRow({
         )}
 
         {repeatOpen && (
-          <div className="mt-2 rounded-lg border border-[#d3c9b3] bg-white p-3">
+          <div className="mt-2 rounded-lg border border-[#d3c9b3] bg-[#faf7ef] p-3">
             <RepeatFields
               initial={{
                 frequency: task.repeatFrequency,

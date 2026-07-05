@@ -48,7 +48,15 @@ import {
 } from "@/app/actions";
 import { combineDueDateTime, deriveEntities, type RawState, type RawTask } from "@/lib/derive";
 import { nextOccurrence, resolveTaskRepeat, type TaskRepeatRule } from "@/lib/taskRecurrence";
-import type { CalendarEvent, TaskbookData } from "./types";
+import type { CalendarEvent, Mode, TaskbookData } from "./types";
+
+// Persists the work/personal/all toggle across sessions — this is a pure client display
+// preference, not server state, so it lives in localStorage rather than the DB.
+const MODE_STORAGE_KEY = "taskbook-mode";
+
+function isMode(v: string | null): v is Mode {
+  return v === "work" || v === "personal" || v === "all";
+}
 
 // Server snapshot fields that this store does NOT derive (just labels/errors — the calendar
 // view itself is computed by deriveCalendarView, called from TaskbookApp since it also needs
@@ -157,6 +165,8 @@ type TaskbookContextValue = {
   raw: RawState;
   calendarEvents: CalendarEvent[];
   nowMs: number;
+  mode: Mode;
+  setMode: (mode: Mode) => void;
 };
 
 const TaskbookContext = createContext<TaskbookContextValue | null>(null);
@@ -254,6 +264,19 @@ export function StoreProvider({
 }) {
   const router = useRouter();
   const [raw, setRaw] = useState(initialRaw);
+
+  // Defaults to "all" on both server and first client render (localStorage isn't available
+  // during SSR) to avoid a hydration mismatch, then syncs to the stored value right after mount.
+  const [mode, setMode] = useState<Mode>("all");
+  useEffect(() => {
+    const stored = window.localStorage.getItem(MODE_STORAGE_KEY);
+    // One-time sync from localStorage right after mount — can't read it any earlier since SSR has no `window`.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (isMode(stored)) setMode(stored);
+  }, []);
+  useEffect(() => {
+    window.localStorage.setItem(MODE_STORAGE_KEY, mode);
+  }, [mode]);
 
   // Re-seed from server truth when a refresh (focus/navigation) delivers a new snapshot. The
   // prop object identity only changes on an actual server render, so client-side re-renders
@@ -720,7 +743,14 @@ export function StoreProvider({
     };
   }, [router]);
 
-  const data = useMemo<TaskbookData>(() => ({ ...serverData, ...deriveEntities(raw, nowMs) }), [serverData, raw, nowMs]);
+  const data = useMemo<TaskbookData>(
+    () => ({ ...serverData, ...deriveEntities(raw, nowMs, mode) }),
+    [serverData, raw, nowMs, mode]
+  );
 
-  return <TaskbookContext.Provider value={{ data, actions, raw, calendarEvents, nowMs }}>{children}</TaskbookContext.Provider>;
+  return (
+    <TaskbookContext.Provider value={{ data, actions, raw, calendarEvents, nowMs, mode, setMode }}>
+      {children}
+    </TaskbookContext.Provider>
+  );
 }

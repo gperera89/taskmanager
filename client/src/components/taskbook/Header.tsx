@@ -1,8 +1,9 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useModalActions } from "./ModalContext";
+import ModeToggle from "./ModeToggle";
 import { useTaskbook } from "./store";
 import type { CapturedKind, VoiceCaptureVM } from "./types";
 
@@ -37,13 +38,25 @@ export default function Header({
 }) {
   const router = useRouter();
   const { openAdd } = useModalActions();
-  const { actions } = useTaskbook();
+  const { actions, mode, setMode } = useTaskbook();
   const [showNotif, setShowNotif] = useState(false);
   const [listening, setListening] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [captureError, setCaptureError] = useState<string | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
+  const notifRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showNotif) return;
+    function handlePointerDown(e: PointerEvent) {
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
+        setShowNotif(false);
+      }
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [showNotif]);
 
   async function uploadRecording(blob: Blob) {
     setProcessing(true);
@@ -160,6 +173,8 @@ export default function Header({
 
         <span className="text-[13px] text-[#8a8069]">{todayLabel}</span>
 
+        <ModeToggle mode={mode} onChange={setMode} />
+
         <button
           type="button"
           title="Settings"
@@ -181,7 +196,7 @@ export default function Header({
           </svg>
         </button>
 
-        <div className="relative">
+        <div className="relative" ref={notifRef}>
           <button
             type="button"
             onClick={() => setShowNotif((v) => !v)}
@@ -201,7 +216,7 @@ export default function Header({
             )}
           </button>
           {showNotif && (
-            <div className="absolute right-0 top-[46px] z-30 w-[330px] rounded-xl border border-[#ddd4c1] bg-white p-4 shadow-[0_16px_40px_rgba(70,55,30,.22)]">
+            <div className="absolute right-0 top-[46px] z-30 w-[330px] rounded-xl border border-[#ddd4c1] bg-[#faf7ef] p-4 shadow-[0_16px_40px_rgba(70,55,30,.22)]">
               <div className="mb-1 text-[11px] uppercase tracking-[0.16em] text-[#a49a82]">Added by voice</div>
               <div className="mb-2.5 text-xs italic text-[#a49a82]">Filed automatically — check it landed right.</div>
               {pendingCaptures.length === 0 ? (

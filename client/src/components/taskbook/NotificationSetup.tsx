@@ -80,7 +80,7 @@ export default function NotificationSetup() {
   if (status === "checking") return null;
 
   return (
-    <div className="rounded-lg border border-[#d3c9b3] bg-white p-2.5 text-sm text-[#2a2622]">
+    <div className="rounded-lg border border-[#d3c9b3] bg-[#faf7ef] p-2.5 text-sm text-[#2a2622]">
       {status === "unsupported" && <p className="text-[#8a8069]">This browser doesn&apos;t support push notifications.</p>}
       {status === "needs-install" && (
         <p className="text-[#8a8069]">

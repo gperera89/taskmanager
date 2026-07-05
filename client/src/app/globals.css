@@ -16,3 +16,16 @@ body {
   background: var(--background);
   color: var(--foreground);
 }
+
+/* Native <select> popups otherwise render with the browser's default white/black chrome —
+   this pulls the closed control and the dropdown list itself onto the app's cream/ink palette
+   (option-level theming is honored by Chrome/Firefox on most platforms, though macOS Safari's
+   native popup still ignores it). */
+select {
+  color-scheme: light;
+}
+
+select option {
+  background-color: #faf7ef;
+  color: #2a2622;
+}

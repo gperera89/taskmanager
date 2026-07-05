@@ -32,7 +32,7 @@ const AREA_TO_KIND: Record<AreaKey, ItemKind> = {
 };
 
 export default function TaskbookApp() {
-  const { data, actions, raw, calendarEvents, nowMs } = useTaskbook();
+  const { data, actions, raw, calendarEvents, nowMs, mode } = useTaskbook();
   const [area, setArea] = useState<AreaKey>("tasks");
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
   const [dayOpen, setDayOpen] = useState(false);
@@ -68,8 +68,8 @@ export default function TaskbookApp() {
   // The calendar view (month grid, day details, "Coming up") — reactive to optimistic edits,
   // dismissals, timezone changes, and month navigation (see lib/derive.ts's deriveCalendarView).
   const calendarView = useMemo(
-    () => deriveCalendarView(raw, calendarEvents, nowMs, viewYear, viewMonth0),
-    [raw, calendarEvents, nowMs, viewYear, viewMonth0]
+    () => deriveCalendarView(raw, calendarEvents, nowMs, viewYear, viewMonth0, mode),
+    [raw, calendarEvents, nowMs, viewYear, viewMonth0, mode]
   );
 
   // Mirror the lg breakpoint (1024px) used for the layout: below it we swipe a carousel,

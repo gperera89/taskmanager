@@ -102,7 +102,7 @@ function RoutineRow({ routine, showChip = false }: { routine: RoutineItemVM; sho
                   setEditingPause(false);
                 }}
                 onBlur={() => setEditingPause(false)}
-                className="rounded-md border border-[#d3c9b3] bg-white px-1.5 py-0.5 text-xs text-[#2a2622] outline-none focus:border-[#17399b]"
+                className="rounded-md border border-[#d3c9b3] bg-[#faf7ef] px-1.5 py-0.5 text-xs text-[#2a2622] outline-none focus:border-[#17399b]"
               />
             ) : (
               <button type="button" onClick={() => setEditingPause(true)} className="cursor-pointer text-xs text-[#8a8069]">
@@ -162,7 +162,7 @@ function RoutineRow({ routine, showChip = false }: { routine: RoutineItemVM; sho
               required
               autoFocus
               placeholder="e.g. Make coffee"
-              className="rounded-md border border-[#d3c9b3] bg-white px-2 py-1 text-[13px] text-[#2a2622] outline-none focus:border-[#17399b]"
+              className="rounded-md border border-[#d3c9b3] bg-[#faf7ef] px-2 py-1 text-[13px] text-[#2a2622] outline-none focus:border-[#17399b]"
             />
             <button type="submit" className="cursor-pointer text-[13px] text-[#557694]">
               Add

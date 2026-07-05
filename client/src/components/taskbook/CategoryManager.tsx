@@ -30,7 +30,7 @@ export default function CategoryManager({ categoryOptions }: { categoryOptions: 
   }
 
   return (
-    <div className="rounded-lg border border-[#d3c9b3] bg-white p-2.5">
+    <div className="rounded-lg border border-[#d3c9b3] bg-[#faf7ef] p-2.5">
       <div className="flex flex-col gap-1.5">
         {categoryOptions.map((c) => (
           <div key={c.id} className="flex items-center justify-between gap-2 text-sm text-[#2a2622]">
