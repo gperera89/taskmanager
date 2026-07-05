@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useModalActions } from "./ModalContext";
 import { useTaskbook } from "./store";
-import { Chip, RowDeleteButton } from "./shared";
+import { CheckSquare, Chip, RowDeleteButton, StrikeSweep } from "./shared";
 import type { RoutineItemVM } from "./types";
 
 export default function RoutinesView({
@@ -45,32 +45,33 @@ function RoutineRow({ routine }: { routine: RoutineItemVM }) {
   const { actions } = useTaskbook();
   const [addingStep, setAddingStep] = useState(false);
   const [editingPause, setEditingPause] = useState(false);
+  const [completing, setCompleting] = useState(false);
+
+  function handleToggle() {
+    if (routine.isTicked) {
+      actions.tickRoutine(routine.id);
+      return;
+    }
+    setCompleting(true);
+    actions.tickRoutine(routine.id);
+    window.setTimeout(() => setCompleting(false), 460);
+  }
 
   return (
     <div className="group border-b border-[#e1d8c4] py-3.5">
-      <div className="flex items-center gap-3">
-        <button
-          type="button"
-          onClick={() => actions.tickRoutine(routine.id)}
-          className="flex h-5.5 w-5.5 flex-none cursor-pointer items-center justify-center rounded"
-          style={{
-            border: `1.5px solid ${routine.isTicked ? "#17399b" : "#b3a988"}`,
-            background: routine.isTicked ? "rgba(23,57,155,.06)" : "transparent",
-          }}
-        >
-          {routine.isTicked && (
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-              <path d="M4 13.5 L9.5 18.5 L20 5.5" stroke="#17399b" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          )}
-        </button>
+      <div className="flex items-start gap-3">
+        <CheckSquare action={handleToggle} checked={routine.isTicked} completing={completing} />
         <div className="min-w-0 flex-1 cursor-pointer" onClick={() => openEdit({ mode: "edit", kind: "routine", item: routine })}>
           <div className="flex items-center justify-between gap-2">
             <span
-              className="text-base"
-              style={{ color: routine.isTicked ? "#a49a82" : "#2a2622", textDecoration: routine.isTicked ? "line-through" : "none" }}
+              className="relative text-base leading-5.5"
+              style={{
+                color: routine.isTicked ? "#a49a82" : "#2a2622",
+                textDecoration: routine.isTicked && !completing ? "line-through" : "none",
+              }}
             >
               {routine.title}
+              {completing && <StrikeSweep />}
             </span>
             {routine.scheduleLabel && <Chip>{routine.scheduleLabel}</Chip>}
           </div>

@@ -66,7 +66,6 @@ export type DerivedEntities = {
   activeProjectCount: number;
   routineList: RoutineItemVM[];
   routineTotalCount: number;
-  habitFeatured: HabitCardVM | null;
   habitSuggested: HabitCardVM[];
   habitOnTrack: HabitCardVM[];
   habitAtRiskCount: number;
@@ -246,20 +245,24 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
   // Tasks — grouped by due bucket. Projects/routines/habits aren't categorized work/personal,
   // so the mode filter only narrows the task list (and, below, the calendar).
   const projectNameById = new Map(raw.projects.map((p) => [p.id, p.name]));
-  const grouped = new Map<DueBucket, TaskItemVM[]>();
+  const grouped = new Map<DueBucket, { vm: TaskItemVM; dueMs: number | null }[]>();
   for (const t of raw.tasks) {
     if (!taskMatchesMode(t.category, mode)) continue;
     const vm = toTaskVM(t, projectNameById);
     const b = bucketForDue(t.dueDate ? new Date(t.dueDate) : null, now);
     if (!grouped.has(b)) grouped.set(b, []);
-    grouped.get(b)!.push(vm);
+    grouped.get(b)!.push({ vm, dueMs: t.dueDate ? new Date(t.dueDate).getTime() : null });
+  }
+  // Within each bucket, order chronologically by due date/time rather than DB insertion order.
+  for (const entries of grouped.values()) {
+    entries.sort((a, b) => (a.dueMs ?? Infinity) - (b.dueMs ?? Infinity));
   }
   const taskGroups: TaskGroupVM[] = BUCKET_ORDER.filter((b) => grouped.has(b)).map((b) => ({
     key: b,
     label: bucketLabel(b, now, year, month0, todayDay),
-    tasks: grouped.get(b)!,
+    tasks: grouped.get(b)!.map((e) => e.vm),
   }));
-  const tasksRemainingToday = (grouped.get("today") ?? []).filter((t) => !t.isCompleted).length;
+  const tasksRemainingToday = (grouped.get("today") ?? []).filter((e) => !e.vm.isCompleted).length;
 
   // Projects.
   const tasksByProject = new Map<string, RawTask[]>();
@@ -268,8 +271,12 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
     if (!tasksByProject.has(t.projectId)) tasksByProject.set(t.projectId, []);
     tasksByProject.get(t.projectId)!.push(t);
   }
-  const projectCards: ProjectCardVM[] = raw.projects.map((p) => {
-    const items = tasksByProject.get(p.id) ?? [];
+  const visibleProjects = raw.projects.filter((p) => {
+    if (mode === "all") return true;
+    return (tasksByProject.get(p.id) ?? []).some((t) => taskMatchesMode(t.category, mode));
+  });
+  const projectCards: ProjectCardVM[] = visibleProjects.map((p) => {
+    const items = (tasksByProject.get(p.id) ?? []).filter((t) => taskMatchesMode(t.category, mode));
     const done = items.filter((t) => t.isCompleted).length;
     const total = items.length;
     const progressPct = total ? Math.round((done / total) * 100) : 0;
@@ -288,7 +295,7 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
       tasks,
     };
   });
-  const activeProjectCount = raw.projects.filter((p) => !p.isCompleted).length;
+  const activeProjectCount = visibleProjects.filter((p) => !p.isCompleted).length;
 
   // Routines. "Next notification" always looks strictly past today (see nextRoutineOccurrence's
   // comment) and is computed against the configured timezone's wall-clock "now", matching the
@@ -336,12 +343,14 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
     .map((habit) => {
       const windowDays = habitWindowDays(habit);
       const nowPeriod = habitPeriodIndex(now, windowDays);
+      const lastPeriod = habit.lastCompletedDate ? habitPeriodIndex(new Date(habit.lastCompletedDate), windowDays) : null;
       const periodEndsAt = new Date((nowPeriod + 1) * windowDays * MS_PER_DAY);
-      const isDoneThisPeriod =
-        habit.lastCompletedDate != null &&
-        habitPeriodIndex(new Date(habit.lastCompletedDate), windowDays) === nowPeriod;
+      const isDoneThisPeriod = lastPeriod === nowPeriod;
       const daysRemaining = (periodEndsAt.getTime() - now.getTime()) / MS_PER_DAY;
-      return { habit, daysRemaining, isDoneThisPeriod, atRisk: !isDoneThisPeriod && daysRemaining <= 1 };
+      // Mirrors the streak-reset check in api.ts/store.tsx's markHabitDone: a gap of more than
+      // one period means the streak would reset to 1 on next completion, i.e. it's already broken.
+      const lapsed = !isDoneThisPeriod && (lastPeriod == null || nowPeriod - lastPeriod > 1);
+      return { habit, daysRemaining, isDoneThisPeriod, lapsed, atRisk: !isDoneThisPeriod && daysRemaining <= 1 };
     })
     .sort((a, b) => a.daysRemaining - b.daysRemaining);
 
@@ -367,13 +376,12 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
     currentStreak: hs.habit.currentStreak,
     longestStreak: hs.habit.longestStreak,
     atRisk: hs.atRisk,
+    lapsed: hs.lapsed,
     isDoneThisPeriod: hs.isDoneThisPeriod,
     detailLabel: habitDetailLabel(hs),
   }));
-  const habitFeatured = habitVMs[0] ?? null;
-  const rest = habitVMs.slice(1);
-  const habitSuggested = rest.filter((h) => !h.isDoneThisPeriod);
-  const habitOnTrack = rest.filter((h) => h.isDoneThisPeriod);
+  const habitSuggested = habitVMs.filter((h) => !h.isDoneThisPeriod);
+  const habitOnTrack = habitVMs.filter((h) => h.isDoneThisPeriod);
   const habitAtRiskCount = habitVMs.filter((h) => h.atRisk).length;
 
   // Voice captures (notification panel).
@@ -399,7 +407,6 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
     activeProjectCount,
     routineList,
     routineTotalCount,
-    habitFeatured,
     habitSuggested,
     habitOnTrack,
     habitAtRiskCount,

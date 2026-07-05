@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTaskbook } from "./store";
-import { CheckSquare, RowDeleteButton, labelClass } from "./shared";
+import { AutoGrowTextarea, CheckSquare, RowDeleteButton, StrikeSweep, labelClass, useCompletionHold } from "./shared";
 import RepeatFields from "./RepeatFields";
 import type { CategoryOption, ProjectOption, TaskGroupVM, TaskItemVM } from "./types";
 
@@ -21,13 +21,14 @@ export default function TasksView({
 }) {
   const [showCompleted, setShowCompleted] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+  const { isHeld, hold } = useCompletionHold();
   const q = query.trim().toLowerCase();
 
   const matchesQuery = (t: TaskItemVM) => !q || t.title.toLowerCase().includes(q);
   const filtered = groups
-    .map((g) => ({ ...g, tasks: g.tasks.filter((t) => matchesQuery(t) && !t.isCompleted) }))
+    .map((g) => ({ ...g, tasks: g.tasks.filter((t) => matchesQuery(t) && (!t.isCompleted || isHeld(t.id))) }))
     .filter((g) => g.tasks.length > 0);
-  const completedTasks = groups.flatMap((g) => g.tasks.filter((t) => matchesQuery(t) && t.isCompleted));
+  const completedTasks = groups.flatMap((g) => g.tasks.filter((t) => matchesQuery(t) && t.isCompleted && !isHeld(t.id)));
 
   return (
     <div>
@@ -65,7 +66,7 @@ export default function TasksView({
                 )}
               </div>
               {visibleTasks.map((task) => (
-                <TaskRow key={task.id} task={task} categoryOptions={categoryOptions} projectOptions={projectOptions} />
+                <TaskRow key={task.id} task={task} categoryOptions={categoryOptions} projectOptions={projectOptions} onCompleting={hold} />
               ))}
             </div>
           );
@@ -110,14 +111,28 @@ export function TaskRow({
   task,
   categoryOptions,
   projectOptions,
+  onCompleting,
 }: {
   task: TaskItemVM;
   categoryOptions: CategoryOption[];
   projectOptions: ProjectOption[];
+  onCompleting?: (id: string) => void;
 }) {
   const { actions } = useTaskbook();
   const hasSubtasks = task.subtasksTotal > 0;
   const progressPct = hasSubtasks ? Math.round((task.subtasksDone / task.subtasksTotal) * 100) : 0;
+
+  const [completing, setCompleting] = useState(false);
+  function handleToggle() {
+    if (task.isCompleted) {
+      actions.toggleTask(task.id, task.isCompleted);
+      return;
+    }
+    onCompleting?.(task.id);
+    setCompleting(true);
+    actions.toggleTask(task.id, task.isCompleted);
+    window.setTimeout(() => setCompleting(false), 460);
+  }
 
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState(task.title);
@@ -167,8 +182,8 @@ export function TaskRow({
   }
 
   return (
-    <div className="group flex gap-3.5 border-b border-[#e1d8c4] py-3.5 px-0.5">
-      <CheckSquare action={() => actions.toggleTask(task.id, task.isCompleted)} checked={task.isCompleted} />
+    <div className="group flex items-start gap-3.5 border-b border-[#e1d8c4] py-3.5 px-0.5">
+      <CheckSquare action={handleToggle} checked={task.isCompleted} completing={completing} />
       <div className="min-w-0 flex-1">
         {editingTitle ? (
           <input
@@ -189,16 +204,20 @@ export function TaskRow({
           />
         ) : (
           <div
-            className="cursor-text text-[17px]"
-            style={{ color: task.isCompleted ? "#a49a82" : "#2a2622", textDecoration: task.isCompleted ? "line-through" : "none" }}
+            className="relative cursor-text text-[17px] leading-5.5"
+            style={{
+              color: task.isCompleted ? "#a49a82" : "#2a2622",
+              textDecoration: task.isCompleted && !completing ? "line-through" : "none",
+            }}
             onClick={() => setEditingTitle(true)}
           >
             {task.title}
+            {completing && <StrikeSweep />}
           </div>
         )}
 
         {editingDescription ? (
-          <textarea
+          <AutoGrowTextarea
             autoFocus
             rows={2}
             value={descriptionDraft}

@@ -1,6 +1,6 @@
 "use client";
 
-import { SUPPORTED_TIME_ZONES } from "@/lib/taskbookDates";
+import { formatUtcOffset, getTimeZoneOffsetMs, OTHER_TIME_ZONES, SUPPORTED_TIME_ZONES } from "@/lib/taskbookDates";
 import CategoryManager from "./CategoryManager";
 import NotificationSetup from "./NotificationSetup";
 import type { CategoryOption } from "./types";
@@ -16,6 +16,10 @@ export default function SettingsModal({
   onSetTimeZone: (timeZone: string) => void;
   onClose: () => void;
 }) {
+  const now = new Date();
+  const zoneLabel = (z: { id: string; label: string }) =>
+    `${z.label} (${formatUtcOffset(getTimeZoneOffsetMs(now, z.id))})`;
+
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-[rgba(42,38,34,.35)] p-6" onClick={onClose}>
       <div
@@ -52,10 +56,31 @@ export default function SettingsModal({
                     : { background: "transparent", borderColor: "#d3c9b3", color: "#2a2622" }
                 }
               >
-                {z.label}
+                {zoneLabel(z)}
               </button>
             ))}
           </div>
+          <select
+            value={OTHER_TIME_ZONES.some((z) => z.id === timeZone) ? timeZone : ""}
+            onChange={(e) => {
+              if (e.target.value) onSetTimeZone(e.target.value);
+            }}
+            className="mt-1.5 cursor-pointer rounded-md border px-2.5 py-1 text-xs"
+            style={
+              OTHER_TIME_ZONES.some((z) => z.id === timeZone)
+                ? { background: "#17399b", borderColor: "#17399b", color: "#fff" }
+                : { background: "transparent", borderColor: "#d3c9b3", color: "#2a2622" }
+            }
+          >
+            <option value="" disabled>
+              More timezones…
+            </option>
+            {OTHER_TIME_ZONES.map((z) => (
+              <option key={z.id} value={z.id}>
+                {zoneLabel(z)}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className="mt-4 flex flex-col gap-1.5">

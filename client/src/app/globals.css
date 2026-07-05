@@ -29,3 +29,61 @@ select option {
   background-color: #faf7ef;
   color: #2a2622;
 }
+
+@keyframes flame-ignite {
+  0% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 0 rgba(23, 57, 155, 0));
+  }
+  35% {
+    transform: scale(1.4);
+    filter: drop-shadow(0 0 8px rgba(23, 57, 155, 0.8)) brightness(1.5);
+  }
+  100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 3px rgba(23, 57, 155, 0.45));
+  }
+}
+
+@keyframes flame-flicker {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.72;
+    transform: scale(0.92);
+  }
+}
+
+@keyframes quote-fade {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Pen-drawn tick + strike-through cue played once on the transition to completed, before a
+   row disappears (or settles into its static completed style) — see CheckSquare/StrikeSweep. */
+@keyframes check-draw {
+  from {
+    stroke-dashoffset: 26;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes strike-draw {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}

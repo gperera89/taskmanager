@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { AreaKey, CapturedKind, HabitCardVM, ItemKind, ModalState } from "./types";
+import type { AreaKey, CapturedKind, ItemKind, ModalState } from "./types";
 import { deriveCalendarView } from "@/lib/derive";
 import { useTaskbook } from "./store";
 import { ModalContext } from "./ModalContext";
@@ -141,9 +141,7 @@ export default function TaskbookApp() {
       const item = data.routineList.find((r) => r.id === entityId);
       if (item) setModal({ mode: "edit", kind: "routine", item });
     } else if (kind === "habit") {
-      const all = [data.habitFeatured, ...data.habitSuggested, ...data.habitOnTrack].filter(
-        (h): h is HabitCardVM => h != null
-      );
+      const all = [...data.habitSuggested, ...data.habitOnTrack];
       const item = all.find((h) => h.id === entityId);
       if (item) setModal({ mode: "edit", kind: "habit", item });
     }
@@ -209,7 +207,6 @@ export default function TaskbookApp() {
       case "habits":
         return (
           <HabitsView
-            featured={data.habitFeatured}
             suggested={data.habitSuggested}
             onTrack={data.habitOnTrack}
             atRiskCount={data.habitAtRiskCount}
@@ -249,6 +246,7 @@ export default function TaskbookApp() {
           pendingCaptures={data.pendingCaptures}
           onEditCapture={openEditForCapture}
           onOpenSettings={() => setSettingsOpen(true)}
+          isMobile={isMobile}
         />
 
         {isMobile ? (

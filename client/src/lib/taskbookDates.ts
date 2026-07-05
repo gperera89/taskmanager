@@ -71,10 +71,35 @@ export const CHINA_TIME_ZONE = "Asia/Shanghai";
 export const DEFAULT_TIME_ZONE = CHINA_TIME_ZONE;
 
 export const SUPPORTED_TIME_ZONES: { id: string; label: string }[] = [
-  { id: CHINA_TIME_ZONE, label: "China" },
+  { id: CHINA_TIME_ZONE, label: "Shanghai" },
   { id: "Australia/Melbourne", label: "Melbourne" },
   { id: "Australia/Brisbane", label: "Brisbane" },
   { id: "Pacific/Auckland", label: "Auckland" },
+];
+
+// Less-frequently-needed zones for travel — surfaced via a dropdown rather than the main row of
+// buttons, so the common four stay one tap away while these stay reachable without cluttering it.
+export const OTHER_TIME_ZONES: { id: string; label: string }[] = [
+  { id: "Australia/Perth", label: "Perth" },
+  { id: "Asia/Singapore", label: "Singapore" },
+  { id: "Asia/Hong_Kong", label: "Hong Kong" },
+  { id: "Asia/Tokyo", label: "Tokyo" },
+  { id: "Asia/Seoul", label: "Seoul" },
+  { id: "Asia/Bangkok", label: "Bangkok" },
+  { id: "Asia/Jakarta", label: "Jakarta" },
+  { id: "Asia/Manila", label: "Manila" },
+  { id: "Asia/Kolkata", label: "India" },
+  { id: "Asia/Dubai", label: "Dubai" },
+  { id: "Europe/London", label: "London" },
+  { id: "Europe/Paris", label: "Paris" },
+  { id: "Europe/Berlin", label: "Berlin" },
+  { id: "Europe/Moscow", label: "Moscow" },
+  { id: "America/New_York", label: "New York" },
+  { id: "America/Chicago", label: "Chicago" },
+  { id: "America/Denver", label: "Denver" },
+  { id: "America/Los_Angeles", label: "Los Angeles" },
+  { id: "America/Sao_Paulo", label: "São Paulo" },
+  { id: "Pacific/Honolulu", label: "Honolulu" },
 ];
 
 // A zone's real (DST-aware) UTC offset, in ms, at a given instant — the standard
@@ -100,6 +125,17 @@ export function getTimeZoneOffsetMs(at: Date, timeZone: string): number {
     Number(parts.second)
   );
   return asUTC - at.getTime();
+}
+
+// "UTC+8" / "UTC-4:30" — for labelling zone pickers. Takes an offset (not a zone id) so callers
+// that already have one from getTimeZoneOffsetMs don't recompute it.
+export function formatUtcOffset(offsetMs: number): string {
+  const totalMinutes = Math.round(offsetMs / 60_000);
+  const sign = totalMinutes < 0 ? "-" : "+";
+  const abs = Math.abs(totalMinutes);
+  const hh = Math.floor(abs / 60);
+  const mm = abs % 60;
+  return `UTC${sign}${hh}${mm ? `:${String(mm).padStart(2, "0")}` : ""}`;
 }
 
 // A Date whose UTC getters read as the current wall clock in `timeZone` — generalizes the old

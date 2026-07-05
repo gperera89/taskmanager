@@ -61,6 +61,7 @@ export type HabitCardVM = {
   currentStreak: number;
   longestStreak: number;
   atRisk: boolean;
+  lapsed: boolean;
   isDoneThisPeriod: boolean;
   detailLabel: string;
 };
@@ -131,7 +132,6 @@ export type TaskbookData = {
   activeProjectCount: number;
   routineList: RoutineItemVM[]; // chronological by next occurrence
   routineTotalCount: number;
-  habitFeatured: HabitCardVM | null;
   habitSuggested: HabitCardVM[];
   habitOnTrack: HabitCardVM[];
   habitAtRiskCount: number;

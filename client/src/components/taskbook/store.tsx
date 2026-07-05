@@ -70,7 +70,6 @@ export type ServerCalendarData = Omit<
   | "activeProjectCount"
   | "routineList"
   | "routineTotalCount"
-  | "habitFeatured"
   | "habitSuggested"
   | "habitOnTrack"
   | "habitAtRiskCount"

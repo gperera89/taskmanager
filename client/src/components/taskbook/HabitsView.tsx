@@ -1,32 +1,36 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useModalActions } from "./ModalContext";
 import { useTaskbook } from "./store";
 import { RowDeleteButton, labelClass } from "./shared";
 import type { HabitCardVM } from "./types";
 
+// From James Clear's Atomic Habits — rotated in the space the "up next" card used to occupy
+// (that card always ended up pinned to a daily habit, since a daily period is always the
+// soonest to expire, so it never actually rotated to anything else).
+const HABIT_QUOTES = [
+  "You should be far more concerned with your current trajectory than with your current results.",
+  "Habits are the compound interest of self-improvement.",
+  "Every action you take is a vote for the type of person you wish to become.",
+  "Success is the product of daily habits—not once-in-a-lifetime transformations.",
+];
+
 export default function HabitsView({
-  featured,
   suggested,
   onTrack,
   atRiskCount,
   query,
 }: {
-  featured: HabitCardVM | null;
   suggested: HabitCardVM[];
   onTrack: HabitCardVM[];
   atRiskCount: number;
   query: string;
 }) {
-  const { actions } = useTaskbook();
-  const { openEdit } = useModalActions();
-  const [skippedId, setSkippedId] = useState<string | null>(null);
   const q = query.trim().toLowerCase();
-  const showFeatured = featured && featured.id !== skippedId && (!q || featured.title.toLowerCase().includes(q));
   const filteredSuggested = q ? suggested.filter((h) => h.title.toLowerCase().includes(q)) : suggested;
   const filteredOnTrack = q ? onTrack.filter((h) => h.title.toLowerCase().includes(q)) : onTrack;
-  const isEmpty = !featured && suggested.length === 0 && onTrack.length === 0;
+  const isEmpty = suggested.length === 0 && onTrack.length === 0;
 
   return (
     <div>
@@ -39,40 +43,7 @@ export default function HabitsView({
       {isEmpty && <p className="py-8 text-[15px] italic text-[#a49a82]">Nothing here yet.</p>}
 
       <div className="max-w-[920px]">
-        {showFeatured && featured && (
-          <div
-            className="group flex items-center justify-between gap-6 rounded-xl px-6 py-5"
-            style={{ border: featured.atRisk ? "1.5px solid #17399b" : "1.5px solid #e1d8c4" }}
-          >
-            <div
-              className="min-w-0 cursor-pointer"
-              onClick={() => openEdit({ mode: "edit", kind: "habit", item: featured })}
-            >
-              <div className={labelClass} style={{ color: featured.atRisk ? "#17399b" : "#8a8069" }}>
-                {featured.atRisk ? "Keep the streak" : "Up next"}
-              </div>
-              <div className="mt-1.5 text-[22px] text-[#2a2622]">{featured.title}</div>
-              <div className="mt-0.5 text-sm italic text-[#8a8069]">{featured.detailLabel}</div>
-            </div>
-            <div className="flex flex-none items-center gap-2.5">
-              <button
-                type="button"
-                onClick={() => actions.markHabitDone(featured.id)}
-                className="cursor-pointer rounded-full bg-[#17399b] px-5 py-2 text-sm text-white"
-              >
-                Done today
-              </button>
-              <button
-                type="button"
-                onClick={() => setSkippedId(featured.id)}
-                className="cursor-pointer rounded-full border border-[#c3b9a1] px-5 py-2 text-sm text-[#557694]"
-              >
-                Skip
-              </button>
-              <RowDeleteButton action={() => actions.removeHabit(featured.id)} />
-            </div>
-          </div>
-        )}
+        {!q && <HabitsQuoteBanner />}
 
         <div className="mt-6.5 grid grid-cols-1 gap-11 lg:grid-cols-2">
           {filteredSuggested.length > 0 && (
@@ -97,6 +68,22 @@ export default function HabitsView({
   );
 }
 
+function HabitsQuoteBanner() {
+  const [index, setIndex] = useState(() => Math.floor(Math.random() * HABIT_QUOTES.length));
+  useEffect(() => {
+    const id = setInterval(() => setIndex((i) => (i + 1) % HABIT_QUOTES.length), 9000);
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <div className="mb-6.5 rounded-xl px-6 py-5" style={{ border: "1.5px solid #e1d8c4" }}>
+      <div key={index} className="text-[17px] italic text-[#5c5546] animate-[quote-fade_0.6s_ease]">
+        “{HABIT_QUOTES[index]}”
+      </div>
+      <div className="mt-1.5 text-[11px] uppercase tracking-[0.16em] text-[#a49a82]">James Clear · Atomic Habits</div>
+    </div>
+  );
+}
+
 function HabitRow({ habit }: { habit: HabitCardVM }) {
   const { openEdit } = useModalActions();
   const { actions } = useTaskbook();
@@ -107,12 +94,63 @@ function HabitRow({ habit }: { habit: HabitCardVM }) {
         <div className="mt-0.5 text-xs text-[#8a8069]">{habit.detailLabel}</div>
       </div>
       <div className="flex flex-none items-center gap-3">
-        <div className="text-right">
-          <div className="text-[17px] font-semibold text-[#557694]">{habit.currentStreak}</div>
-          <div className="text-[9px] uppercase tracking-[0.16em] text-[#a49a82]">streak</div>
-        </div>
+        <HabitFlameButton habit={habit} />
         <RowDeleteButton action={() => actions.removeHabit(habit.id)} />
       </div>
     </div>
+  );
+}
+
+// Mask-based icon (rather than an inline path) so it stays in sync with, and recolors/animates
+// from, the flame asset in /public — "lit" (steady or flickering, blue) vs "lapsed" (grey, out).
+function HabitFlameButton({ habit }: { habit: HabitCardVM }) {
+  const { actions } = useTaskbook();
+  const [igniting, setIgniting] = useState(false);
+
+  function handleComplete() {
+    if (habit.isDoneThisPeriod) return;
+    actions.markHabitDone(habit.id);
+    setIgniting(true);
+    window.setTimeout(() => setIgniting(false), 650);
+  }
+
+  const status: "lit" | "flicker" | "out" = habit.lapsed ? "out" : habit.atRisk ? "flicker" : "lit";
+  const color = status === "out" ? "#c3b9a1" : "#17399b";
+  const animationClass = igniting
+    ? "animate-[flame-ignite_0.6s_ease]"
+    : status === "flicker"
+      ? "animate-[flame-flicker_1.8s_ease-in-out_infinite]"
+      : "";
+
+  return (
+    <button
+      type="button"
+      onClick={handleComplete}
+      disabled={habit.isDoneThisPeriod}
+      title={habit.isDoneThisPeriod ? "Done for this period" : "Mark done"}
+      aria-label={habit.isDoneThisPeriod ? "Habit completed" : "Mark habit done"}
+      className={`flex flex-none items-center justify-center rounded-full p-1 transition-transform ${
+        habit.isDoneThisPeriod ? "cursor-default" : "cursor-pointer hover:scale-110"
+      }`}
+    >
+      <span
+        aria-hidden
+        className={animationClass}
+        style={{
+          display: "block",
+          width: 24,
+          height: 24,
+          backgroundColor: color,
+          opacity: status === "out" ? 0.55 : 1,
+          filter: status === "out" ? undefined : "drop-shadow(0 0 3px rgba(23,57,155,.45))",
+          WebkitMaskImage: "url(/mode_heat_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg)",
+          maskImage: "url(/mode_heat_24dp_1F1F1F_FILL0_wght400_GRAD0_opsz24.svg)",
+          WebkitMaskRepeat: "no-repeat",
+          maskRepeat: "no-repeat",
+          WebkitMaskSize: "contain",
+          maskSize: "contain",
+        }}
+      />
+    </button>
   );
 }

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { todayInputValue } from "@/lib/taskbookDates";
 import { useTaskbook } from "./store";
 import { parseTaskForm } from "./formParse";
-import { Chip, RowDeleteButton, labelClass } from "./shared";
+import { AutoGrowTextarea, Chip, RowDeleteButton, labelClass, useCompletionHold } from "./shared";
 import { TaskRow } from "./TasksView";
 import type { CategoryOption, ProjectCardVM, ProjectOption } from "./types";
 
@@ -94,6 +94,7 @@ function ProjectCard({
   projectOptions: ProjectOption[];
 }) {
   const { actions } = useTaskbook();
+  const { isHeld, hold } = useCompletionHold();
   const [editingName, setEditingName] = useState(false);
   const [editingDescription, setEditingDescription] = useState(false);
   const [editingDueDate, setEditingDueDate] = useState(false);
@@ -102,7 +103,11 @@ function ProjectCard({
   const cycleViewMode = () =>
     setViewMode((mode) => VIEW_MODES[(VIEW_MODES.indexOf(mode) + 1) % VIEW_MODES.length]);
   const visibleTasks =
-    viewMode === "none" ? [] : viewMode === "unchecked" ? project.tasks.filter((t) => !t.isCompleted) : project.tasks;
+    viewMode === "none"
+      ? []
+      : viewMode === "unchecked"
+        ? project.tasks.filter((t) => !t.isCompleted || isHeld(t.id))
+        : project.tasks;
 
   return (
     <div className="group rounded-xl border border-[#e1d8c4] bg-[#f2ecdf] px-5.5 pb-5 pt-5.5">
@@ -153,7 +158,7 @@ function ProjectCard({
           }}
           className="mt-1.5"
         >
-          <textarea
+          <AutoGrowTextarea
             name="description"
             rows={2}
             autoFocus
@@ -207,7 +212,7 @@ function ProjectCard({
       </div>
       <div className="flex flex-col gap-3">
         {visibleTasks.map((item) => (
-          <TaskRow key={item.id} task={item} categoryOptions={categoryOptions} projectOptions={projectOptions} />
+          <TaskRow key={item.id} task={item} categoryOptions={categoryOptions} projectOptions={projectOptions} onCompleting={hold} />
         ))}
         {viewMode === "none" && project.total > 0 && (
           <div className="pl-8 text-[13px] italic text-[#a49a82]">{project.total} tasks hidden</div>

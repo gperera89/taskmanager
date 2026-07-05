@@ -34,7 +34,10 @@ export default async function RootLayout({
       <body className="flex h-screen flex-col overflow-hidden font-serif bg-[#efe9dc]">
         {session?.user && (
           <div className="flex flex-none items-center justify-end gap-3 border-b border-[#ddd4c1] bg-[#e6ded0] px-6 py-2.5 text-xs text-[#8a8069]">
-            <span>{session.user.name ?? session.user.email}</span>
+            {/* Filled via portal by Header.tsx on mobile, where settings/notifications/mode
+                toggle would otherwise overflow off-screen alongside the search bar. */}
+            <div id="mobile-top-actions" className="flex items-center gap-2 lg:hidden" />
+            <span className="hidden lg:inline">{session.user.name ?? session.user.email}</span>
             <form
               action={async () => {
                 "use server";

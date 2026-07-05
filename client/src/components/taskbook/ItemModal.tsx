@@ -14,6 +14,7 @@ import {
 } from "./formParse";
 import CategoryManager from "./CategoryManager";
 import RepeatFields from "./RepeatFields";
+import { AutoGrowTextarea } from "./shared";
 import type { CategoryOption, HabitCardVM, ModalState, ProjectCardVM, ProjectOption, RoutineItemVM } from "./types";
 
 const inputClass =
@@ -220,7 +221,7 @@ function TaskForm({
       <div>
         <label className={labelTextClass}>Description</label>
         {shared ? (
-          <textarea
+          <AutoGrowTextarea
             name="description"
             rows={2}
             value={shared.descriptionValue}
@@ -228,7 +229,7 @@ function TaskForm({
             className={inputClass}
           />
         ) : (
-          <textarea name="description" rows={2} className={inputClass} />
+          <AutoGrowTextarea name="description" rows={2} className={inputClass} />
         )}
       </div>
       <div className="flex flex-wrap gap-3">
@@ -300,7 +301,7 @@ function ProjectForm({
       <div>
         <label className={labelTextClass}>Description</label>
         {shared ? (
-          <textarea
+          <AutoGrowTextarea
             name="description"
             rows={2}
             value={shared.descriptionValue}
@@ -308,7 +309,7 @@ function ProjectForm({
             className={inputClass}
           />
         ) : (
-          <textarea name="description" rows={2} defaultValue={item?.description ?? ""} className={inputClass} />
+          <AutoGrowTextarea name="description" rows={2} defaultValue={item?.description ?? ""} className={inputClass} />
         )}
       </div>
       <div>

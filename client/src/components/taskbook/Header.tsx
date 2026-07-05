@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { useModalActions } from "./ModalContext";
 import ModeToggle from "./ModeToggle";
@@ -28,6 +29,7 @@ export default function Header({
   pendingCaptures,
   onEditCapture,
   onOpenSettings,
+  isMobile,
 }: {
   todayLabel: string;
   query: string;
@@ -35,17 +37,29 @@ export default function Header({
   pendingCaptures: VoiceCaptureVM[];
   onEditCapture: (kind: CapturedKind, entityId: string) => void;
   onOpenSettings: () => void;
+  isMobile: boolean;
 }) {
   const router = useRouter();
   const { openAdd } = useModalActions();
   const { actions, mode, setMode } = useTaskbook();
   const [showNotif, setShowNotif] = useState(false);
+  // On mobile, settings/notifications/mode toggle are portaled into the sign-out bar in
+  // layout.tsx (top-right) instead of rendered here, since they'd otherwise overflow off-screen
+  // alongside the search bar below the lg breakpoint.
+  const [mobileActionsEl, setMobileActionsEl] = useState<HTMLElement | null>(null);
   const [listening, setListening] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [captureError, setCaptureError] = useState<string | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
   const notifRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    // One-time DOM query for the portal target rendered by layout.tsx, which exists before
+    // this component mounts — not syncing to changing external state.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMobileActionsEl(document.getElementById("mobile-top-actions"));
+  }, []);
 
   useEffect(() => {
     if (!showNotif) return;
@@ -111,6 +125,58 @@ export default function Header({
     actions.dismissCapture(capture.id);
   }
 
+  // Shared between the desktop layout (rendered inline, after the search bar) and mobile
+  // (portaled into the sign-out bar in layout.tsx) — only one of those spots renders it at a time.
+  const actionsCluster = (
+    <>
+      <ModeToggle mode={mode} onChange={setMode} />
+
+      <button
+        type="button"
+        title="Settings"
+        onClick={onOpenSettings}
+        className="flex h-9 w-9 cursor-pointer items-center justify-center"
+      >
+        <svg width="18" height="18" viewBox="0 -960 960 960" fill="#557694">
+          <path d="m370-80-16-128q-13-5-24.5-12T307-235l-119 50L78-375l103-78q-1-7-1-13.5v-27q0-6.5 1-13.5L78-585l110-190 119 50q11-8 23-15t24-12l16-128h220l16 128q13 5 24.5 12t22.5 15l119-50 110 190-103 78q1 7 1 13.5v27q0 6.5-2 13.5l103 78-110 190-118-50q-11 8-23 15t-24 12L590-80H370Zm70-80h79l14-106q31-8 57.5-23.5T639-327l99 41 39-68-86-65q5-14 7-29.5t2-31.5q0-16-2-31.5t-7-29.5l86-65-39-68-99 42q-22-23-48.5-38.5T533-694l-13-106h-79l-14 106q-31 8-57.5 23.5T321-633l-99-41-39 68 86 64q-5 15-7 30t-2 32q0 16 2 31t7 30l-86 65 39 68 99-42q22 23 48.5 38.5T427-266l13 106Zm42-180q58 0 99-41t41-99q0-58-41-99t-99-41q-59 0-99.5 41T342-480q0 58 40.5 99t99.5 41Zm-2-140Z" />
+        </svg>
+      </button>
+
+      <div className="relative" ref={notifRef}>
+        <button
+          type="button"
+          onClick={() => setShowNotif((v) => !v)}
+          className="relative flex h-9 w-9 cursor-pointer items-center justify-center"
+        >
+          {pendingCaptures.length > 0 ? (
+            <svg width="19" height="19" viewBox="0 -960 960 960" fill="#557694">
+              <path d="M480-80q-33 0-56.5-23.5T400-160h160q0 33-23.5 56.5T480-80Zm0-420ZM160-200v-80h80v-280q0-83 50-147.5T420-792v-28q0-25 17.5-42.5T480-880q25 0 42.5 17.5T540-820v13q-11 22-16 45t-4 47q-10-2-19.5-3.5T480-720q-66 0-113 47t-47 113v280h320v-257q18 8 38.5 12.5T720-520v240h80v80H160Zm475-435q-35-35-35-85t35-85q35-35 85-35t85 35q35 35 35 85t-35 85q-35 35-85 35t-85-35Z" />
+            </svg>
+          ) : (
+            <svg width="19" height="19" viewBox="0 -960 960 960" fill="#557694">
+              <path d="M160-200v-80h80v-280q0-83 50-147.5T420-792v-28q0-25 17.5-42.5T480-880q25 0 42.5 17.5T540-820v28q80 20 130 84.5T720-560v280h80v80H160Zm320-300Zm0 420q-33 0-56.5-23.5T400-160h160q0 33-23.5 56.5T480-80ZM320-280h320v-280q0-66-47-113t-113-47q-66 0-113 47t-47 113v280Z" />
+            </svg>
+          )}
+        </button>
+        {showNotif && (
+          <div className="absolute right-0 top-[46px] z-30 w-[330px] rounded-xl border border-[#ddd4c1] bg-[#faf7ef] p-4 shadow-[0_16px_40px_rgba(70,55,30,.22)]">
+            <div className="mb-1 text-[11px] uppercase tracking-[0.16em] text-[#a49a82]">Added by voice</div>
+            <div className="mb-2.5 text-xs italic text-[#a49a82]">Filed automatically — check it landed right.</div>
+            {pendingCaptures.length === 0 ? (
+              <div className="py-3.5 text-sm italic text-[#a49a82]">All caught up.</div>
+            ) : (
+              <div className="flex max-h-80 flex-col gap-2.5 overflow-y-auto">
+                {pendingCaptures.map((c) => (
+                  <CapturedItem key={c.id} capture={c} onEdit={handleEditCapture} />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </>
+  );
+
   return (
     <div className="flex flex-none items-center justify-between border-b border-[#ddd4c1] px-8 py-4">
       <div className="relative flex items-center gap-3">
@@ -157,7 +223,7 @@ export default function Header({
 
       </div>
 
-      <div className="flex items-center gap-4">
+      <div className="hidden items-center gap-4 lg:flex">
         <div className="flex w-65 items-center gap-2 rounded-full border border-[#d3c9b3] px-3.5 py-1.5 text-[#a49a82]">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" className="flex-none">
             <circle cx="11" cy="11" r="7" stroke="#b3a988" strokeWidth="1.6" />
@@ -173,52 +239,10 @@ export default function Header({
 
         <span className="text-[13px] text-[#8a8069]">{todayLabel}</span>
 
-        <ModeToggle mode={mode} onChange={setMode} />
-
-        <button
-          type="button"
-          title="Settings"
-          onClick={onOpenSettings}
-          className="flex h-9 w-9 cursor-pointer items-center justify-center"
-        >
-          <svg width="18" height="18" viewBox="0 -960 960 960" fill="#557694">
-            <path d="m370-80-16-128q-13-5-24.5-12T307-235l-119 50L78-375l103-78q-1-7-1-13.5v-27q0-6.5 1-13.5L78-585l110-190 119 50q11-8 23-15t24-12l16-128h220l16 128q13 5 24.5 12t22.5 15l119-50 110 190-103 78q1 7 1 13.5v27q0 6.5-2 13.5l103 78-110 190-118-50q-11 8-23 15t-24 12L590-80H370Zm70-80h79l14-106q31-8 57.5-23.5T639-327l99 41 39-68-86-65q5-14 7-29.5t2-31.5q0-16-2-31.5t-7-29.5l86-65-39-68-99 42q-22-23-48.5-38.5T533-694l-13-106h-79l-14 106q-31 8-57.5 23.5T321-633l-99-41-39 68 86 64q-5 15-7 30t-2 32q0 16 2 31t7 30l-86 65 39 68 99-42q22 23 48.5 38.5T427-266l13 106Zm42-180q58 0 99-41t41-99q0-58-41-99t-99-41q-59 0-99.5 41T342-480q0 58 40.5 99t99.5 41Zm-2-140Z" />
-          </svg>
-        </button>
-
-        <div className="relative" ref={notifRef}>
-          <button
-            type="button"
-            onClick={() => setShowNotif((v) => !v)}
-            className="relative flex h-9 w-9 cursor-pointer items-center justify-center"
-          >
-            {pendingCaptures.length > 0 ? (
-              <svg width="19" height="19" viewBox="0 -960 960 960" fill="#557694">
-                <path d="M480-80q-33 0-56.5-23.5T400-160h160q0 33-23.5 56.5T480-80Zm0-420ZM160-200v-80h80v-280q0-83 50-147.5T420-792v-28q0-25 17.5-42.5T480-880q25 0 42.5 17.5T540-820v13q-11 22-16 45t-4 47q-10-2-19.5-3.5T480-720q-66 0-113 47t-47 113v280h320v-257q18 8 38.5 12.5T720-520v240h80v80H160Zm475-435q-35-35-35-85t35-85q35-35 85-35t85 35q35 35 35 85t-35 85q-35 35-85 35t-85-35Z" />
-              </svg>
-            ) : (
-              <svg width="19" height="19" viewBox="0 -960 960 960" fill="#557694">
-                <path d="M160-200v-80h80v-280q0-83 50-147.5T420-792v-28q0-25 17.5-42.5T480-880q25 0 42.5 17.5T540-820v28q80 20 130 84.5T720-560v280h80v80H160Zm320-300Zm0 420q-33 0-56.5-23.5T400-160h160q0 33-23.5 56.5T480-80ZM320-280h320v-280q0-66-47-113t-113-47q-66 0-113 47t-47 113v280Z" />
-              </svg>
-            )}
-          </button>
-          {showNotif && (
-            <div className="absolute right-0 top-[46px] z-30 w-[330px] rounded-xl border border-[#ddd4c1] bg-[#faf7ef] p-4 shadow-[0_16px_40px_rgba(70,55,30,.22)]">
-              <div className="mb-1 text-[11px] uppercase tracking-[0.16em] text-[#a49a82]">Added by voice</div>
-              <div className="mb-2.5 text-xs italic text-[#a49a82]">Filed automatically — check it landed right.</div>
-              {pendingCaptures.length === 0 ? (
-                <div className="py-3.5 text-sm italic text-[#a49a82]">All caught up.</div>
-              ) : (
-                <div className="flex max-h-80 flex-col gap-2.5 overflow-y-auto">
-                  {pendingCaptures.map((c) => (
-                    <CapturedItem key={c.id} capture={c} onEdit={handleEditCapture} />
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+        {!isMobile && actionsCluster}
       </div>
+
+      {isMobile && mobileActionsEl && createPortal(actionsCluster, mobileActionsEl)}
     </div>
   );
 }
