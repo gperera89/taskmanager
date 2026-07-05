@@ -181,18 +181,8 @@ export default function Header({
           onClick={onOpenSettings}
           className="flex h-9 w-9 cursor-pointer items-center justify-center"
         >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-            <path
-              d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"
-              stroke="#557694"
-              strokeWidth="1.6"
-            />
-            <path
-              d="M19.4 13.5c.1-.5.1-1 0-1.5l1.6-1.4-1.5-2.6-2 .6a7.6 7.6 0 0 0-1.3-.75L15.8 6h-3l-.4 2c-.47.19-.9.44-1.3.75l-2-.6-1.5 2.6 1.6 1.4c-.1.5-.1 1 0 1.5l-1.6 1.4 1.5 2.6 2-.6c.4.3.83.55 1.3.75l.4 2h3l.4-2c.47-.2.9-.45 1.3-.75l2 .6 1.5-2.6-1.6-1.4Z"
-              stroke="#557694"
-              strokeWidth="1.6"
-              strokeLinejoin="round"
-            />
+          <svg width="18" height="18" viewBox="0 -960 960 960" fill="#557694">
+            <path d="m370-80-16-128q-13-5-24.5-12T307-235l-119 50L78-375l103-78q-1-7-1-13.5v-27q0-6.5 1-13.5L78-585l110-190 119 50q11-8 23-15t24-12l16-128h220l16 128q13 5 24.5 12t22.5 15l119-50 110 190-103 78q1 7 1 13.5v27q0 6.5-2 13.5l103 78-110 190-118-50q-11 8-23 15t-24 12L590-80H370Zm70-80h79l14-106q31-8 57.5-23.5T639-327l99 41 39-68-86-65q5-14 7-29.5t2-31.5q0-16-2-31.5t-7-29.5l86-65-39-68-99 42q-22-23-48.5-38.5T533-694l-13-106h-79l-14 106q-31 8-57.5 23.5T321-633l-99-41-39 68 86 64q-5 15-7 30t-2 32q0 16 2 31t7 30l-86 65 39 68 99-42q22 23 48.5 38.5T427-266l13 106Zm42-180q58 0 99-41t41-99q0-58-41-99t-99-41q-59 0-99.5 41T342-480q0 58 40.5 99t99.5 41Zm-2-140Z" />
           </svg>
         </button>
 
@@ -202,17 +192,14 @@ export default function Header({
             onClick={() => setShowNotif((v) => !v)}
             className="relative flex h-9 w-9 cursor-pointer items-center justify-center"
           >
-            <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
-              <path
-                d="M6 9a6 6 0 1 1 12 0c0 4 1.5 5 2 6H4c.5-1 2-2 2-6Z"
-                stroke="#557694"
-                strokeWidth="1.6"
-                strokeLinejoin="round"
-              />
-              <path d="M10 20a2 2 0 0 0 4 0" stroke="#557694" strokeWidth="1.6" strokeLinecap="round" />
-            </svg>
-            {pendingCaptures.length > 0 && (
-              <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-[#17399b]" />
+            {pendingCaptures.length > 0 ? (
+              <svg width="19" height="19" viewBox="0 -960 960 960" fill="#557694">
+                <path d="M480-80q-33 0-56.5-23.5T400-160h160q0 33-23.5 56.5T480-80Zm0-420ZM160-200v-80h80v-280q0-83 50-147.5T420-792v-28q0-25 17.5-42.5T480-880q25 0 42.5 17.5T540-820v13q-11 22-16 45t-4 47q-10-2-19.5-3.5T480-720q-66 0-113 47t-47 113v280h320v-257q18 8 38.5 12.5T720-520v240h80v80H160Zm475-435q-35-35-35-85t35-85q35-35 85-35t85 35q35 35 35 85t-35 85q-35 35-85 35t-85-35Z" />
+              </svg>
+            ) : (
+              <svg width="19" height="19" viewBox="0 -960 960 960" fill="#557694">
+                <path d="M160-200v-80h80v-280q0-83 50-147.5T420-792v-28q0-25 17.5-42.5T480-880q25 0 42.5 17.5T540-820v28q80 20 130 84.5T720-560v280h80v80H160Zm320-300Zm0 420q-33 0-56.5-23.5T400-160h160q0 33-23.5 56.5T480-80ZM320-280h320v-280q0-66-47-113t-113-47q-66 0-113 47t-47 113v280Z" />
+              </svg>
             )}
           </button>
           {showNotif && (
