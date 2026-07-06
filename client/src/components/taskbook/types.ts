@@ -148,10 +148,10 @@ export type TaskbookData = {
 export type AreaKey = "tasks" | "projects" | "routines" | "habits" | "calendar" | "day";
 
 // Global visibility filter (top-right toggle): which calendar(s)/tasks are shown. "work"/
-// "personal" match against Task.category (case-insensitively) and the ICS event's `source`
-// label ("Outlook" is the YCIS work calendar, "Gmail" is the personal one) — see deriveEntities/
+// "home" match against Task.category (case-insensitively) and the ICS event's `source`
+// label ("Outlook" is the YCIS work calendar, "Gmail" is the home one) — see deriveEntities/
 // deriveCalendarView in lib/derive.ts.
-export type Mode = "work" | "personal" | "all";
+export type Mode = "work" | "home" | "all";
 
 export type ItemKind = "task" | "project" | "routine" | "habit";
 

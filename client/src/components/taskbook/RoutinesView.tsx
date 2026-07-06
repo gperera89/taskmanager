@@ -20,18 +20,18 @@ export default function RoutinesView({
 
   return (
     <div>
-      <div className="flex items-end justify-between">
+      <div className="flex max-w-[680px] items-end justify-between">
         <div className="font-script text-[62px] leading-[0.8] text-[#2a2622]">Routines</div>
         <div className="pb-2.5 text-[13px] text-[#8a8069]">{total} total</div>
       </div>
-      <div className="my-5 mb-6 h-px bg-[#d5cbb4]" />
+      <div className="my-5 mb-6 h-px max-w-[680px] bg-[#d5cbb4]" />
 
       {total === 0 && <p className="py-8 text-[15px] italic text-[#a49a82]">Nothing here yet.</p>}
       {total > 0 && filtered.length === 0 && (
         <p className="py-8 text-[15px] italic text-[#a49a82]">No routines match your search.</p>
       )}
 
-      <div className="max-w-140">
+      <div className="max-w-[680px]">
         {filtered.map((r) => (
           <RoutineRow key={r.id} routine={r} />
         ))}
@@ -46,15 +46,32 @@ function RoutineRow({ routine }: { routine: RoutineItemVM }) {
   const [addingStep, setAddingStep] = useState(false);
   const [editingPause, setEditingPause] = useState(false);
   const [completing, setCompleting] = useState(false);
+  // Purely local scratch state so the user can tick off steps through the day — steps always
+  // complete together in the database (see completeRoutineCluster), so there's nothing per-step
+  // to persist. Cleared whenever the routine itself un-ticks (manual toggle or the hourly
+  // auto-reset), ready for the next occurrence.
+  const [stepChecks, setStepChecks] = useState<Record<string, boolean>>({});
 
   function handleToggle() {
     if (routine.isTicked) {
       actions.tickRoutine(routine.id);
+      setStepChecks({});
       return;
     }
     setCompleting(true);
     actions.tickRoutine(routine.id);
     window.setTimeout(() => setCompleting(false), 460);
+  }
+
+  function isStepChecked(id: string) {
+    return routine.isTicked || (stepChecks[id] ?? false);
+  }
+
+  function toggleStep(id: string) {
+    if (routine.isTicked) return;
+    const next = { ...stepChecks, [id]: !isStepChecked(id) };
+    setStepChecks(next);
+    if (routine.subroutines.every((s) => next[s.id])) handleToggle();
   }
 
   return (
@@ -73,7 +90,11 @@ function RoutineRow({ routine }: { routine: RoutineItemVM }) {
               {routine.title}
               {completing && <StrikeSweep />}
             </span>
-            {routine.scheduleLabel && <Chip>{routine.scheduleLabel}</Chip>}
+            {routine.scheduleLabel && (
+              <span className="hidden lg:inline">
+                <Chip>{routine.scheduleLabel}</Chip>
+              </span>
+            )}
           </div>
           {routine.isTicked && !routine.scheduleLabel && (
             <div className="mt-0.5 text-xs italic text-[#b3a988]">auto-resets within the hour</div>
@@ -111,25 +132,29 @@ function RoutineRow({ routine }: { routine: RoutineItemVM }) {
       </div>
 
       {routine.subroutines.length > 0 && (
-        <ul className="ml-8.5 mt-2 flex flex-col gap-1">
-          {routine.subroutines.map((s) => (
-            <li key={s.id} className="group/step flex items-center justify-between gap-2">
-              <span
-                className="text-[13px]"
-                style={{ color: routine.isTicked ? "#c2b89f" : "#8a8069", textDecoration: routine.isTicked ? "line-through" : "none" }}
-              >
-                · {s.title}
-              </span>
-              <button
-                type="button"
-                onClick={() => actions.removeRoutine(s.id)}
-                aria-label="Remove step"
-                className="cursor-pointer text-xs text-[#b3a988] opacity-0 transition-opacity hover:text-[#8a4040] group-hover/step:opacity-100"
-              >
-                Remove
-              </button>
-            </li>
-          ))}
+        <ul className="ml-8.5 mt-2 flex flex-col gap-1.5">
+          {routine.subroutines.map((s) => {
+            const checked = isStepChecked(s.id);
+            return (
+              <li key={s.id} className="group/step flex items-center gap-2">
+                <CheckSquare action={() => toggleStep(s.id)} checked={checked} size={16} />
+                <span
+                  className="flex-1 text-[13px]"
+                  style={{ color: checked ? "#c2b89f" : "#8a8069", textDecoration: checked ? "line-through" : "none" }}
+                >
+                  {s.title}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => actions.removeRoutine(s.id)}
+                  aria-label="Remove step"
+                  className="cursor-pointer text-xs text-[#b3a988] opacity-0 transition-opacity hover:text-[#8a4040] group-hover/step:opacity-100"
+                >
+                  Remove
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
 

@@ -59,7 +59,7 @@ export async function POST(request: Request) {
       }
       default: {
         // The AI may not have matched an existing category — Task requires a non-empty one.
-        const category = parsed.task.category || categories[0]?.name || "Personal";
+        const category = parsed.task.category || categories[0]?.name || "Home";
         const task = await createTask({ ...parsed.task, category });
         entityId = task.id;
         summary = task.title;

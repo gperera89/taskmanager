@@ -28,8 +28,10 @@ export default function SettingsModal({
       >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-xl text-[#2a2622]">Settings</h2>
-          <button type="button" onClick={onClose} className="cursor-pointer text-[#8a8069]">
-            ✕
+          <button type="button" onClick={onClose} aria-label="Close" className="cursor-pointer text-[#8a8069]">
+            <svg width="18" height="18" viewBox="0 -960 960 960">
+              <path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z" fill="#8a8069" />
+            </svg>
           </button>
         </div>
 

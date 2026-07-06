@@ -81,10 +81,10 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const INTERVAL_UNIT_DAYS: Record<string, number> = { DAY: 1, WEEK: 7, MONTH: 30 };
 export const ROUTINE_TICK_EXPIRY_MS = 60 * 60 * 1000;
 
-// Task.category is free text (seeded with "Work"/"Personal" but user-editable), so the mode
+// Task.category is free text (seeded with "Work"/"Home" but user-editable), so the mode
 // filter matches those two labels case-insensitively and leaves everything else visible only in
 // "all". Calendar events are matched by their ICS source label instead, since they have no
-// category — "Outlook" is the YCIS work calendar, "Gmail" the personal one (see lib/calendar.ts).
+// category — "Outlook" is the YCIS work calendar, "Gmail" the home one (see lib/calendar.ts).
 function taskMatchesMode(category: string, mode: Mode): boolean {
   return mode === "all" || category.toLowerCase() === mode;
 }
@@ -243,7 +243,7 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
   const month0 = now.getMonth();
   const todayDay = now.getDate();
 
-  // Tasks — grouped by due bucket. Projects/routines/habits aren't categorized work/personal,
+  // Tasks — grouped by due bucket. Projects/routines/habits aren't categorized work/home,
   // so the mode filter only narrows the task list (and, below, the calendar).
   const projectNameById = new Map(raw.projects.map((p) => [p.id, p.name]));
   const grouped = new Map<DueBucket, { vm: TaskItemVM; dueMs: number | null }[]>();

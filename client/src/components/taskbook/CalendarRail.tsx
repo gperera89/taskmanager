@@ -58,13 +58,13 @@ export default function CalendarRail({
           <span className="text-[13px] text-[#8a8069]">{year}</span>
           <div className="flex gap-2">
             <button type="button" onClick={onPrevMonth} aria-label="Previous month" className="cursor-pointer p-0.5">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-                <path d="M15 5l-7 7 7 7" stroke="#8a8069" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+              <svg width="14" height="14" viewBox="0 -960 960 960">
+                <path d="M400-80 0-480l400-400 71 71-329 329 329 329-71 71Z" fill="#8a8069" />
               </svg>
             </button>
             <button type="button" onClick={onNextMonth} aria-label="Next month" className="cursor-pointer p-0.5">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-                <path d="M9 5l7 7-7 7" stroke="#8a8069" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+              <svg width="14" height="14" viewBox="0 -960 960 960">
+                <path d="m321-80-71-71 329-329-329-329 71-71 400 400L321-80Z" fill="#8a8069" />
               </svg>
             </button>
           </div>

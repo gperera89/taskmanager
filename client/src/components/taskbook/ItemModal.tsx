@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { todayInputValue } from "@/lib/taskbookDates";
 import { useTaskbook } from "./store";
 import {
@@ -13,6 +13,7 @@ import {
   parseTaskForm,
 } from "./formParse";
 import CategoryManager from "./CategoryManager";
+import { DateTimePickerPanel, formatPickerLabel } from "./DateTimePicker";
 import RepeatFields from "./RepeatFields";
 import { AutoGrowTextarea } from "./shared";
 import type { CategoryOption, HabitCardVM, ModalState, ProjectCardVM, ProjectOption, RoutineItemVM } from "./types";
@@ -82,8 +83,10 @@ export default function ItemModal({
       >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-xl text-[#2a2622]">{heading}</h2>
-          <button type="button" onClick={onClose} className="cursor-pointer text-[#8a8069]">
-            ✕
+          <button type="button" onClick={onClose} aria-label="Close" className="cursor-pointer text-[#8a8069]">
+            <svg width="18" height="18" viewBox="0 -960 960 960">
+              <path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z" fill="#8a8069" />
+            </svg>
           </button>
         </div>
 
@@ -169,6 +172,21 @@ function TaskForm({
 }) {
   const { actions } = useTaskbook();
   const [showManageCategories, setShowManageCategories] = useState(false);
+  const [dueDate, setDueDate] = useState(todayInputValue());
+  const [dueTime, setDueTime] = useState("");
+  const [dueOpen, setDueOpen] = useState(false);
+
+  // A click-away close, not an onBlur one — macOS Safari never focuses a <button> on click,
+  // so an onBlur-based "closed when focus leaves" check misses plain clicks outside the panel.
+  const duePanelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!dueOpen) return;
+    function handlePointerDown(e: PointerEvent) {
+      if (!duePanelRef.current?.contains(e.target as Node)) setDueOpen(false);
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [dueOpen]);
 
   return (
     <form
@@ -233,13 +251,17 @@ function TaskForm({
         )}
       </div>
       <div className="flex flex-wrap gap-3">
-        <div>
-          <label className={labelTextClass}>Due date</label>
-          <input name="dueDate" type="date" defaultValue={todayInputValue()} className={inputClass} />
-        </div>
-        <div>
-          <label className={labelTextClass}>Due time</label>
-          <input name="dueTime" type="time" className={inputClass} />
+        <div className="min-w-35 flex-1">
+          <label className={labelTextClass}>Due</label>
+          <input type="hidden" name="dueDate" value={dueDate} />
+          <input type="hidden" name="dueTime" value={dueTime} />
+          <button
+            type="button"
+            onClick={() => setDueOpen(!dueOpen)}
+            className={`${inputClass} cursor-pointer text-left`}
+          >
+            {formatPickerLabel(dueDate, dueTime)}
+          </button>
         </div>
         <div className="min-w-35 flex-1">
           <label className={labelTextClass}>Project</label>
@@ -253,6 +275,21 @@ function TaskForm({
           </select>
         </div>
       </div>
+      {dueOpen && (
+        <div ref={duePanelRef} className="w-fit rounded-lg border border-[#17399b] bg-[#faf7ef] p-2.5">
+          <DateTimePickerPanel dateValue={dueDate} timeValue={dueTime} onChangeDate={setDueDate} onChangeTime={setDueTime} />
+          <button
+            type="button"
+            onClick={() => {
+              setDueDate("");
+              setDueTime("");
+            }}
+            className="mt-2 cursor-pointer text-xs text-[#b3a988] hover:text-[#8a4040]"
+          >
+            Clear
+          </button>
+        </div>
+      )}
       <RepeatFields />
       <Actions submitLabel="Add task" />
     </form>

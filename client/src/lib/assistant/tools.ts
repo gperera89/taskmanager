@@ -98,7 +98,7 @@ export async function createTaskTool(args: CreateTaskArgs): Promise<TaskSummary>
   const category =
     (args.category && categories.some((c) => c.name === args.category) ? args.category : undefined) ??
     categories[0]?.name ??
-    "Personal";
+    "Home";
   const projectId = args.projectId && projectNames.has(args.projectId) ? args.projectId : null;
 
   const task = await createTask({

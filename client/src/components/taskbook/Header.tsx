@@ -18,6 +18,18 @@ const KIND_LABEL: Record<CapturedKind, string> = {
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 
+type BarMode = "search" | "chat" | "mic";
+
+// Material Symbols glyphs (24dp, outlined), inlined so fill color can react to selection —
+// same convention as ModeToggle's ICON_PATH.
+const ADD_ICON_PATH = "M440-440H200v-80h240v-240h80v240h240v80H520v240h-80v-240Z";
+const BAR_ICON_PATH: Record<BarMode, string> = {
+  search:
+    "M784-120 532-372q-30 24-69 38t-83 14q-109 0-184.5-75.5T120-580q0-109 75.5-184.5T380-840q109 0 184.5 75.5T640-580q0 44-14 83t-38 69l252 252-56 56ZM380-400q75 0 127.5-52.5T560-580q0-75-52.5-127.5T380-760q-75 0-127.5 52.5T200-580q0 75 52.5 127.5T380-400Z",
+  chat: "M240-400h320v-80H240v80Zm0-120h480v-80H240v80Zm0-120h480v-80H240v80ZM80-80v-720q0-33 23.5-56.5T160-880h640q33 0 56.5 23.5T880-800v480q0 33-23.5 56.5T800-240H240L80-80Zm126-240h594v-480H160v525l46-45Zm-46 0v-480 480Z",
+  mic: "M395-435q-35-35-35-85v-240q0-50 35-85t85-35q50 0 85 35t35 85v240q0 50-35 85t-85 35q-50 0-85-35Zm85-205Zm-40 520v-123q-104-14-172-93t-68-184h80q0 83 58.5 141.5T480-320q83 0 141.5-58.5T680-520h80q0 105-68 184t-172 93v123h-80Zm68.5-371.5Q520-503 520-520v-240q0-17-11.5-28.5T480-800q-17 0-28.5 11.5T440-760v240q0 17 11.5 28.5T480-480q17 0 28.5-11.5Z",
+};
+
 // MediaRecorder's default mimeType varies by browser; pick a file extension Whisper recognizes.
 function extensionFor(mimeType: string): string {
   if (mimeType.includes("mp4")) return "mp4";
@@ -57,9 +69,9 @@ export default function Header({
   const chunksRef = useRef<BlobPart[]>([]);
   const notifRef = useRef<HTMLDivElement>(null);
 
-  // Search/chat toggle for the search bar — "barMode" to avoid confusion with the unrelated
-  // personal/all/work `mode` from useTaskbook() above.
-  const [barMode, setBarMode] = useState<"search" | "chat">("search");
+  // Search/chat/mic toggle for the search bar — "barMode" to avoid confusion with the unrelated
+  // home/all/work `mode` from useTaskbook() above.
+  const [barMode, setBarMode] = useState<BarMode>("search");
   const [chatDraft, setChatDraft] = useState("");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
@@ -131,10 +143,12 @@ export default function Header({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Voice capture failed");
       setShowNotif(true);
+      setBarMode("search");
       router.refresh();
     } catch (err) {
       console.error("[voice] capture failed:", err);
       setCaptureError(err instanceof Error ? err.message : "Voice capture failed");
+      setBarMode("mic");
     } finally {
       setProcessing(false);
     }
@@ -167,6 +181,27 @@ export default function Header({
       console.error("[voice] microphone access failed:", err);
       setCaptureError("Couldn't access the microphone.");
     }
+  }
+
+  // Selecting search/chat while a recording is in flight stops it (still processes/uploads
+  // whatever was captured) rather than leaving it running silently in the background.
+  function selectSearchMode() {
+    if (listening) void toggleListening();
+    setBarMode("search");
+  }
+  function selectChatMode() {
+    if (listening) void toggleListening();
+    setBarMode("chat");
+    setChatPanelOpen(true);
+  }
+  function selectMicMode() {
+    if (barMode === "mic") {
+      if (listening) void toggleListening();
+      return;
+    }
+    setChatPanelOpen(false);
+    setBarMode("mic");
+    void toggleListening();
   }
 
   function handleEditCapture(capture: VoiceCaptureVM) {
@@ -238,39 +273,11 @@ export default function Header({
           }}
           className="flex items-center gap-2 rounded-full bg-[#17399b] py-2 pl-3 pr-3.5 text-white cursor-pointer"
         >
-          <svg width="16" height="16" viewBox="0 0 24 24">
-            <path d="M12 5v14M5 12h14" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
+          <svg width="16" height="16" viewBox="0 -960 960 960">
+            <path d={ADD_ICON_PATH} fill="#fff" />
           </svg>
           <span className="text-sm">Add</span>
         </button>
-
-        <button
-          type="button"
-          title="Speak to add"
-          disabled={processing}
-          onClick={toggleListening}
-          className="flex h-9.5 w-9.5 cursor-pointer items-center justify-center rounded-full disabled:cursor-not-allowed disabled:opacity-60"
-          style={{
-            border: listening ? "1.5px solid #17399b" : "1px solid #d3c9b3",
-            background: listening ? "rgba(23,57,155,.08)" : "transparent",
-          }}
-        >
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
-            <rect x="9" y="3" width="6" height="11" rx="3" stroke="#557694" strokeWidth="1.6" />
-            <path d="M5 11a7 7 0 0 0 14 0M12 18v3" stroke="#557694" strokeWidth="1.6" strokeLinecap="round" />
-          </svg>
-        </button>
-
-        {listening && (
-          <span className="text-[12.5px] italic text-[#17399b]">
-            Listening… <span className="text-[#a49a82]">tap to stop</span>
-          </span>
-        )}
-        {processing && <span className="text-[12.5px] italic text-[#17399b]">Transcribing…</span>}
-        {captureError && !listening && !processing && (
-          <span className="text-[12.5px] italic text-[#8a4040]">{captureError}</span>
-        )}
-
       </div>
 
       <div className="hidden items-center gap-4 lg:flex">
@@ -281,51 +288,60 @@ export default function Header({
                 type="button"
                 title="Search"
                 aria-pressed={barMode === "search"}
-                onClick={() => setBarMode("search")}
+                onClick={selectSearchMode}
                 className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-full"
                 style={{ background: barMode === "search" ? "rgba(23,57,155,.12)" : "transparent" }}
               >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
-                  <circle cx="11" cy="11" r="7" stroke={barMode === "search" ? "#17399b" : "#a49a82"} strokeWidth="1.8" />
-                  <path d="M20 20l-4-4" stroke={barMode === "search" ? "#17399b" : "#a49a82"} strokeWidth="1.8" strokeLinecap="round" />
+                <svg width="13" height="13" viewBox="0 -960 960 960">
+                  <path d={BAR_ICON_PATH.search} fill={barMode === "search" ? "#17399b" : "#a49a82"} />
                 </svg>
               </button>
               <button
                 type="button"
                 title="Chat"
                 aria-pressed={barMode === "chat"}
-                onClick={() => {
-                  setBarMode("chat");
-                  setChatPanelOpen(true);
-                }}
+                onClick={selectChatMode}
                 className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-full"
                 style={{ background: barMode === "chat" ? "rgba(23,57,155,.12)" : "transparent" }}
               >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+                <svg width="13" height="13" viewBox="0 -960 960 960">
+                  <path d={BAR_ICON_PATH.chat} fill={barMode === "chat" ? "#17399b" : "#a49a82"} />
+                </svg>
+              </button>
+              <button
+                type="button"
+                title="Speak to add"
+                disabled={processing && barMode !== "mic"}
+                aria-pressed={barMode === "mic"}
+                onClick={selectMicMode}
+                className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-full disabled:cursor-not-allowed disabled:opacity-60"
+                style={{ background: barMode === "mic" ? "rgba(23,57,155,.12)" : "transparent" }}
+              >
+                <svg width="13" height="13" viewBox="0 -960 960 960">
                   <path
-                    d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5Z"
-                    stroke={barMode === "chat" ? "#17399b" : "#a49a82"}
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
+                    d={BAR_ICON_PATH.mic}
+                    fill={barMode === "mic" ? "#17399b" : "#a49a82"}
                   />
                 </svg>
               </button>
             </div>
 
-            <div className="flex w-65 items-center gap-2 rounded-full border border-[#d3c9b3] px-3.5 py-1.5 text-[#a49a82]">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" className="flex-none">
-                <circle cx="11" cy="11" r="7" stroke="#b3a988" strokeWidth="1.6" />
-                <path d="M20 20l-4-4" stroke="#b3a988" strokeWidth="1.6" strokeLinecap="round" />
+            <div
+              className="flex w-65 items-center gap-2 rounded-full border border-[#d3c9b3] px-3.5 py-1.5 text-[#a49a82]"
+              style={{ animation: barMode === "mic" && listening ? "mic-pulse 1.6s ease-in-out infinite" : undefined }}
+            >
+              <svg width="15" height="15" viewBox="0 -960 960 960" className="flex-none">
+                <path d={BAR_ICON_PATH[barMode === "chat" ? "chat" : barMode === "mic" ? "mic" : "search"]} fill="#b3a988" />
               </svg>
-              {barMode === "search" ? (
+              {barMode === "search" && (
                 <input
                   value={query}
                   onChange={(e) => onQueryChange(e.target.value)}
                   placeholder="Search tasks…"
                   className="w-full min-w-0 bg-transparent text-[13.5px] text-[#2a2622] outline-none placeholder:text-[#a49a82]"
                 />
-              ) : (
+              )}
+              {barMode === "chat" && (
                 <input
                   value={chatDraft}
                   onChange={(e) => setChatDraft(e.target.value)}
@@ -340,6 +356,30 @@ export default function Header({
                   disabled={chatLoading}
                   className="w-full min-w-0 bg-transparent text-[13.5px] text-[#2a2622] outline-none placeholder:text-[#a49a82] disabled:opacity-60"
                 />
+              )}
+              {barMode === "mic" && (
+                <div className="flex w-full min-w-0 items-center gap-2">
+                  <div className="flex flex-none items-center gap-0.75" aria-hidden>
+                    {[0, 1, 2, 3].map((i) => (
+                      <span
+                        key={i}
+                        className="block h-3 w-0.75 rounded-full"
+                        style={{
+                          background: captureError ? "#8a4040" : "#17399b",
+                          animation:
+                            listening || processing ? `mic-bar 0.9s ${i * 0.12}s ease-in-out infinite` : undefined,
+                          opacity: listening || processing ? 1 : 0.4,
+                        }}
+                      />
+                    ))}
+                  </div>
+                  <span
+                    className="truncate text-[13.5px] italic"
+                    style={{ color: captureError ? "#8a4040" : "#17399b" }}
+                  >
+                    {captureError ?? (processing ? "Transcribing…" : listening ? "Listening… tap to stop" : "Tap the mic to start")}
+                  </span>
+                </div>
               )}
             </div>
           </div>

@@ -161,7 +161,7 @@ export function CalendarTaskItem({
 }
 
 // Reuses the ModeToggle's home/work glyphs so a calendar event visually matches which calendar
-// (Gmail = personal, Outlook = work) it came from — hovering swaps the glyph for a dismiss "x",
+// (Gmail = home, Outlook = work) it came from — hovering swaps the glyph for a dismiss "x",
 // so the marker doubles as the dismiss control instead of needing a separate button.
 export function CalendarEventMarker({
   source,
@@ -174,7 +174,7 @@ export function CalendarEventMarker({
   onDismiss: () => void;
   size?: number;
 }) {
-  const iconPath = source === "Outlook" ? ICON_PATH.work : source === "Gmail" ? ICON_PATH.personal : ICON_PATH.all;
+  const iconPath = source === "Outlook" ? ICON_PATH.work : source === "Gmail" ? ICON_PATH.home : ICON_PATH.all;
   return (
     <button
       type="button"
@@ -196,10 +196,12 @@ export function CalendarEventMarker({
         className="absolute opacity-0 transition-opacity group-hover:opacity-100"
         width={size * 0.6}
         height={size * 0.6}
-        viewBox="0 0 24 24"
-        fill="none"
+        viewBox="0 -960 960 960"
       >
-        <path d="M6 6l12 12M18 6L6 18" stroke="#8a4040" strokeWidth="2" strokeLinecap="round" />
+        <path
+          d="m336-280-56-56 144-144-144-143 56-56 144 144 143-144 56 56-144 143 144 144-56 56-143-144-144 144Z"
+          fill="#8a4040"
+        />
       </svg>
     </button>
   );

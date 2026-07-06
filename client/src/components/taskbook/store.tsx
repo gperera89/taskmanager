@@ -51,12 +51,12 @@ import { combineDueDateTime, deriveEntities, type RawState, type RawTask } from 
 import { nextOccurrence, resolveTaskRepeat, type TaskRepeatRule } from "@/lib/taskRecurrence";
 import type { CalendarEvent, Mode, TaskbookData } from "./types";
 
-// Persists the work/personal/all toggle across sessions — this is a pure client display
+// Persists the work/home/all toggle across sessions — this is a pure client display
 // preference, not server state, so it lives in localStorage rather than the DB.
 const MODE_STORAGE_KEY = "taskbook-mode";
 
 function isMode(v: string | null): v is Mode {
-  return v === "work" || v === "personal" || v === "all";
+  return v === "work" || v === "home" || v === "all";
 }
 
 // Server snapshot fields that this store does NOT derive (just labels/errors — the calendar

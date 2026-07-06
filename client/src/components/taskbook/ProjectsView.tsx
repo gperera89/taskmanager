@@ -18,6 +18,15 @@ const VIEW_MODE_LABEL: Record<ProjectViewMode, string> = {
   all: "Showing all tasks — click to collapse",
   none: "Collapsed — click to show unchecked tasks",
 };
+// Material Symbols "arrow_circle_down" / "arrow_drop_down_circle" / "arrow_circle_up" glyphs —
+// down (fully open) for "all", the lighter drop-down glyph for the partial "unchecked" default,
+// up (tucked away) for "none" (collapsed).
+const VIEW_MODE_ICON_PATH: Record<ProjectViewMode, string> = {
+  all: "m480-320 160-160-56-56-64 64v-168h-80v168l-64-64-56 56 160 160Zm0 240q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm0-80q134 0 227-93t93-227q0-134-93-227t-227-93q-134 0-227 93t-93 227q0 134 93 227t227 93Zm0-320Z",
+  unchecked:
+    "m480-360 160-160H320l160 160Zm0 280q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm0-80q134 0 227-93t93-227q0-134-93-227t-227-93q-134 0-227 93t-93 227q0 134 93 227t227 93Zm0-320Z",
+  none: "M440-320h80v-168l64 64 56-56-160-160-160 160 56 56 64-64v168Zm40 240q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm0-80q134 0 227-93t93-227q0-134-93-227t-227-93q-134 0-227 93t-93 227q0 134 93 227t227 93Zm0-320Z",
+};
 
 function ProjectExpandToggle({ mode, onCycle }: { mode: ProjectViewMode; onCycle: () => void }) {
   const label = VIEW_MODE_LABEL[mode];
@@ -29,17 +38,8 @@ function ProjectExpandToggle({ mode, onCycle }: { mode: ProjectViewMode; onCycle
       aria-label={label}
       className="flex flex-none cursor-pointer items-center justify-center text-[#a49a82]"
     >
-      <svg
-        width="11"
-        height="9"
-        viewBox="0 0 24 24"
-        fill="none"
-        style={{ transform: mode === "none" ? "none" : "rotate(90deg)", transition: "transform .15s" }}
-      >
-        <path d="M8 5l8 7-8 7" stroke="#a49a82" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-        {mode === "all" && (
-          <path d="M2 5l8 7-8 7" stroke="#a49a82" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-        )}
+      <svg width="17" height="17" viewBox="0 -960 960 960">
+        <path d={VIEW_MODE_ICON_PATH[mode]} fill="#a49a82" />
       </svg>
     </button>
   );

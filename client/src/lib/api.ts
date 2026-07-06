@@ -439,7 +439,7 @@ export function deleteRoutine(id: string) {
   return notFoundAsError("Routine not found", () => prisma.routine.delete({ where: { id } }));
 }
 
-const DEFAULT_CATEGORIES = ["Work", "Personal"];
+const DEFAULT_CATEGORIES = ["Work", "Home"];
 
 // Selectable options for the task category dropdown. Seeds a couple of defaults the first
 // time it's called on an empty table so the dropdown is never empty out of the box.

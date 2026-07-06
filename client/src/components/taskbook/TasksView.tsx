@@ -1,8 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { FocusEvent } from "react";
 import { useTaskbook } from "./store";
+import type { TaskRepeatInput } from "./store";
 import { AutoGrowTextarea, CheckSquare, RowDeleteButton, StrikeSweep, labelClass, useCompletionHold } from "./shared";
+import { DateTimePickerPanel } from "./DateTimePicker";
 import RepeatFields from "./RepeatFields";
 import type { CategoryOption, ProjectOption, TaskGroupVM, TaskItemVM } from "./types";
 
@@ -83,11 +86,10 @@ export default function TasksView({
               <svg
                 width="9"
                 height="9"
-                viewBox="0 0 24 24"
-                fill="none"
+                viewBox="0 -960 960 960"
                 style={{ transform: showCompleted ? "rotate(90deg)" : "none", transition: "transform .15s" }}
               >
-                <path d="M8 5l8 7-8 7" stroke="#a49a82" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M504-480 320-664l56-56 240 240-240 240-56-56 184-184Z" fill="#a49a82" />
               </svg>
               Completed ({completedTasks.length})
             </button>
@@ -106,6 +108,23 @@ const GROUP_PREVIEW_COUNT = 4;
 
 const chipSelectClass =
   "cursor-pointer whitespace-nowrap rounded-full border-none px-2.5 py-0.5 text-[11.5px] outline-none";
+
+// The two chip <select>s below reuse chipSelectClass but also need the OS-native dropdown
+// caret replaced — by default it renders flush against the pill's right edge with a lot of
+// dead space before it. This swaps in a small Material "arrow_drop_down" glyph pulled in
+// closer to the label instead, colored to match each select's text.
+function chipSelectArrowStyle(color: string): React.CSSProperties {
+  const fill = encodeURIComponent(color);
+  return {
+    appearance: "none",
+    WebkitAppearance: "none",
+    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 -960 960 960'%3E%3Cpath d='M480-360 240-600h480L480-360Z' fill='${fill}'/%3E%3C/svg%3E")`,
+    backgroundRepeat: "no-repeat",
+    backgroundPosition: "right 4px center",
+    backgroundSize: "13px 13px",
+    paddingRight: 20,
+  };
+}
 
 export function TaskRow({
   task,
@@ -142,6 +161,8 @@ export function TaskRow({
   const [dueDateDraft, setDueDateDraft] = useState(task.dueDateValue);
   const [dueTimeDraft, setDueTimeDraft] = useState(task.dueTimeValue);
   const [repeatOpen, setRepeatOpen] = useState(false);
+  const repeatChangedRef = useRef(false);
+  const repeatDraftRef = useRef<TaskRepeatInput>(null);
 
   function commitTitle() {
     setEditingTitle(false);
@@ -168,17 +189,52 @@ export function TaskRow({
     actions.setTaskProject(task.id, projectId);
   }
 
-  function commitDue(nextDate: string, nextTime: string) {
+  function openDue() {
+    setDueDateDraft(task.dueDateValue);
+    setDueTimeDraft(task.dueTimeValue);
+    setDueOpen(true);
+  }
+
+  function updateDueDraft(nextDate: string, nextTime: string) {
     setDueDateDraft(nextDate);
     setDueTimeDraft(nextTime);
-    actions.setTaskDue(task.id, nextDate, nextTime);
   }
+
+  // Clicking a day/time button doesn't reliably move keyboard focus (macOS Safari never
+  // focuses a <button> on click), so an onBlur-based "commit when focus leaves" approach
+  // misses plain clicks-away entirely. Watching for a pointerdown outside the panel works
+  // regardless of focus behavior.
+  const duePanelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!dueOpen) return;
+    function handlePointerDown(e: PointerEvent) {
+      if (duePanelRef.current?.contains(e.target as Node)) return;
+      setDueOpen(false);
+      if (dueDateDraft !== task.dueDateValue || dueTimeDraft !== task.dueTimeValue) {
+        actions.setTaskDue(task.id, dueDateDraft, dueTimeDraft);
+      }
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [dueOpen, dueDateDraft, dueTimeDraft, task.id, task.dueDateValue, task.dueTimeValue, actions]);
 
   function clearDue() {
     setDueDateDraft("");
     setDueTimeDraft("");
     actions.setTaskDue(task.id, "", "");
     setDueOpen(false);
+  }
+
+  function openRepeat() {
+    repeatChangedRef.current = false;
+    setRepeatOpen(true);
+  }
+
+  function commitRepeatBlur(e: FocusEvent<HTMLDivElement>) {
+    const next = e.relatedTarget as Node | null;
+    if (next && e.currentTarget.contains(next)) return;
+    setRepeatOpen(false);
+    if (repeatChangedRef.current) actions.setTaskRepeat(task.id, repeatDraftRef.current);
   }
 
   return (
@@ -249,7 +305,7 @@ export function TaskRow({
             value={task.category}
             onChange={(e) => commitCategory(e.target.value)}
             className={chipSelectClass}
-            style={{ color: "#557694", background: "rgba(85,118,148,.1)" }}
+            style={{ color: "#557694", background: "rgba(85,118,148,.1)", ...chipSelectArrowStyle("#557694") }}
           >
             {categoryOptions.map((c) => (
               <option key={c.id} value={c.name}>
@@ -262,7 +318,7 @@ export function TaskRow({
             value={task.projectId ?? ""}
             onChange={(e) => commitProject(e.target.value)}
             className={chipSelectClass}
-            style={{ color: "#8a8069", background: "rgba(138,128,105,.13)" }}
+            style={{ color: "#8a8069", background: "rgba(138,128,105,.13)", ...chipSelectArrowStyle("#8a8069") }}
           >
             <option value="">No project</option>
             {projectOptions.map((p) => (
@@ -274,7 +330,7 @@ export function TaskRow({
 
           <button
             type="button"
-            onClick={() => setRepeatOpen((v) => !v)}
+            onClick={() => (repeatOpen ? setRepeatOpen(false) : openRepeat())}
             className={chipSelectClass}
             style={{
               color: task.repeatLabel ? "#557694" : "#b3a988",
@@ -287,7 +343,7 @@ export function TaskRow({
 
           <button
             type="button"
-            onClick={() => setDueOpen((v) => !v)}
+            onClick={() => (dueOpen ? setDueOpen(false) : openDue())}
             className={chipSelectClass}
             style={{
               color: task.dueLabel ? "#557694" : "#b3a988",
@@ -300,32 +356,27 @@ export function TaskRow({
         </div>
 
         {dueOpen && (
-          <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-[#d3c9b3] bg-[#faf7ef] p-2.5">
-            <input
-              type="date"
-              value={dueDateDraft}
-              onChange={(e) => commitDue(e.target.value, dueTimeDraft)}
-              className="rounded border border-[#d3c9b3] px-1.5 py-1 text-xs text-[#2a2622] outline-none focus:border-[#17399b]"
-            />
-            <input
-              type="time"
-              value={dueTimeDraft}
-              onChange={(e) => commitDue(dueDateDraft, e.target.value)}
-              className="rounded border border-[#d3c9b3] px-1.5 py-1 text-xs text-[#2a2622] outline-none focus:border-[#17399b]"
+          <div ref={duePanelRef} className="mt-2 w-fit rounded-lg border border-[#17399b] bg-[#faf7ef] p-2.5">
+            <DateTimePickerPanel
+              dateValue={dueDateDraft}
+              timeValue={dueTimeDraft}
+              onChangeDate={(d) => updateDueDraft(d, dueTimeDraft)}
+              onChangeTime={(t) => updateDueDraft(dueDateDraft, t)}
             />
             {task.dueDateValue && (
-              <button type="button" onClick={clearDue} className="cursor-pointer text-xs text-[#b3a988] hover:text-[#8a4040]">
+              <button
+                type="button"
+                onClick={clearDue}
+                className="mt-2 cursor-pointer text-xs text-[#b3a988] hover:text-[#8a4040]"
+              >
                 Clear
               </button>
             )}
-            <button type="button" onClick={() => setDueOpen(false)} className="cursor-pointer text-xs text-[#8a8069]">
-              Done
-            </button>
           </div>
         )}
 
         {repeatOpen && (
-          <div className="mt-2 rounded-lg border border-[#d3c9b3] bg-[#faf7ef] p-3">
+          <div className="mt-2 rounded-lg border border-[#17399b] bg-[#faf7ef] p-3" onBlur={commitRepeatBlur}>
             <RepeatFields
               initial={{
                 frequency: task.repeatFrequency,
@@ -337,28 +388,21 @@ export function TaskRow({
                 monthlyWeekday: task.repeatMonthlyWeekday,
               }}
               anchorDate={task.dueDateValue ? new Date(`${task.dueDateValue}T00:00:00`) : undefined}
-              onChange={(rule) =>
-                actions.setTaskRepeat(
-                  task.id,
-                  rule.frequency
-                    ? {
-                        frequency: rule.frequency,
-                        interval: rule.interval,
-                        daysOfWeek: rule.daysOfWeek,
-                        monthlyMode: rule.monthlyMode,
-                        dayOfMonth: rule.dayOfMonth,
-                        monthlyOrdinal: rule.monthlyOrdinal,
-                        monthlyWeekday: rule.monthlyWeekday,
-                      }
-                    : null
-                )
-              }
+              onChange={(rule) => {
+                repeatChangedRef.current = true;
+                repeatDraftRef.current = rule.frequency
+                  ? {
+                      frequency: rule.frequency,
+                      interval: rule.interval,
+                      daysOfWeek: rule.daysOfWeek,
+                      monthlyMode: rule.monthlyMode,
+                      dayOfMonth: rule.dayOfMonth,
+                      monthlyOrdinal: rule.monthlyOrdinal,
+                      monthlyWeekday: rule.monthlyWeekday,
+                    }
+                  : null;
+              }}
             />
-            <div className="mt-3 flex justify-end">
-              <button type="button" onClick={() => setRepeatOpen(false)} className="cursor-pointer text-xs text-[#8a8069]">
-                Done
-              </button>
-            </div>
           </div>
         )}
 
