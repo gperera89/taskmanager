@@ -15,6 +15,8 @@ const KIND_LABEL: Record<CapturedKind, string> = {
   habit: "Habit",
 };
 
+type ChatMessage = { role: "user" | "assistant"; content: string };
+
 // MediaRecorder's default mimeType varies by browser; pick a file extension Whisper recognizes.
 function extensionFor(mimeType: string): string {
   if (mimeType.includes("mp4")) return "mp4";
@@ -54,6 +56,16 @@ export default function Header({
   const chunksRef = useRef<BlobPart[]>([]);
   const notifRef = useRef<HTMLDivElement>(null);
 
+  // Search/chat toggle for the search bar — "barMode" to avoid confusion with the unrelated
+  // personal/all/work `mode` from useTaskbook() above.
+  const [barMode, setBarMode] = useState<"search" | "chat">("search");
+  const [chatDraft, setChatDraft] = useState("");
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
+  const [chatPanelOpen, setChatPanelOpen] = useState(false);
+  const chatRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     // One-time DOM query for the portal target rendered by layout.tsx, which exists before
     // this component mounts — not syncing to changing external state.
@@ -71,6 +83,43 @@ export default function Header({
     document.addEventListener("pointerdown", handlePointerDown);
     return () => document.removeEventListener("pointerdown", handlePointerDown);
   }, [showNotif]);
+
+  useEffect(() => {
+    if (!chatPanelOpen) return;
+    function handlePointerDown(e: PointerEvent) {
+      if (chatRef.current && !chatRef.current.contains(e.target as Node)) {
+        setChatPanelOpen(false);
+      }
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [chatPanelOpen]);
+
+  async function sendChatMessage() {
+    const content = chatDraft.trim();
+    if (!content || chatLoading) return;
+    const nextMessages = [...chatMessages, { role: "user" as const, content }];
+    setChatMessages(nextMessages);
+    setChatDraft("");
+    setChatError(null);
+    setChatLoading(true);
+    try {
+      const res = await fetch("/api/assistant/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: nextMessages }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Chat failed");
+      setChatMessages([...nextMessages, { role: "assistant", content: data.reply }]);
+      if (data.mutated) router.refresh();
+    } catch (err) {
+      console.error("[assistant] chat failed:", err);
+      setChatError(err instanceof Error ? err.message : "Chat failed");
+    } finally {
+      setChatLoading(false);
+    }
+  }
 
   async function uploadRecording(blob: Blob) {
     setProcessing(true);
@@ -224,17 +273,115 @@ export default function Header({
       </div>
 
       <div className="hidden items-center gap-4 lg:flex">
-        <div className="flex w-65 items-center gap-2 rounded-full border border-[#d3c9b3] px-3.5 py-1.5 text-[#a49a82]">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" className="flex-none">
-            <circle cx="11" cy="11" r="7" stroke="#b3a988" strokeWidth="1.6" />
-            <path d="M20 20l-4-4" stroke="#b3a988" strokeWidth="1.6" strokeLinecap="round" />
-          </svg>
-          <input
-            value={query}
-            onChange={(e) => onQueryChange(e.target.value)}
-            placeholder="Search tasks…"
-            className="w-full min-w-0 bg-transparent text-[13.5px] text-[#2a2622] outline-none placeholder:text-[#a49a82]"
-          />
+        <div className="relative" ref={chatRef}>
+          <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-0.5 rounded-full border border-[#d3c9b3] p-1">
+              <button
+                type="button"
+                title="Search"
+                aria-pressed={barMode === "search"}
+                onClick={() => setBarMode("search")}
+                className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-full"
+                style={{ background: barMode === "search" ? "rgba(23,57,155,.12)" : "transparent" }}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+                  <circle cx="11" cy="11" r="7" stroke={barMode === "search" ? "#17399b" : "#a49a82"} strokeWidth="1.8" />
+                  <path d="M20 20l-4-4" stroke={barMode === "search" ? "#17399b" : "#a49a82"} strokeWidth="1.8" strokeLinecap="round" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                title="Chat"
+                aria-pressed={barMode === "chat"}
+                onClick={() => {
+                  setBarMode("chat");
+                  setChatPanelOpen(true);
+                }}
+                className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-full"
+                style={{ background: barMode === "chat" ? "rgba(23,57,155,.12)" : "transparent" }}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+                  <path
+                    d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5Z"
+                    stroke={barMode === "chat" ? "#17399b" : "#a49a82"}
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+            </div>
+
+            <div className="flex w-65 items-center gap-2 rounded-full border border-[#d3c9b3] px-3.5 py-1.5 text-[#a49a82]">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" className="flex-none">
+                <circle cx="11" cy="11" r="7" stroke="#b3a988" strokeWidth="1.6" />
+                <path d="M20 20l-4-4" stroke="#b3a988" strokeWidth="1.6" strokeLinecap="round" />
+              </svg>
+              {barMode === "search" ? (
+                <input
+                  value={query}
+                  onChange={(e) => onQueryChange(e.target.value)}
+                  placeholder="Search tasks…"
+                  className="w-full min-w-0 bg-transparent text-[13.5px] text-[#2a2622] outline-none placeholder:text-[#a49a82]"
+                />
+              ) : (
+                <input
+                  value={chatDraft}
+                  onChange={(e) => setChatDraft(e.target.value)}
+                  onFocus={() => setChatPanelOpen(true)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      void sendChatMessage();
+                    }
+                  }}
+                  placeholder="Ask about your tasks, or tell me to add one…"
+                  disabled={chatLoading}
+                  className="w-full min-w-0 bg-transparent text-[13.5px] text-[#2a2622] outline-none placeholder:text-[#a49a82] disabled:opacity-60"
+                />
+              )}
+            </div>
+          </div>
+
+          {barMode === "chat" && chatPanelOpen && (
+            <div className="absolute left-0 top-[46px] z-30 w-95 rounded-xl border border-[#ddd4c1] bg-[#faf7ef] p-4 shadow-[0_16px_40px_rgba(70,55,30,.22)]">
+              <div className="mb-2 flex items-center justify-between">
+                <div className="text-[11px] uppercase tracking-[0.16em] text-[#a49a82]">Ask about your tasks</div>
+                {chatMessages.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setChatMessages([])}
+                    className="cursor-pointer text-xs text-[#b3a988] hover:text-[#8a4040]"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+              {chatMessages.length === 0 && !chatLoading ? (
+                <div className="py-3.5 text-sm italic text-[#a49a82]">
+                  Try &ldquo;what&apos;s due today?&rdquo; or &ldquo;add a task to call the vet tomorrow&rdquo;.
+                </div>
+              ) : (
+                <div className="flex max-h-80 flex-col gap-2.5 overflow-y-auto">
+                  {chatMessages.map((m, i) => (
+                    <div
+                      key={i}
+                      className={
+                        m.role === "user"
+                          ? "self-end rounded-lg bg-[#17399b] px-3 py-1.5 text-sm text-white"
+                          : "self-start rounded-lg border border-[#ddd4c1] bg-white px-3 py-1.5 text-sm text-[#2a2622]"
+                      }
+                      style={{ maxWidth: "85%" }}
+                    >
+                      {m.content}
+                    </div>
+                  ))}
+                  {chatLoading && <div className="self-start text-sm italic text-[#a49a82]">Thinking…</div>}
+                </div>
+              )}
+              {chatError && <div className="mt-2 text-[11px] italic text-[#8a4040]">{chatError}</div>}
+            </div>
+          )}
         </div>
 
         <span className="text-[13px] text-[#8a8069]">{todayLabel}</span>
