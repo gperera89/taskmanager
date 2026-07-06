@@ -152,3 +152,48 @@ export function RowDeleteButton({ action }: { action: () => void }) {
 }
 
 export const labelClass = "text-[11px] uppercase tracking-[0.16em] text-[#a49a82]";
+
+/** Renders `children` on one line, shrinking the font size (down to `minFontSize`) so it never
+    overflows the container's width — for decorative script text where letter widths vary too
+    much to size by character count alone. Re-measures on resize. */
+export function FitText({
+  children,
+  maxFontSize,
+  minFontSize = 24,
+  className,
+}: {
+  children: string;
+  maxFontSize: number;
+  minFontSize?: number;
+  className?: string;
+}) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const textRef = useRef<HTMLSpanElement | null>(null);
+  const [fontSize, setFontSize] = useState(maxFontSize);
+
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    const text = textRef.current;
+    if (!container || !text) return;
+
+    const fit = () => {
+      text.style.fontSize = `${maxFontSize}px`;
+      const containerWidth = container.clientWidth;
+      const textWidth = text.scrollWidth;
+      setFontSize(textWidth > containerWidth ? Math.max(minFontSize, maxFontSize * (containerWidth / textWidth)) : maxFontSize);
+    };
+
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [children, maxFontSize, minFontSize]);
+
+  return (
+    <div ref={containerRef} className="w-full">
+      <span ref={textRef} className={className} style={{ fontSize, whiteSpace: "nowrap", display: "inline-block" }}>
+        {children}
+      </span>
+    </div>
+  );
+}

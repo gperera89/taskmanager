@@ -267,7 +267,7 @@ export default function TaskbookApp() {
             </div>
             {area === "day" && dayDetail && (
               <div className="absolute inset-0 z-10 overflow-y-auto bg-[#efe9dc] px-5 py-6 pb-10">
-                <DayView detail={dayDetail} onBack={() => selectTab("calendar")} />
+                <DayView detail={dayDetail} />
               </div>
             )}
           </div>
@@ -276,7 +276,7 @@ export default function TaskbookApp() {
             <div className="flex-1 overflow-y-auto px-11 py-8 pb-10">
               {viewFor(area)}
               {area === "day" && dayDetail && (
-                <DayView detail={dayDetail} onBack={() => selectTab("tasks")} />
+                <DayView detail={dayDetail} />
               )}
             </div>
 

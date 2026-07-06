@@ -1,23 +1,19 @@
 "use client";
 
 import { useTaskbook } from "./store";
-import { Chip, labelClass } from "./shared";
+import { Chip, FitText, labelClass } from "./shared";
 import type { DayDetailVM } from "./types";
 
-export default function DayView({ detail, onBack }: { detail: DayDetailVM; onBack: () => void }) {
+export default function DayView({ detail }: { detail: DayDetailVM }) {
   const { actions } = useTaskbook();
   const isEmpty = detail.tasks.length === 0 && detail.projects.length === 0 && detail.events.length === 0;
 
   return (
     <div>
-      <div className="mb-0.5 flex items-center gap-3.5">
-        <button type="button" onClick={onBack} className="cursor-pointer text-[13px] text-[#557694]">
-          ‹ Back
-        </button>
-      </div>
-      <div className="mt-1.5 flex max-w-[680px] items-end gap-4">
-        <div className="font-script text-[60px] leading-[0.8] text-[#2a2622]">{detail.weekday}</div>
-        <div className="pb-2 text-[22px] text-[#557694]">{detail.dateLabel}</div>
+      <div className="max-w-[680px] pb-2">
+        <FitText maxFontSize={60} minFontSize={30} className="font-script leading-[1.3] text-[#2a2622]">
+          {detail.fullLabel}
+        </FitText>
       </div>
       <div className="my-5 mb-1 h-px max-w-[680px] bg-[#d5cbb4]" />
 
@@ -103,7 +99,7 @@ export default function DayView({ detail, onBack }: { detail: DayDetailVM; onBac
           </>
         )}
 
-        {isEmpty && <div className="py-8 text-[15px] italic text-[#a49a82]">Nothing due on this day.</div>}
+        {isEmpty && <div className="py-8 text-[15px] italic text-[#a49a82]">No events or tasks for this day.</div>}
       </div>
     </div>
   );

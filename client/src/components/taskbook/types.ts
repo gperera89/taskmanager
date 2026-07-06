@@ -94,6 +94,7 @@ export type DayDetailVM = {
   day: number;
   weekday: string;
   dateLabel: string;
+  fullLabel: string;
   tasks: { id: string; title: string; isCompleted: boolean; projectName: string | null }[];
   projects: { id: string; name: string }[];
   events: { id: string; title: string; metaLabel: string; allDay: boolean }[];

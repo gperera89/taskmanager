@@ -48,6 +48,12 @@ export function formatLongDate(d: Date): string {
   return `${WEEKDAY_LONG.format(d)}, ${d.getDate()} ${MONTH_LONG.format(d)}`;
 }
 
+// Full weekday + date + month, no separators (e.g. "Wednesday 31 September") — for display in
+// the day-detail view's single cursive headline, which otherwise repeated the weekday twice.
+export function formatFullDate(d: Date): string {
+  return `${WEEKDAY_LONG.format(d)} ${d.getDate()} ${MONTH_LONG.format(d)}`;
+}
+
 const TIME_FORMAT = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: "UTC" });
 
 // A Task's due date, with a clock time appended when one was actually set. Date-only due

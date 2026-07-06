@@ -14,6 +14,7 @@ import {
   daysUntil,
   formatDueLabel,
   formatEventTime,
+  formatFullDate,
   formatShortDate,
   localDaysUntil,
   pad2,
@@ -459,10 +460,24 @@ export function deriveCalendarView(
   function ensureDay(day: number): DayDetailVM {
     if (!dayDetails[day]) {
       const d = new Date(viewYear, viewMonth0, day);
-      dayDetails[day] = { day, weekday: WEEKDAY_NAMES[d.getDay()], dateLabel: formatShortDate(d), tasks: [], projects: [], events: [] };
+      dayDetails[day] = {
+        day,
+        weekday: WEEKDAY_NAMES[d.getDay()],
+        dateLabel: formatShortDate(d),
+        fullLabel: formatFullDate(d),
+        tasks: [],
+        projects: [],
+        events: [],
+      };
     }
     return dayDetails[day];
   }
+
+  // Every day of the viewed month gets an entry up front, not just ones with something due —
+  // otherwise clicking an empty day leaves dayDetails[day] undefined and the day view renders
+  // nothing at all (not even its "nothing due" empty state) instead of an actual blank day.
+  const daysInMonth = new Date(viewYear, viewMonth0 + 1, 0).getDate();
+  for (let day = 1; day <= daysInMonth; day++) ensureDay(day);
 
   const projectNameById = new Map(raw.projects.map((p) => [p.id, p.name]));
 
