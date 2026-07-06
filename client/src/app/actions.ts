@@ -18,6 +18,7 @@ import {
   dismissCalendarEvent as dismissCalendarEventApi,
   dismissVoiceCapture,
   type HabitIntervalUnit,
+  restoreCalendarEvent as restoreCalendarEventApi,
   type RoutineFrequency,
   type RoutineMonthlyMode,
   type TaskRepeatInput,
@@ -343,4 +344,9 @@ export async function updateTimeZone(timeZone: string) {
 export async function dismissCalendarEvent(eventId: string) {
   await requireSession();
   await dismissCalendarEventApi(eventId);
+}
+
+export async function restoreCalendarEvent(eventId: string) {
+  await requireSession();
+  await restoreCalendarEventApi(eventId);
 }

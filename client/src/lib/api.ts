@@ -525,6 +525,12 @@ export function dismissCalendarEvent(eventId: string) {
   });
 }
 
+// deleteMany (rather than delete) so restoring an already-restored/never-dismissed event is a
+// harmless no-op instead of throwing on a missing row.
+export function restoreCalendarEvent(eventId: string) {
+  return prisma.dismissedCalendarEvent.deleteMany({ where: { eventId } });
+}
+
 // Every row is an unread notice pointing at a Task/Project/Routine/Habit that voice capture
 // already created — the notification panel's job is just to surface it for a quick look.
 export const getUnreadVoiceCaptures = () => prisma.voiceCapture.findMany({ orderBy: { createdAt: "desc" } });

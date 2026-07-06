@@ -33,6 +33,7 @@ import {
   renameCategory as renameCategoryAction,
   renameProject as renameProjectAction,
   renameTask as renameTaskAction,
+  restoreCalendarEvent as restoreCalendarEventAction,
   tickRoutine as tickRoutineAction,
   toggleProject as toggleProjectAction,
   toggleTask as toggleTaskAction,
@@ -153,6 +154,7 @@ export type TaskbookActions = {
   // Settings / calendar
   setTimeZone: (timeZone: string) => void;
   dismissEvent: (eventId: string) => void;
+  restoreEvent: (eventId: string) => void;
 };
 
 // `raw`/`calendarEvents`/`nowMs` are exposed alongside the derived `data` so TaskbookApp can call
@@ -738,6 +740,11 @@ export function StoreProvider({
       setTimeZone: (timeZone) => mutate((r) => ({ ...r, timeZone }), () => updateTimeZoneAction(timeZone)),
       dismissEvent: (eventId) =>
         mutate((r) => ({ ...r, dismissedEventIds: [...r.dismissedEventIds, eventId] }), () => dismissCalendarEventAction(eventId)),
+      restoreEvent: (eventId) =>
+        mutate(
+          (r) => ({ ...r, dismissedEventIds: r.dismissedEventIds.filter((id) => id !== eventId) }),
+          () => restoreCalendarEventAction(eventId)
+        ),
     };
   }, [router]);
 

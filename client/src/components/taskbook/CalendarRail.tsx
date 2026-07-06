@@ -1,6 +1,7 @@
 "use client";
 
 import type { MonthCell } from "@/lib/taskbookDates";
+import { CalendarEventMarker, CalendarTaskItem } from "./shared";
 import type { DayDetailVM, UpcomingItemVM } from "./types";
 
 const WEEKDAY_HEADERS = ["M", "T", "W", "T", "F", "S", "S"];
@@ -17,7 +18,9 @@ export default function CalendarRail({
   onClickAdjacentDay,
   onPrevMonth,
   onNextMonth,
+  onToggleTask,
   onDismissEvent,
+  onRestoreEvent,
   variant = "rail",
 }: {
   monthLabel: string;
@@ -31,25 +34,14 @@ export default function CalendarRail({
   onClickAdjacentDay: (direction: "prev" | "next", day: number) => void;
   onPrevMonth: () => void;
   onNextMonth: () => void;
+  onToggleTask: (id: string, isCompleted: boolean) => void;
   onDismissEvent: (eventId: string) => void;
+  onRestoreEvent: (eventId: string) => void;
   // "rail" is the always-on desktop side panel; "panel" is the in-content view shown
   // when Calendar is picked as a carousel tab on portrait/mobile screens.
   variant?: "rail" | "panel";
 }) {
-  let railTitle: string;
-  let railItems: { key: string; a: string; b: string; c: string; hasC: boolean; eventId?: string; allDay?: boolean }[];
-
-  if (selectedDay != null && dayDetail) {
-    railTitle = `${dayDetail.weekday.slice(0, 3)} ${selectedDay} ${monthLabel}`;
-    railItems = [
-      ...dayDetail.tasks.map((t) => ({ key: `t-${t.id}`, a: "·", b: t.title, c: t.projectName ?? "", hasC: !!t.projectName })),
-      ...dayDetail.projects.map((p) => ({ key: `p-${p.id}`, a: "·", b: p.name, c: "Project", hasC: true })),
-      ...dayDetail.events.map((e) => ({ key: `e-${e.id}`, a: "", b: e.title, c: e.metaLabel, hasC: true, eventId: e.id, allDay: e.allDay })),
-    ];
-  } else {
-    railTitle = "Coming up";
-    railItems = upcoming;
-  }
+  const railTitle = selectedDay != null && dayDetail ? `${dayDetail.weekday} ${selectedDay} ${monthLabel}` : "Coming up";
 
   const outerClass =
     variant === "panel"
@@ -123,29 +115,69 @@ export default function CalendarRail({
       </div>
 
       <div className="my-5.5 h-px bg-[#d5cbb4]" />
-      <div className="mb-3 text-[11px] uppercase tracking-[0.16em] text-[#a49a82]">{railTitle}</div>
-      <div className="flex flex-col gap-3.5">
-        {railItems.map((item) => (
-          <div key={item.key} className="flex items-baseline gap-2.5">
-            <span className="w-17 flex-none whitespace-nowrap text-[13px] font-semibold text-[#557694]">{item.a}</span>
-            <div className="min-w-0 flex-1">
-              <div className="text-sm text-[#2a2622]">{item.b}</div>
-              {item.hasC && <div className="mt-px text-[11.5px] text-[#a49a82]">{item.c}</div>}
-            </div>
-            {item.allDay && item.eventId && (
-              <button
-                type="button"
-                onClick={() => onDismissEvent(item.eventId!)}
-                aria-label={`Dismiss ${item.b}`}
-                className="flex-none cursor-pointer px-1 text-[13px] text-[#b3a988] hover:text-[#8a4040]"
-              >
-                ✕
-              </button>
-            )}
-          </div>
-        ))}
-        {railItems.length === 0 && <div className="text-[13px] italic text-[#a49a82]">Nothing scheduled.</div>}
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <span className="text-[11px] uppercase tracking-[0.16em] text-[#a49a82]">{railTitle}</span>
+        {selectedDay != null && dayDetail && dayDetail.dismissedEvents.length > 0 && (
+          <button
+            type="button"
+            onClick={() => dayDetail.dismissedEvents.forEach((d) => onRestoreEvent(d.id))}
+            className="flex-none cursor-pointer whitespace-nowrap text-[11px] text-[#557694] underline decoration-dotted underline-offset-2"
+          >
+            {dayDetail.dismissedEvents.length} dismissed · Restore
+          </button>
+        )}
       </div>
+
+      {selectedDay != null && dayDetail ? (
+        <div className="flex flex-col gap-3">
+          {dayDetail.tasks.length === 0 && dayDetail.projects.length === 0 && dayDetail.events.length === 0 && (
+            <div className="text-[13px] italic text-[#a49a82]">Nothing scheduled.</div>
+          )}
+          {dayDetail.tasks.map((t) => (
+            <div key={`t-${t.id}`} className="flex items-start gap-2.5">
+              <CalendarTaskItem
+                title={t.title}
+                isCompleted={t.isCompleted}
+                onToggle={() => onToggleTask(t.id, t.isCompleted)}
+                projectName={t.projectName}
+                size={20}
+              />
+            </div>
+          ))}
+          {dayDetail.projects.map((p) => (
+            <div key={`p-${p.id}`} className="flex items-start gap-2.5">
+              <span className="mt-0.5 h-5 w-5 flex-none rounded border border-[#b3a988]" />
+              <div className="min-w-0 flex-1">
+                <div className="text-sm text-[#2a2622]">{p.name}</div>
+                <div className="mt-px text-[11.5px] text-[#a49a82]">Project</div>
+              </div>
+            </div>
+          ))}
+          {dayDetail.events.map((e) => (
+            <div key={`e-${e.id}`} className="flex items-start gap-2.5">
+              <CalendarEventMarker source={e.source} title={e.title} onDismiss={() => onDismissEvent(e.id)} size={20} />
+              <div className="min-w-0 flex-1">
+                <div className="text-sm text-[#2a2622]">{e.title}</div>
+                <div className="mt-px text-[11.5px] text-[#a49a82]">{e.metaLabel}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3.5">
+          {upcoming.map((item) => (
+            <div key={item.key} className="flex items-baseline gap-2.5">
+              <span className="w-17 flex-none whitespace-nowrap text-[13px] font-semibold text-[#557694]">{item.a}</span>
+              <div className="min-w-0 flex-1">
+                <div className="text-sm text-[#2a2622]">{item.b}</div>
+                {item.hasC && <div className="mt-px text-[11.5px] text-[#a49a82]">{item.c}</div>}
+              </div>
+            </div>
+          ))}
+          {upcoming.length === 0 && <div className="text-[13px] italic text-[#a49a82]">Nothing scheduled.</div>}
+        </div>
+      )}
+
       {selectedDay != null && !dayOpen && (
         <div className="mt-4 text-xs italic text-[#557694]">Click {selectedDay} {monthLabel} again to open the full day →</div>
       )}

@@ -97,7 +97,10 @@ export type DayDetailVM = {
   fullLabel: string;
   tasks: { id: string; title: string; isCompleted: boolean; projectName: string | null }[];
   projects: { id: string; name: string }[];
-  events: { id: string; title: string; metaLabel: string; allDay: boolean }[];
+  events: { id: string; title: string; metaLabel: string; allDay: boolean; source: string }[];
+  // Events dismissed for this specific day, kept around (title only) so the day heading can
+  // offer a "N dismissed · Restore" affordance without re-fetching anything.
+  dismissedEvents: { id: string; title: string }[];
 };
 
 export type UpcomingItemVM = {

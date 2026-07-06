@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { ICON_PATH } from "./ModeToggle";
 
 const AUTO_GROW_MAX_LINES = 3;
 
@@ -111,6 +112,96 @@ export function StrikeSweep() {
       className="pointer-events-none absolute left-0 top-2.5 h-[1.5px] w-full origin-left bg-[#17399b]"
       style={{ animation: "strike-draw .36s .08s ease-out both" }}
     />
+  );
+}
+
+/** A checkbox + title, sharing the exact complete/strike-through animation as the main Tasks
+    view's TaskRow — used by the calendar rail and full day view so completing a task looks the
+    same everywhere it appears. */
+export function CalendarTaskItem({
+  title,
+  isCompleted,
+  onToggle,
+  projectName,
+  size = 20,
+  textClassName = "text-sm",
+}: {
+  title: string;
+  isCompleted: boolean;
+  onToggle: () => void;
+  projectName?: string | null;
+  size?: number;
+  textClassName?: string;
+}) {
+  const [completing, setCompleting] = useState(false);
+  function handleToggle() {
+    if (isCompleted) {
+      onToggle();
+      return;
+    }
+    setCompleting(true);
+    onToggle();
+    window.setTimeout(() => setCompleting(false), 460);
+  }
+  return (
+    <>
+      <CheckSquare action={handleToggle} checked={isCompleted} completing={completing} size={size} />
+      <div className="min-w-0 flex-1">
+        <div
+          className={`relative ${textClassName}`}
+          style={{ color: isCompleted ? "#a49a82" : "#2a2622", textDecoration: isCompleted && !completing ? "line-through" : "none" }}
+        >
+          {title}
+          {completing && <StrikeSweep />}
+        </div>
+        {projectName && <div className="mt-px text-[11.5px] text-[#a49a82]">{projectName}</div>}
+      </div>
+    </>
+  );
+}
+
+// Reuses the ModeToggle's home/work glyphs so a calendar event visually matches which calendar
+// (Gmail = personal, Outlook = work) it came from — hovering swaps the glyph for a dismiss "x",
+// so the marker doubles as the dismiss control instead of needing a separate button.
+export function CalendarEventMarker({
+  source,
+  title,
+  onDismiss,
+  size = 20,
+}: {
+  source: string;
+  title: string;
+  onDismiss: () => void;
+  size?: number;
+}) {
+  const iconPath = source === "Outlook" ? ICON_PATH.work : source === "Gmail" ? ICON_PATH.personal : ICON_PATH.all;
+  return (
+    <button
+      type="button"
+      onClick={onDismiss}
+      aria-label={`Dismiss ${title}`}
+      title="Dismiss"
+      className="group relative mt-0.5 flex flex-none cursor-pointer items-center justify-center"
+      style={{ width: size, height: size }}
+    >
+      <svg
+        className="absolute transition-opacity group-hover:opacity-0"
+        width={size * 0.72}
+        height={size * 0.72}
+        viewBox="0 -960 960 960"
+      >
+        <path d={iconPath} fill="#a49a82" />
+      </svg>
+      <svg
+        className="absolute opacity-0 transition-opacity group-hover:opacity-100"
+        width={size * 0.6}
+        height={size * 0.6}
+        viewBox="0 0 24 24"
+        fill="none"
+      >
+        <path d="M6 6l12 12M18 6L6 18" stroke="#8a4040" strokeWidth="2" strokeLinecap="round" />
+      </svg>
+    </button>
   );
 }
 

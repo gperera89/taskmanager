@@ -228,7 +228,9 @@ export default function TaskbookApp() {
             onClickAdjacentDay={clickAdjacentDay}
             onPrevMonth={goPrevMonth}
             onNextMonth={goNextMonth}
+            onToggleTask={actions.toggleTask}
             onDismissEvent={actions.dismissEvent}
+            onRestoreEvent={actions.restoreEvent}
           />
         );
       default:
@@ -292,7 +294,9 @@ export default function TaskbookApp() {
               onClickAdjacentDay={clickAdjacentDay}
               onPrevMonth={goPrevMonth}
               onNextMonth={goNextMonth}
+              onToggleTask={actions.toggleTask}
               onDismissEvent={actions.dismissEvent}
+              onRestoreEvent={actions.restoreEvent}
             />
           </div>
         )}

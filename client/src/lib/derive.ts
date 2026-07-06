@@ -202,9 +202,9 @@ function bucketLabel(b: DueBucket, now: Date, year: number, month0: number, toda
     case "overdue":
       return "Overdue";
     case "today":
-      return `Today · ${formatShortDate(now)}`;
+      return `Today · ${formatFullDate(now)}`;
     case "tomorrow":
-      return `Tomorrow · ${formatShortDate(new Date(year, month0, todayDay + 1))}`;
+      return `Tomorrow · ${formatFullDate(new Date(year, month0, todayDay + 1))}`;
     case "week":
       return "This week";
     case "later":
@@ -462,12 +462,13 @@ export function deriveCalendarView(
       const d = new Date(viewYear, viewMonth0, day);
       dayDetails[day] = {
         day,
-        weekday: WEEKDAY_NAMES[d.getDay()],
+        weekday: WEEKDAY_FULL_NAMES[d.getDay()],
         dateLabel: formatShortDate(d),
         fullLabel: formatFullDate(d),
         tasks: [],
         projects: [],
         events: [],
+        dismissedEvents: [],
       };
     }
     return dayDetails[day];
@@ -501,12 +502,15 @@ export function deriveCalendarView(
     dotDays.add(d.getDate());
   }
   for (const e of visibleEvents) {
-    if (dismissed.has(e.id)) continue;
     const start = new Date(e.start);
     const zoned = zonedYMD(start, raw.timeZone);
     if (zoned.year !== viewYear || zoned.month0 !== viewMonth0) continue;
+    if (dismissed.has(e.id)) {
+      ensureDay(zoned.day).dismissedEvents.push({ id: e.id, title: e.title });
+      continue;
+    }
     const metaLabel = `${e.allDay ? "All day" : formatEventTime(e.start, raw.timeZone)} · ${e.source}`;
-    ensureDay(zoned.day).events.push({ id: e.id, title: e.title, metaLabel, allDay: e.allDay });
+    ensureDay(zoned.day).events.push({ id: e.id, title: e.title, metaLabel, allDay: e.allDay, source: e.source });
     dotDays.add(zoned.day);
   }
 
