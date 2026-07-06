@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { useModalActions } from "./ModalContext";
+import { renderMarkdownLite } from "./markdownLite";
 import ModeToggle from "./ModeToggle";
 import { useTaskbook } from "./store";
 import type { CapturedKind, VoiceCaptureVM } from "./types";
@@ -373,7 +374,7 @@ export default function Header({
                       }
                       style={{ maxWidth: "85%" }}
                     >
-                      {m.content}
+                      {m.role === "assistant" ? renderMarkdownLite(m.content) : m.content}
                     </div>
                   ))}
                   {chatLoading && <div className="self-start text-sm italic text-[#a49a82]">Thinking…</div>}
