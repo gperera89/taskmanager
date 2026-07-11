@@ -18,7 +18,7 @@ export default function GlobalError({ error }: { error: Error & { digest?: strin
 
   return (
     <html lang="en">
-      <body className="flex h-screen items-center justify-center bg-[#efe9dc] font-serif text-[#8a8069]">
+      <body className="flex h-screen items-center justify-center bg-(--surface) font-serif text-(--ink-muted)">
         Updating…
       </body>
     </html>

@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 
 const inputClass =
-  "w-full rounded-lg border border-[#d3c9b3] bg-[#faf7ef] px-3 py-2 text-sm text-[#2a2622] outline-none focus:border-[#17399b]";
-const labelTextClass = "mb-1 block text-[11px] uppercase tracking-[0.14em] text-[#8a8069]";
+  "w-full rounded-lg border border-(--border-strong) bg-(--card) px-3 py-2 text-sm text-(--ink) outline-none focus:border-(--accent-text)";
+const labelTextClass = "mb-1 block text-[11px] uppercase tracking-[0.14em] text-(--ink-muted)";
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 // Displayed Monday-first to match how people actually think about a week; daysOfWeek values
 // underneath are still 0=Sunday..6=Saturday throughout the rest of the app.
@@ -84,7 +84,7 @@ export default function RepeatFields({
     <div className="flex flex-col gap-3">
       <div>
         <label className={labelTextClass}>Repeat</label>
-        <div className="flex gap-1 rounded-lg border border-[#d3c9b3] p-1">
+        <div className="flex gap-1 rounded-lg border border-(--border-strong) p-1">
           {FREQUENCY_OPTIONS.map((f) => (
             <button
               key={f.value}
@@ -92,8 +92,8 @@ export default function RepeatFields({
               onClick={() => setFrequency(f.value)}
               className="flex-1 cursor-pointer rounded-md py-1.5 text-xs"
               style={{
-                background: frequency === f.value ? "#17399b" : "transparent",
-                color: frequency === f.value ? "#fff" : "#8a8069",
+                background: frequency === f.value ? "var(--accent)" : "transparent",
+                color: frequency === f.value ? "var(--on-accent)" : "var(--ink-muted)",
               }}
             >
               {f.value && !isSingular ? `${f.label}s` : f.label}
@@ -129,9 +129,9 @@ export default function RepeatFields({
                     onClick={() => setDaysOfWeek((cur) => (cur.includes(idx) ? cur.filter((d) => d !== idx) : [...cur, idx]))}
                     className="flex h-8.5 w-8.5 cursor-pointer items-center justify-center rounded-full text-xs"
                     style={{
-                      background: daysOfWeek.includes(idx) ? "#17399b" : "transparent",
-                      color: daysOfWeek.includes(idx) ? "#fff" : "#8a8069",
-                      border: daysOfWeek.includes(idx) ? "none" : "1px solid #d3c9b3",
+                      background: daysOfWeek.includes(idx) ? "var(--accent)" : "transparent",
+                      color: daysOfWeek.includes(idx) ? "var(--on-accent)" : "var(--ink-muted)",
+                      border: daysOfWeek.includes(idx) ? "none" : "1px solid var(--border-strong)",
                     }}
                   >
                     {DAY_NAMES[idx][0]}
@@ -147,7 +147,7 @@ export default function RepeatFields({
           {frequency === "MONTHLY" && (
             <div>
               <label className={labelTextClass}>On</label>
-              <div className="mb-2.5 flex gap-1 rounded-full border border-[#d3c9b3] p-1">
+              <div className="mb-2.5 flex gap-1 rounded-full border border-(--border-strong) p-1">
                 {(["DATE", "WEEKDAY"] as const).map((mode) => (
                   <button
                     key={mode}
@@ -155,8 +155,8 @@ export default function RepeatFields({
                     onClick={() => setMonthlyMode(mode)}
                     className="flex-1 cursor-pointer rounded-full py-1.5 text-xs"
                     style={{
-                      background: monthlyMode === mode ? "#17399b" : "transparent",
-                      color: monthlyMode === mode ? "#fff" : "#8a8069",
+                      background: monthlyMode === mode ? "var(--accent)" : "transparent",
+                      color: monthlyMode === mode ? "var(--on-accent)" : "var(--ink-muted)",
                     }}
                   >
                     {mode === "DATE" ? "Each date" : "On the"}
@@ -175,8 +175,8 @@ export default function RepeatFields({
                         onClick={() => setDayOfMonth(day)}
                         className="flex h-7.5 w-7.5 cursor-pointer items-center justify-center rounded-full text-[11px]"
                         style={{
-                          background: dayOfMonth === day ? "#17399b" : "transparent",
-                          color: dayOfMonth === day ? "#fff" : "#2a2622",
+                          background: dayOfMonth === day ? "var(--accent)" : "transparent",
+                          color: dayOfMonth === day ? "var(--on-accent)" : "var(--ink)",
                         }}
                       >
                         {day}
@@ -188,9 +188,9 @@ export default function RepeatFields({
                     onClick={() => setDayOfMonth(-1)}
                     className="mt-1.5 w-full cursor-pointer rounded-lg py-1.5 text-xs"
                     style={{
-                      background: dayOfMonth === -1 ? "#17399b" : "transparent",
-                      color: dayOfMonth === -1 ? "#fff" : "#557694",
-                      border: dayOfMonth === -1 ? "none" : "1px solid #d3c9b3",
+                      background: dayOfMonth === -1 ? "var(--accent)" : "transparent",
+                      color: dayOfMonth === -1 ? "var(--on-accent)" : "var(--info)",
+                      border: dayOfMonth === -1 ? "none" : "1px solid var(--border-strong)",
                     }}
                   >
                     Last day of the month

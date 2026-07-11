@@ -30,7 +30,7 @@ export default async function Home() {
   });
   const settingsPromise = getAppSettings().catch((err) => {
     console.error("[page] failed to load app settings:", err);
-    return { timeZone: "Asia/Shanghai" };
+    return { timeZone: "Asia/Shanghai", lastCronAt: null as Date | null };
   });
   const dismissedPromise = getDismissedCalendarEventIds().catch((err) => {
     console.error("[page] failed to load dismissed events:", err);
@@ -49,15 +49,15 @@ export default async function Home() {
     // Settle the other in-flight promises so their rejections (if any) don't go unhandled.
     await Promise.allSettled([calendarPromise, capturesPromise, settingsPromise, dismissedPromise]);
     return (
-      <div className="flex flex-1 items-center justify-center bg-[#efe9dc]">
-        <p className="font-serif text-[#8a8069]">Could not reach the database. Check DATABASE_URL in .env.local.</p>
+      <div className="flex flex-1 items-center justify-center bg-(--surface)">
+        <p className="font-serif text-(--ink-muted)">Could not reach the database. Check DATABASE_URL in .env.local.</p>
       </div>
     );
   }
 
   const { events: calendarEvents, errors: calendarErrors } = await calendarPromise;
   const captures = await capturesPromise;
-  const { timeZone } = await settingsPromise;
+  const { timeZone, lastCronAt } = await settingsPromise;
   const dismissedEventIds = await dismissedPromise;
 
   const now = new Date();
@@ -81,6 +81,8 @@ export default async function Home() {
   const serverData: ServerCalendarData = {
     todayLabel: formatLongDate(now),
     calendarErrors,
+    // Notification heartbeat — the UI warns when the cron scheduler has stopped calling in.
+    lastCronAtMs: lastCronAt ? lastCronAt.getTime() : null,
   };
 
   return (

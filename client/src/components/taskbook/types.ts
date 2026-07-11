@@ -31,11 +31,26 @@ export type TaskItemVM = {
   repeatMonthlyOrdinal: number | null;
   repeatMonthlyWeekday: number | null;
   repeatLabel: string | null; // e.g. "Every week · Mon, Wed", null when repeatFrequency is null
+  section: string | null; // grouping heading within a project card
+  sortOrder: number | null; // manual position within its bucket/section (fractional index)
+  reminderLeadMinutes: number | null; // notify this long before the due time (null = at it)
+  subtasks: SubtaskVM[];
+};
+
+export type SubtaskVM = {
+  id: string;
+  title: string;
+  isCompleted: boolean;
 };
 
 export type TaskGroupVM = {
   key: string;
   label: string;
+  tasks: TaskItemVM[];
+};
+
+export type ProjectSectionVM = {
+  name: string | null; // null = the unsectioned group (rendered without a heading)
   tasks: TaskItemVM[];
 };
 
@@ -45,10 +60,13 @@ export type ProjectCardVM = {
   description: string | null;
   dueDateValue: string;
   dueLabel: string | null;
+  reminderLeadMinutes: number | null;
   done: number;
   total: number;
   progressPct: number;
-  tasks: TaskItemVM[]; // all tasks in the project, incomplete first
+  tasks: TaskItemVM[]; // all tasks in the project, incomplete first (flat, for lookups)
+  sections: ProjectSectionVM[]; // the same tasks grouped by section for display
+  sectionNames: string[]; // existing section names, for the per-task section picker
 };
 
 export type HabitIntervalUnit = "DAY" | "WEEK" | "MONTH";
@@ -112,7 +130,8 @@ export type UpcomingItemVM = {
 };
 
 export type ProjectOption = { id: string; name: string };
-export type CategoryOption = { id: string; name: string };
+export type CategoryScopeOption = "WORK" | "HOME" | "NONE";
+export type CategoryOption = { id: string; name: string; scope: CategoryScopeOption };
 
 export type CapturedKind = "task" | "project" | "routine" | "habit";
 
@@ -130,6 +149,9 @@ export type VoiceCaptureVM = {
 // it depends on the viewed month, which this store doesn't track (see CalendarViewVM).
 export type TaskbookData = {
   todayLabel: string;
+  // AppSettings.lastCronAt as ms (null = never ran) — the notification heartbeat. The UI
+  // warns when it's stale, since a lapsed external scheduler otherwise fails silently.
+  lastCronAtMs: number | null;
   taskGroups: TaskGroupVM[];
   tasksRemainingToday: number;
   projectCards: ProjectCardVM[];

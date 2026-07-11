@@ -14,5 +14,7 @@ export const config = {
 	// for the iPhone Shortcut which can't hold a login cookie), same as api/cron's secret check.
 	// api/mcp is the same story for the Claude MCP connector, which authenticates via a secret
 	// embedded in the URL path instead of a session cookie (see api/mcp/[secret]/route.ts).
-	matcher: ["/((?!api/auth|api/cron|api/voice-capture|api/mcp|_next/static|_next/image|favicon.ico|icon.png|apple-icon.png).*)"],
+	// api/notify-action is hit by ntfy notification action buttons carrying the cron secret.
+	// sw.js must load without a session so the service worker can register/update on any device.
+	matcher: ["/((?!api/auth|api/cron|api/voice-capture|api/mcp|api/notify-action|_next/static|_next/image|favicon.ico|icon.png|apple-icon.png|sw.js|manifest.webmanifest).*)"],
 };

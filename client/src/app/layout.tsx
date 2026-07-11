@@ -31,9 +31,11 @@ export default async function RootLayout({
       lang="en"
       className={`${lora.variable} ${pinyon.variable} h-full antialiased`}
     >
-      <body className="flex h-screen flex-col overflow-hidden font-serif bg-[#efe9dc]">
+      {/* h-dvh (not h-screen/100vh) so iOS Safari's collapsing chrome never hides the bottom
+          tab bar behind the home indicator. */}
+      <body className="flex h-dvh flex-col overflow-hidden font-serif bg-(--surface)">
         {session?.user && (
-          <div className="flex flex-none items-center justify-end gap-3 border-b border-[#ddd4c1] bg-[#e6ded0] px-6 py-2.5 text-xs text-[#8a8069]">
+          <div className="flex flex-none items-center justify-end gap-3 border-b border-(--border) bg-(--surface-raised) px-6 py-2.5 text-xs text-(--ink-muted)">
             {/* Filled via portal by Header.tsx on mobile, where settings/notifications/mode
                 toggle would otherwise overflow off-screen alongside the search bar. */}
             <div id="mobile-top-actions" className="flex items-center gap-2 lg:hidden" />
@@ -44,7 +46,7 @@ export default async function RootLayout({
                 await signOut({ redirectTo: "/" });
               }}
             >
-              <button type="submit" className="hover:text-[#17399b]">
+              <button type="submit" className="hover:text-(--accent-text)">
                 Sign out
               </button>
             </form>

@@ -1,8 +1,112 @@
 @import "tailwindcss";
 
+/* ---------------------------------------------------------------------------------------------
+   Design tokens. Every component references these via Tailwind's var shorthand (e.g.
+   bg-(--surface), text-(--ink-muted)) or plain var() in style objects — never raw hex — so the
+   whole palette, including dark mode below, is defined in this one block.
+--------------------------------------------------------------------------------------------- */
 :root {
-  --background: #efe9dc;
-  --foreground: #2a2622;
+  color-scheme: light;
+
+  /* Surfaces */
+  --surface: #efe9dc; /* page background */
+  --surface-raised: #e6ded0; /* top bar, bottom tabs */
+  --surface-active: #e9e1d0; /* active tab, sync banner */
+  --surface-rail: #ece5d6; /* calendar side rail */
+  --card: #faf7ef; /* cards, modals, inputs */
+  --card-tint: #f2ecdf; /* project cards */
+
+  /* Lines */
+  --border: #ddd4c1;
+  --border-strong: #d3c9b3;
+  --border-soft: #e1d8c4; /* row dividers */
+  --border-faint: #eee5d4;
+  --rule: #d5cbb4; /* heading rules */
+
+  /* Ink */
+  --ink: #2a2622;
+  --ink-strong: #4a4436; /* calendar day numbers */
+  --ink-quote: #5c5546;
+  --ink-muted: #8a8069;
+  --ink-soft: #a49a82; /* empty states, placeholders */
+  --ink-faint: #b3a988;
+  --ink-ghost: #c4bba3; /* "Add description" affordance */
+  --ink-disabled: #c3b9a1; /* out-of-month days */
+  --ink-strike: #c2b89f; /* struck-through completed text */
+
+  /* Accents */
+  --accent: #17399b; /* filled accent backgrounds */
+  --accent-text: #17399b; /* accent-colored text/borders (diverges in dark) */
+  --on-accent: #fff;
+  --info: #557694;
+  --danger: #8a4040;
+  --danger-surface: #f0e4dc;
+
+  /* Washes (translucent chip/button fills) */
+  --overlay: rgba(42, 38, 34, 0.35);
+  --accent-wash: rgba(23, 57, 155, 0.08);
+  --accent-wash-strong: rgba(23, 57, 155, 0.12);
+  --accent-ring: rgba(23, 57, 155, 0.45);
+  --info-wash: rgba(85, 118, 148, 0.1);
+  --info-wash-soft: rgba(85, 118, 148, 0.08);
+  --muted-wash: rgba(138, 128, 105, 0.13);
+
+  /* Toasts (inverted panel) */
+  --toast-bg: #2a2622;
+  --toast-ink: #efe9dc;
+  --toast-action: #b8c6f2;
+
+  --background: var(--surface);
+  --foreground: var(--ink);
+}
+
+/* Warm-dark companion palette: same hue family, flipped values. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+
+    --surface: #211e17;
+    --surface-raised: #2a251c;
+    --surface-active: #332d20;
+    --surface-rail: #262218;
+    --card: #2b261d;
+    --card-tint: #2f2a20;
+
+    --border: #3d362a;
+    --border-strong: #4c4433;
+    --border-soft: #383226;
+    --border-faint: #322d22;
+    --rule: #4c4433;
+
+    --ink: #ece5d4;
+    --ink-strong: #d9d1bd;
+    --ink-quote: #cfc7b1;
+    --ink-muted: #a89e87;
+    --ink-soft: #948b74;
+    --ink-faint: #7d745f;
+    --ink-ghost: #665e4c;
+    --ink-disabled: #5a5343;
+    --ink-strike: #6f6754;
+
+    --accent: #4f6ac4;
+    --accent-text: #9db1f2;
+    --on-accent: #fff;
+    --info: #8fb3d1;
+    --danger: #e09393;
+    --danger-surface: #3a2a26;
+
+    --overlay: rgba(0, 0, 0, 0.55);
+    --accent-wash: rgba(157, 177, 242, 0.12);
+    --accent-wash-strong: rgba(157, 177, 242, 0.18);
+    --accent-ring: rgba(157, 177, 242, 0.5);
+    --info-wash: rgba(143, 179, 209, 0.14);
+    --info-wash-soft: rgba(143, 179, 209, 0.1);
+    --muted-wash: rgba(168, 158, 135, 0.14);
+
+    --toast-bg: #ece5d4;
+    --toast-ink: #211e17;
+    --toast-action: #2d4bad;
+  }
 }
 
 @theme inline {
@@ -17,17 +121,13 @@ body {
   color: var(--foreground);
 }
 
-/* Native <select> popups otherwise render with the browser's default white/black chrome —
-   this pulls the closed control and the dropdown list itself onto the app's cream/ink palette
+/* Native <select> popups otherwise render with the browser's default chrome — this pulls the
+   closed control and the dropdown list itself onto the app's palette in both themes
    (option-level theming is honored by Chrome/Firefox on most platforms, though macOS Safari's
    native popup still ignores it). */
-select {
-  color-scheme: light;
-}
-
 select option {
-  background-color: #faf7ef;
-  color: #2a2622;
+  background-color: var(--card);
+  color: var(--ink);
 }
 
 @keyframes flame-ignite {

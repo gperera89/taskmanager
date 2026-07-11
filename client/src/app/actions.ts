@@ -2,6 +2,7 @@
 
 import { auth } from "@/auth";
 import {
+  type CategoryScope,
   completeHabit,
   completeRoutineCluster,
   createCategory,
@@ -17,13 +18,18 @@ import {
   deleteTask,
   dismissCalendarEvent as dismissCalendarEventApi,
   dismissVoiceCapture,
+  duplicateProject as duplicateProjectApi,
   type HabitIntervalUnit,
+  reorderTasks as reorderTasksApi,
   restoreCalendarEvent as restoreCalendarEventApi,
   type RoutineFrequency,
   type RoutineMonthlyMode,
+  snoozeTask as snoozeTaskApi,
   type TaskRepeatInput,
   toggleTaskCompletion,
+  untickRoutineCluster,
   updateCategory,
+  updateCategoryScope as updateCategoryScopeApi,
   updateHabit,
   updateProject,
   updateRoutine,
@@ -81,6 +87,8 @@ export async function addTask(formData: FormData): Promise<string | undefined> {
   const dueTime = String(formData.get("dueTime") ?? "").trim();
   const projectId = String(formData.get("projectId") ?? "").trim();
   const parentId = String(formData.get("parentId") ?? "").trim();
+  const section = String(formData.get("section") ?? "").trim();
+  const reminderLead = Number(formData.get("reminderLeadMinutes") ?? "");
   if (!title || !category) return;
 
   const task = await createTask({
@@ -91,6 +99,8 @@ export async function addTask(formData: FormData): Promise<string | undefined> {
     dueTime: dueTime || null,
     projectId: projectId || null,
     parentId: parentId || null,
+    section: section || null,
+    reminderLeadMinutes: reminderLead > 0 ? reminderLead : null,
     repeat: parseTaskRepeat(formData),
   });
   return task.id;
@@ -146,15 +156,56 @@ export async function updateTaskRepeat(id: string, formData: FormData) {
   await updateTask(id, { repeat: parseTaskRepeat(formData) });
 }
 
+export async function updateTaskSection(id: string, formData: FormData) {
+  await requireSession();
+  const section = String(formData.get("section") ?? "").trim();
+  await updateTask(id, { section: section || null });
+}
+
+export async function updateTaskReminderLead(id: string, formData: FormData) {
+  await requireSession();
+  const lead = Number(formData.get("reminderLeadMinutes") ?? "");
+  await updateTask(id, { reminderLeadMinutes: lead > 0 ? lead : null });
+}
+
+// Rewrites the manual order of a whole group (due bucket / project section) in one call —
+// the ids arrive in their new display order.
+export async function reorderTaskGroup(formData: FormData) {
+  await requireSession();
+  const ids = formData.getAll("ids").map(String).filter(Boolean);
+  if (ids.length) await reorderTasksApi(ids);
+}
+
+export async function snoozeTask(id: string, days: number) {
+  await requireSession();
+  await snoozeTaskApi(id, Math.min(Math.max(Math.round(days) || 1, 1), 30));
+}
+
 export async function addProject(formData: FormData): Promise<string | undefined> {
   await requireSession();
 
   const name = String(formData.get("name") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
   const dueDate = String(formData.get("dueDate") ?? "").trim();
+  const reminderLead = Number(formData.get("reminderLeadMinutes") ?? "");
   if (!name) return;
 
-  const project = await createProject({ name, description: description || null, dueDate: dueDate || null });
+  const project = await createProject({
+    name,
+    description: description || null,
+    dueDate: dueDate || null,
+    reminderLeadMinutes: reminderLead > 0 ? reminderLead : null,
+  });
+  return project.id;
+}
+
+// "New from template": server-computed copy of an existing project and its tasks. Not
+// optimistic — the caller refreshes after it resolves (creating a whole task tree client-side
+// would duplicate too much server logic for a rare operation).
+export async function duplicateProject(id: string, formData: FormData): Promise<string | undefined> {
+  await requireSession();
+  const name = String(formData.get("name") ?? "").trim();
+  const project = await duplicateProjectApi(id, name || null);
   return project.id;
 }
 
@@ -164,9 +215,15 @@ export async function editProject(id: string, formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
   const dueDate = String(formData.get("dueDate") ?? "").trim();
+  const reminderLead = Number(formData.get("reminderLeadMinutes") ?? "");
   if (!name) return;
 
-  await updateProject(id, { name, description: description || null, dueDate: dueDate || null });
+  await updateProject(id, {
+    name,
+    description: description || null,
+    dueDate: dueDate || null,
+    reminderLeadMinutes: reminderLead > 0 ? reminderLead : null,
+  });
 }
 
 export async function renameProject(id: string, formData: FormData) {
@@ -296,6 +353,12 @@ export async function tickRoutine(id: string) {
   await completeRoutineCluster(id);
 }
 
+// Un-ticks a cluster (e.g. one the notification cron auto-ticked but wasn't actually done).
+export async function untickRoutine(id: string) {
+  await requireSession();
+  await untickRoutineCluster(id);
+}
+
 export async function removeRoutine(id: string) {
   await requireSession();
   await deleteRoutine(id);
@@ -311,12 +374,22 @@ export async function addSubroutine(parentId: string, formData: FormData): Promi
   return subroutine.id;
 }
 
+const CATEGORY_SCOPES: CategoryScope[] = ["WORK", "HOME", "NONE"];
+
 export async function addCategory(formData: FormData): Promise<string | undefined> {
   await requireSession();
   const name = String(formData.get("name") ?? "").trim();
+  const scope = String(formData.get("scope") ?? "NONE") as CategoryScope;
   if (!name) return;
-  const category = await createCategory(name);
+  const category = await createCategory(name, CATEGORY_SCOPES.includes(scope) ? scope : "NONE");
   return category.id;
+}
+
+export async function setCategoryScope(id: string, formData: FormData) {
+  await requireSession();
+  const scope = String(formData.get("scope") ?? "") as CategoryScope;
+  if (!CATEGORY_SCOPES.includes(scope)) return;
+  await updateCategoryScopeApi(id, scope);
 }
 
 export async function renameCategory(id: string, formData: FormData) {

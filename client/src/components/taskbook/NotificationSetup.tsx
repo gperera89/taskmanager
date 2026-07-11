@@ -80,26 +80,26 @@ export default function NotificationSetup() {
   if (status === "checking") return null;
 
   return (
-    <div className="rounded-lg border border-[#d3c9b3] bg-[#faf7ef] p-2.5 text-sm text-[#2a2622]">
-      {status === "unsupported" && <p className="text-[#8a8069]">This browser doesn&apos;t support push notifications.</p>}
+    <div className="rounded-lg border border-(--border-strong) bg-(--card) p-2.5 text-sm text-(--ink)">
+      {status === "unsupported" && <p className="text-(--ink-muted)">This browser doesn&apos;t support push notifications.</p>}
       {status === "needs-install" && (
-        <p className="text-[#8a8069]">
+        <p className="text-(--ink-muted)">
           On iPhone, notifications only work once this app is added to your home screen. Tap the Share button in
           Safari, then &ldquo;Add to Home Screen,&rdquo; and reopen it from there.
         </p>
       )}
       {status === "denied" && (
-        <p className="text-[#8a4040]">
+        <p className="text-(--danger)">
           Notifications are blocked for this site. Enable them in your browser&apos;s site settings to turn this on.
         </p>
       )}
       {(status === "off" || status === "error") && (
         <div className="flex items-center justify-between gap-2">
-          <span className="text-[#8a8069]">Get a notification when a task or project comes due.</span>
+          <span className="text-(--ink-muted)">Get a notification when a task or project comes due.</span>
           <button
             type="button"
             onClick={enable}
-            className="cursor-pointer whitespace-nowrap rounded-md bg-[#17399b] px-2.5 py-1 text-xs text-white"
+            className="cursor-pointer whitespace-nowrap rounded-md bg-(--accent) px-2.5 py-1 text-xs text-(--on-accent)"
           >
             Enable
           </button>
@@ -107,8 +107,8 @@ export default function NotificationSetup() {
       )}
       {status === "on" && (
         <div className="flex items-center justify-between gap-2">
-          <span className="text-[#557694]">Notifications are on for this device.</span>
-          <button type="button" onClick={disable} className="cursor-pointer text-xs text-[#b3a988] hover:text-[#8a4040]">
+          <span className="text-(--info)">Notifications are on for this device.</span>
+          <button type="button" onClick={disable} className="cursor-pointer text-xs text-(--ink-faint) hover:text-(--danger)">
             Turn off
           </button>
         </div>

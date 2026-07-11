@@ -20,7 +20,7 @@ export default function Error({ error }: { error: Error & { digest?: string } })
   }, [error]);
 
   return (
-    <div className="flex h-screen items-center justify-center bg-[#efe9dc] font-serif text-[#8a8069]">
+    <div className="flex h-screen items-center justify-center bg-(--surface) font-serif text-(--ink-muted)">
       Updating…
     </div>
   );

@@ -7,6 +7,8 @@
 // needs resurrecting).
 
 import type { Task, Project, Habit, Routine, Category, VoiceCapture } from "@prisma/client";
+import { habitPeriodStatus, taskOrderCompare, MS_PER_DAY, ROUTINE_TICK_EXPIRY_MS } from "@/lib/shared";
+export { combineDueDateTime, ROUTINE_TICK_EXPIRY_MS } from "@/lib/shared";
 import {
   bucketForDue,
   buildMonthCells,
@@ -75,18 +77,23 @@ export type DerivedEntities = {
   pendingCaptures: VoiceCaptureVM[];
 };
 
-// --- Constants mirrored from lib/api.ts (which is server-only and can't be imported here) ---
+// Mode filtering: each Category row carries a scope (WORK/HOME/NONE). A task shows in a
+// non-"all" mode when its category's scope matches, or when the scope is NONE (visible in
+// both — the old behavior of hiding anything that wasn't literally named "Work"/"Home" made
+// tasks silently vanish). The literal-name fallback keeps things sane before the scope
+// backfill has run. Calendar events are matched by their ICS source label instead, since they
+// have no category — "Outlook" is the work calendar, "Gmail" the home one (see lib/calendar.ts).
+function taskMatchesMode(category: string, mode: Mode, scopeByName: Map<string, Mode | "both">): boolean {
+  if (mode === "all") return true;
+  const scope = scopeByName.get(category.toLowerCase());
+  if (scope !== undefined) return scope === "both" || scope === mode;
+  return category.toLowerCase() === mode;
+}
 
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
-const INTERVAL_UNIT_DAYS: Record<string, number> = { DAY: 1, WEEK: 7, MONTH: 30 };
-export const ROUTINE_TICK_EXPIRY_MS = 60 * 60 * 1000;
-
-// Task.category is free text (seeded with "Work"/"Home" but user-editable), so the mode
-// filter matches those two labels case-insensitively and leaves everything else visible only in
-// "all". Calendar events are matched by their ICS source label instead, since they have no
-// category — "Outlook" is the YCIS work calendar, "Gmail" the home one (see lib/calendar.ts).
-function taskMatchesMode(category: string, mode: Mode): boolean {
-  return mode === "all" || category.toLowerCase() === mode;
+function categoryScopeMap(categories: Category[]): Map<string, Mode | "both"> {
+  return new Map(
+    categories.map((c) => [c.name.toLowerCase(), c.scope === "WORK" ? "work" : c.scope === "HOME" ? "home" : "both"])
+  );
 }
 
 function eventMatchesMode(source: string, mode: Mode): boolean {
@@ -94,24 +101,9 @@ function eventMatchesMode(source: string, mode: Mode): boolean {
   return mode === "work" ? source === "Outlook" : source === "Gmail";
 }
 
-function habitWindowDays(habit: Pick<Habit, "intervalValue" | "intervalUnit">): number {
-  return habit.intervalValue * INTERVAL_UNIT_DAYS[habit.intervalUnit];
-}
-
-function habitPeriodIndex(date: Date, windowDays: number) {
-  return Math.floor(date.getTime() / (MS_PER_DAY * windowDays));
-}
-
 export function isRoutineTickedNow(routine: Pick<Routine, "lastCompletedAt">, nowMs: number): boolean {
   if (!routine.lastCompletedAt) return false;
   return nowMs - new Date(routine.lastCompletedAt).getTime() < ROUTINE_TICK_EXPIRY_MS;
-}
-
-// Mirrors lib/api.ts's combineDueDateTime so optimistic task/subtask edits store the same
-// UTC-midnight-plus-face-value-time encoding the server would have written.
-export function combineDueDateTime(dueDate: string, dueTime?: string | null): Date {
-  const time = dueTime && /^\d{2}:\d{2}$/.test(dueTime) ? dueTime : "00:00";
-  return new Date(`${dueDate}T${time}:00.000Z`);
 }
 
 // --- Formatting helpers (ported from page.tsx) ---
@@ -192,6 +184,10 @@ function toTaskVM(t: RawTask, projectNameById: Map<string, string>): TaskItemVM 
     repeatMonthlyOrdinal: t.repeatMonthlyOrdinal,
     repeatMonthlyWeekday: t.repeatMonthlyWeekday,
     repeatLabel,
+    section: t.section,
+    sortOrder: t.sortOrder,
+    reminderLeadMinutes: t.reminderLeadMinutes,
+    subtasks: t.subtasks.map((s) => ({ id: s.id, title: s.title, isCompleted: s.isCompleted })),
   };
 }
 
@@ -245,18 +241,24 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
 
   // Tasks — grouped by due bucket. Projects/routines/habits aren't categorized work/home,
   // so the mode filter only narrows the task list (and, below, the calendar).
+  const scopeByName = categoryScopeMap(raw.categories);
   const projectNameById = new Map(raw.projects.map((p) => [p.id, p.name]));
-  const grouped = new Map<DueBucket, { vm: TaskItemVM; dueMs: number | null }[]>();
+  const grouped = new Map<DueBucket, { vm: TaskItemVM; dueMs: number | null; createdMs: number }[]>();
   for (const t of raw.tasks) {
-    if (!taskMatchesMode(t.category, mode)) continue;
+    if (!taskMatchesMode(t.category, mode, scopeByName)) continue;
     const vm = toTaskVM(t, projectNameById);
     const b = bucketForDue(t.dueDate ? new Date(t.dueDate) : null, now);
     if (!grouped.has(b)) grouped.set(b, []);
-    grouped.get(b)!.push({ vm, dueMs: t.dueDate ? new Date(t.dueDate).getTime() : null });
+    grouped.get(b)!.push({ vm, dueMs: t.dueDate ? new Date(t.dueDate).getTime() : null, createdMs: new Date(t.createdAt).getTime() });
   }
-  // Within each bucket, order chronologically by due date/time rather than DB insertion order.
+  // Within each bucket: manual order first (drag-and-drop), then due time, then creation.
   for (const entries of grouped.values()) {
-    entries.sort((a, b) => (a.dueMs ?? Infinity) - (b.dueMs ?? Infinity));
+    entries.sort((a, b) =>
+      taskOrderCompare(
+        { sortOrder: a.vm.sortOrder, dueMs: a.dueMs, createdMs: a.createdMs },
+        { sortOrder: b.vm.sortOrder, dueMs: b.dueMs, createdMs: b.createdMs }
+      )
+    );
   }
   const taskGroups: TaskGroupVM[] = BUCKET_ORDER.filter((b) => grouped.has(b)).map((b) => ({
     key: b,
@@ -274,26 +276,49 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
   }
   const visibleProjects = raw.projects.filter((p) => {
     if (mode === "all") return true;
-    return (tasksByProject.get(p.id) ?? []).some((t) => taskMatchesMode(t.category, mode));
+    return (tasksByProject.get(p.id) ?? []).some((t) => taskMatchesMode(t.category, mode, scopeByName));
   });
   const projectCards: ProjectCardVM[] = visibleProjects.map((p) => {
-    const items = (tasksByProject.get(p.id) ?? []).filter((t) => taskMatchesMode(t.category, mode));
+    const items = (tasksByProject.get(p.id) ?? []).filter((t) => taskMatchesMode(t.category, mode, scopeByName));
     const done = items.filter((t) => t.isCompleted).length;
     const total = items.length;
     const progressPct = total ? Math.round((done / total) * 100) : 0;
-    const tasks = [...items]
-      .sort((a, b) => Number(a.isCompleted) - Number(b.isCompleted))
-      .map((t) => toTaskVM(t, projectNameById));
+    const orderKey = (t: RawTask) => ({
+      sortOrder: t.sortOrder,
+      dueMs: t.dueDate ? new Date(t.dueDate).getTime() : null,
+      createdMs: new Date(t.createdAt).getTime(),
+    });
+    const sorted = [...items].sort(
+      (a, b) => Number(a.isCompleted) - Number(b.isCompleted) || taskOrderCompare(orderKey(a), orderKey(b))
+    );
+    const tasks = sorted.map((t) => toTaskVM(t, projectNameById));
+    // Group by section, preserving first-appearance order; unsectioned tasks lead.
+    const sectionOrder: (string | null)[] = [null];
+    const bySection = new Map<string | null, TaskItemVM[]>([[null, []]]);
+    for (const t of tasks) {
+      const key = t.section;
+      if (!bySection.has(key)) {
+        bySection.set(key, []);
+        sectionOrder.push(key);
+      }
+      bySection.get(key)!.push(t);
+    }
+    const sections = sectionOrder
+      .map((name) => ({ name, tasks: bySection.get(name)! }))
+      .filter((s) => s.name === null || s.tasks.length > 0);
     return {
       id: p.id,
       name: p.name,
       description: p.description,
       dueDateValue: toDateInputValue(p.dueDate),
       dueLabel: p.dueDate ? formatShortDate(calendarDateFromDue(new Date(p.dueDate))) : null,
+      reminderLeadMinutes: p.reminderLeadMinutes,
       done,
       total,
       progressPct,
       tasks,
+      sections,
+      sectionNames: sectionOrder.filter((s): s is string => s !== null),
     };
   });
   const activeProjectCount = visibleProjects.filter((p) => !p.isCompleted).length;
@@ -339,19 +364,18 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
   const routineList = [...routineVMs].sort((a, b) => a.nextOccurrenceMs - b.nextOccurrenceMs);
   const routineTotalCount = routineVMs.length;
 
-  // Habits — status computed, then ranked by urgency (soonest to break its streak first).
+  // Habits — status computed (period boundaries local-midnight-aligned in the configured
+  // zone, see lib/shared.ts), then ranked by urgency (soonest to break its streak first).
   const habitStatuses = raw.habits
     .map((habit) => {
-      const windowDays = habitWindowDays(habit);
-      const nowPeriod = habitPeriodIndex(now, windowDays);
-      const lastPeriod = habit.lastCompletedDate ? habitPeriodIndex(new Date(habit.lastCompletedDate), windowDays) : null;
-      const periodEndsAt = new Date((nowPeriod + 1) * windowDays * MS_PER_DAY);
-      const isDoneThisPeriod = lastPeriod === nowPeriod;
-      const daysRemaining = (periodEndsAt.getTime() - now.getTime()) / MS_PER_DAY;
-      // Mirrors the streak-reset check in api.ts/store.tsx's markHabitDone: a gap of more than
-      // one period means the streak would reset to 1 on next completion, i.e. it's already broken.
-      const lapsed = !isDoneThisPeriod && (lastPeriod == null || nowPeriod - lastPeriod > 1);
-      return { habit, daysRemaining, isDoneThisPeriod, lapsed, atRisk: !isDoneThisPeriod && daysRemaining <= 1 };
+      const status = habitPeriodStatus(habit, now, raw.timeZone);
+      return {
+        habit,
+        daysRemaining: status.daysRemaining,
+        isDoneThisPeriod: status.isDoneThisPeriod,
+        lapsed: status.lapsed,
+        atRisk: status.atRisk,
+      };
     })
     .sort((a, b) => a.daysRemaining - b.daysRemaining);
 
@@ -412,7 +436,7 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
     habitOnTrack,
     habitAtRiskCount,
     projectOptions: raw.projects.map((p) => ({ id: p.id, name: p.name })),
-    categoryOptions: raw.categories.map((c) => ({ id: c.id, name: c.name })),
+    categoryOptions: raw.categories.map((c) => ({ id: c.id, name: c.name, scope: c.scope })),
     pendingCaptures,
   };
 }
@@ -452,6 +476,7 @@ export function deriveCalendarView(
   const now = new Date(nowMs);
   const today = zonedYMD(now, raw.timeZone);
   const dismissed = new Set(raw.dismissedEventIds);
+  const scopeByName = categoryScopeMap(raw.categories);
   const visibleEvents = calendarEvents.filter((e) => eventMatchesMode(e.source, mode));
 
   const dayDetails: Record<number, DayDetailVM> = {};
@@ -483,7 +508,7 @@ export function deriveCalendarView(
   const projectNameById = new Map(raw.projects.map((p) => [p.id, p.name]));
 
   for (const t of raw.tasks) {
-    if (t.isCompleted || !t.dueDate || !taskMatchesMode(t.category, mode)) continue;
+    if (t.isCompleted || !t.dueDate || !taskMatchesMode(t.category, mode, scopeByName)) continue;
     const d = calendarDateFromDue(new Date(t.dueDate));
     if (d.getFullYear() !== viewYear || d.getMonth() !== viewMonth0) continue;
     ensureDay(d.getDate()).tasks.push({
@@ -522,7 +547,7 @@ export function deriveCalendarView(
   type UpcomingSource = { sortKey: number; item: UpcomingItemVM };
   const upcomingSources: UpcomingSource[] = [];
   for (const t of raw.tasks) {
-    if (t.isCompleted || !t.dueDate || !taskMatchesMode(t.category, mode)) continue;
+    if (t.isCompleted || !t.dueDate || !taskMatchesMode(t.category, mode, scopeByName)) continue;
     const diff = daysUntil(new Date(t.dueDate), now);
     if (diff < 0) continue;
     const d = calendarDateFromDue(new Date(t.dueDate));

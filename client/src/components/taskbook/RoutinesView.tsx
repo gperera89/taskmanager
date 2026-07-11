@@ -21,14 +21,14 @@ export default function RoutinesView({
   return (
     <div>
       <div className="flex max-w-[680px] items-end justify-between">
-        <div className="font-script text-[62px] leading-[0.8] text-[#2a2622]">Routines</div>
-        <div className="pb-2.5 text-[13px] text-[#8a8069]">{total} total</div>
+        <div className="font-script text-[62px] leading-[0.8] text-(--ink)">Routines</div>
+        <div className="pb-2.5 text-[13px] text-(--ink-muted)">{total} total</div>
       </div>
-      <div className="my-5 mb-6 h-px max-w-[680px] bg-[#d5cbb4]" />
+      <div className="my-5 mb-6 h-px max-w-[680px] bg-(--rule)" />
 
-      {total === 0 && <p className="py-8 text-[15px] italic text-[#a49a82]">Nothing here yet.</p>}
+      {total === 0 && <p className="py-8 text-[15px] italic text-(--ink-soft)">Nothing here yet.</p>}
       {total > 0 && filtered.length === 0 && (
-        <p className="py-8 text-[15px] italic text-[#a49a82]">No routines match your search.</p>
+        <p className="py-8 text-[15px] italic text-(--ink-soft)">No routines match your search.</p>
       )}
 
       <div className="max-w-[680px]">
@@ -54,7 +54,9 @@ function RoutineRow({ routine }: { routine: RoutineItemVM }) {
 
   function handleToggle() {
     if (routine.isTicked) {
-      actions.tickRoutine(routine.id);
+      // Un-tick (e.g. the cron auto-ticked it on notify but it wasn't actually done) — the
+      // old behavior re-ticked, which made a ticked routine impossible to take back.
+      actions.untickRoutine(routine.id);
       setStepChecks({});
       return;
     }
@@ -75,7 +77,7 @@ function RoutineRow({ routine }: { routine: RoutineItemVM }) {
   }
 
   return (
-    <div className="group border-b border-[#e1d8c4] py-3.5">
+    <div className="group border-b border-(--border-soft) py-3.5">
       <div className="flex items-start gap-3">
         <CheckSquare action={handleToggle} checked={routine.isTicked} completing={completing} />
         <div className="min-w-0 flex-1 cursor-pointer" onClick={() => openEdit({ mode: "edit", kind: "routine", item: routine })}>
@@ -83,7 +85,7 @@ function RoutineRow({ routine }: { routine: RoutineItemVM }) {
             <span
               className="relative text-base leading-5.5"
               style={{
-                color: routine.isTicked ? "#a49a82" : "#2a2622",
+                color: routine.isTicked ? "var(--ink-soft)" : "var(--ink)",
                 textDecoration: routine.isTicked && !completing ? "line-through" : "none",
               }}
             >
@@ -97,7 +99,7 @@ function RoutineRow({ routine }: { routine: RoutineItemVM }) {
             )}
           </div>
           {routine.isTicked && !routine.scheduleLabel && (
-            <div className="mt-0.5 text-xs italic text-[#b3a988]">auto-resets within the hour</div>
+            <div className="mt-0.5 text-xs italic text-(--ink-faint)">auto-resets within the hour</div>
           )}
           <div className="mt-1 flex items-center gap-2.5" onClick={(e) => e.stopPropagation()}>
             {editingPause ? (
@@ -110,10 +112,10 @@ function RoutineRow({ routine }: { routine: RoutineItemVM }) {
                   setEditingPause(false);
                 }}
                 onBlur={() => setEditingPause(false)}
-                className="rounded-md border border-[#d3c9b3] bg-[#faf7ef] px-1.5 py-0.5 text-xs text-[#2a2622] outline-none focus:border-[#17399b]"
+                className="rounded-md border border-(--border-strong) bg-(--card) px-1.5 py-0.5 text-xs text-(--ink) outline-none focus:border-(--accent-text)"
               />
             ) : (
-              <button type="button" onClick={() => setEditingPause(true)} className="cursor-pointer text-xs text-[#8a8069]">
+              <button type="button" onClick={() => setEditingPause(true)} className="cursor-pointer text-xs text-(--ink-muted)">
                 Next: {routine.nextNotificationLabel}
               </button>
             )}
@@ -121,7 +123,7 @@ function RoutineRow({ routine }: { routine: RoutineItemVM }) {
               <button
                 type="button"
                 onClick={() => actions.setRoutinePause(routine.id, "")}
-                className="cursor-pointer text-xs text-[#b3a988] hover:text-[#8a4040]"
+                className="cursor-pointer text-xs text-(--ink-faint) hover:text-(--danger)"
               >
                 Clear pause
               </button>
@@ -140,7 +142,7 @@ function RoutineRow({ routine }: { routine: RoutineItemVM }) {
                 <CheckSquare action={() => toggleStep(s.id)} checked={checked} size={16} />
                 <span
                   className="flex-1 text-[13px]"
-                  style={{ color: checked ? "#c2b89f" : "#8a8069", textDecoration: checked ? "line-through" : "none" }}
+                  style={{ color: checked ? "var(--ink-strike)" : "var(--ink-muted)", textDecoration: checked ? "line-through" : "none" }}
                 >
                   {s.title}
                 </span>
@@ -148,7 +150,7 @@ function RoutineRow({ routine }: { routine: RoutineItemVM }) {
                   type="button"
                   onClick={() => actions.removeRoutine(s.id)}
                   aria-label="Remove step"
-                  className="cursor-pointer text-xs text-[#b3a988] opacity-0 transition-opacity hover:text-[#8a4040] group-hover/step:opacity-100"
+                  className="cursor-pointer text-xs text-(--ink-faint) opacity-0 transition-opacity hover:text-(--danger) group-hover/step:opacity-100"
                 >
                   Remove
                 </button>
@@ -174,17 +176,17 @@ function RoutineRow({ routine }: { routine: RoutineItemVM }) {
               required
               autoFocus
               placeholder="e.g. Make coffee"
-              className="rounded-md border border-[#d3c9b3] bg-[#faf7ef] px-2 py-1 text-[13px] text-[#2a2622] outline-none focus:border-[#17399b]"
+              className="rounded-md border border-(--border-strong) bg-(--card) px-2 py-1 text-[13px] text-(--ink) outline-none focus:border-(--accent-text)"
             />
-            <button type="submit" className="cursor-pointer text-[13px] text-[#557694]">
+            <button type="submit" className="cursor-pointer text-[13px] text-(--info)">
               Add
             </button>
-            <button type="button" onClick={() => setAddingStep(false)} className="cursor-pointer text-[13px] text-[#b3a988]">
+            <button type="button" onClick={() => setAddingStep(false)} className="cursor-pointer text-[13px] text-(--ink-faint)">
               Cancel
             </button>
           </form>
         ) : (
-          <button type="button" onClick={() => setAddingStep(true)} className="cursor-pointer text-[13px] text-[#557694]">
+          <button type="button" onClick={() => setAddingStep(true)} className="cursor-pointer text-[13px] text-(--info)">
             + Add step
           </button>
         )}

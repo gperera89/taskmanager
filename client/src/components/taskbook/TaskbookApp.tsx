@@ -15,6 +15,10 @@ import HabitsView from "./HabitsView";
 import DayView from "./DayView";
 import ItemModal from "./ItemModal";
 import SettingsModal from "./SettingsModal";
+import LogbookModal from "./LogbookModal";
+import ReviewModal from "./ReviewModal";
+import StatusBanners from "./StatusBanners";
+import Toasts from "./Toasts";
 
 // The order of the portrait/mobile carousel. On desktop the calendar is a side rail
 // instead of a swipeable panel, so it is dropped from the content flow there.
@@ -39,6 +43,8 @@ export default function TaskbookApp() {
   const [query, setQuery] = useState("");
   const [modal, setModal] = useState<ModalState>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [logbookOpen, setLogbookOpen] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   // While we programmatically snap the carousel to a tapped tab, ignore the scroll
@@ -89,6 +95,40 @@ export default function TaskbookApp() {
     }),
     [area]
   );
+
+  // The shortcut handler is registered once; it reads the active area through a ref so "n"
+  // always opens the Add form matching the tab currently in view.
+  const areaRef = useRef(area);
+  useEffect(() => {
+    areaRef.current = area;
+  }, [area]);
+
+  // Desktop keyboard shortcuts: n = new item, / = focus search, Escape = close whatever's
+  // open. Skipped while typing in any field so the letters still type normally.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        setModal(null);
+        setSettingsOpen(false);
+        setLogbookOpen(false);
+        setReviewOpen(false);
+        return;
+      }
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target?.isContentEditable) return;
+      if (e.key === "n") {
+        e.preventDefault();
+        setModal({ mode: "add", initialKind: AREA_TO_KIND[areaRef.current] });
+      } else if (e.key === "/") {
+        e.preventDefault();
+        document.getElementById("taskbook-search")?.focus();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   function scrollToArea(key: AreaKey, behavior: ScrollBehavior = "smooth") {
     const idx = CAROUSEL_VIEWS.indexOf(key);
@@ -240,7 +280,7 @@ export default function TaskbookApp() {
 
   return (
     <ModalContext.Provider value={modalActions}>
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#efe9dc] font-serif">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-(--surface) font-serif">
         <Header
           todayLabel={data.todayLabel}
           query={query}
@@ -248,8 +288,11 @@ export default function TaskbookApp() {
           pendingCaptures={data.pendingCaptures}
           onEditCapture={openEditForCapture}
           onOpenSettings={() => setSettingsOpen(true)}
+          onOpenLogbook={() => setLogbookOpen(true)}
+          onOpenReview={() => setReviewOpen(true)}
           isMobile={isMobile}
         />
+        <StatusBanners />
 
         {isMobile ? (
           <div className="relative flex min-h-0 flex-1">
@@ -268,7 +311,7 @@ export default function TaskbookApp() {
               ))}
             </div>
             {area === "day" && dayDetail && (
-              <div className="absolute inset-0 z-10 overflow-y-auto bg-[#efe9dc] px-5 py-6 pb-10">
+              <div className="absolute inset-0 z-10 overflow-y-auto bg-(--surface) px-5 py-6 pb-10">
                 <DayView detail={dayDetail} />
               </div>
             )}
@@ -329,6 +372,10 @@ export default function TaskbookApp() {
           onClose={() => setSettingsOpen(false)}
         />
       )}
+
+      {logbookOpen && <LogbookModal onClose={() => setLogbookOpen(false)} />}
+      {reviewOpen && <ReviewModal onClose={() => setReviewOpen(false)} />}
+      <Toasts />
     </ModalContext.Provider>
   );
 }

@@ -35,12 +35,12 @@ export default function HabitsView({
   return (
     <div>
       <div className="flex items-end justify-between">
-        <div className="font-script text-[62px] leading-[0.8] text-[#2a2622]">Habits</div>
-        <div className="pb-2.5 text-[13px] text-[#8a8069]">{atRiskCount} needs attention</div>
+        <div className="font-script text-[62px] leading-[0.8] text-(--ink)">Habits</div>
+        <div className="pb-2.5 text-[13px] text-(--ink-muted)">{atRiskCount} needs attention</div>
       </div>
-      <div className="my-5 mb-6 h-px bg-[#d5cbb4]" />
+      <div className="my-5 mb-6 h-px bg-(--rule)" />
 
-      {isEmpty && <p className="py-8 text-[15px] italic text-[#a49a82]">Nothing here yet.</p>}
+      {isEmpty && <p className="py-8 text-[15px] italic text-(--ink-soft)">Nothing here yet.</p>}
 
       <div className="max-w-[920px]">
         {!q && <HabitsQuoteBanner />}
@@ -75,11 +75,11 @@ function HabitsQuoteBanner() {
     return () => clearInterval(id);
   }, []);
   return (
-    <div className="mb-6.5 rounded-xl px-6 py-5" style={{ border: "1.5px solid #e1d8c4" }}>
-      <div key={index} className="text-[17px] italic text-[#5c5546] animate-[quote-fade_0.6s_ease]">
+    <div className="mb-6.5 rounded-xl px-6 py-5" style={{ border: "1.5px solid var(--border-soft)" }}>
+      <div key={index} className="text-[17px] italic text-(--ink-quote) animate-[quote-fade_0.6s_ease]">
         “{HABIT_QUOTES[index]}”
       </div>
-      <div className="mt-1.5 text-[11px] uppercase tracking-[0.16em] text-[#a49a82]">James Clear · Atomic Habits</div>
+      <div className="mt-1.5 text-[11px] uppercase tracking-[0.16em] text-(--ink-soft)">James Clear · Atomic Habits</div>
     </div>
   );
 }
@@ -88,10 +88,10 @@ function HabitRow({ habit }: { habit: HabitCardVM }) {
   const { openEdit } = useModalActions();
   const { actions } = useTaskbook();
   return (
-    <div className="group flex items-center justify-between gap-3 border-b border-[#e1d8c4] py-3.5">
+    <div className="group flex items-center justify-between gap-3 border-b border-(--border-soft) py-3.5">
       <div className="min-w-0 cursor-pointer" onClick={() => openEdit({ mode: "edit", kind: "habit", item: habit })}>
-        <div className="text-base text-[#2a2622]">{habit.title}</div>
-        <div className="mt-0.5 text-xs text-[#8a8069]">{habit.detailLabel}</div>
+        <div className="text-base text-(--ink)">{habit.title}</div>
+        <div className="mt-0.5 text-xs text-(--ink-muted)">{habit.detailLabel}</div>
       </div>
       <div className="flex flex-none items-center gap-3">
         <HabitFlameButton habit={habit} />
@@ -115,7 +115,7 @@ function HabitFlameButton({ habit }: { habit: HabitCardVM }) {
   }
 
   const status: "lit" | "flicker" | "out" = habit.lapsed ? "out" : habit.atRisk ? "flicker" : "lit";
-  const color = status === "out" ? "#c3b9a1" : "#17399b";
+  const color = status === "out" ? "var(--ink-disabled)" : "var(--accent-text)";
   const animationClass = igniting
     ? "animate-[flame-ignite_0.6s_ease]"
     : status === "flicker"

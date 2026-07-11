@@ -31,6 +31,7 @@ export function parseTaskRepeat(fd: FormData): TaskRepeatInput {
 }
 
 export function parseTaskForm(fd: FormData): TaskCreateInput {
+  const reminderLead = Number(fd.get("reminderLeadMinutes") ?? "");
   return {
     title: String(fd.get("title") ?? "").trim(),
     category: String(fd.get("category") ?? "").trim(),
@@ -39,15 +40,19 @@ export function parseTaskForm(fd: FormData): TaskCreateInput {
     dueTime: String(fd.get("dueTime") ?? "").trim() || null,
     projectId: String(fd.get("projectId") ?? "").trim() || null,
     parentId: String(fd.get("parentId") ?? "").trim() || null,
+    section: String(fd.get("section") ?? "").trim() || null,
+    reminderLeadMinutes: reminderLead > 0 ? reminderLead : null,
     repeat: parseTaskRepeat(fd),
   };
 }
 
 export function parseProjectForm(fd: FormData): ProjectInput {
+  const reminderLead = Number(fd.get("reminderLeadMinutes") ?? "");
   return {
     name: String(fd.get("name") ?? "").trim(),
     description: String(fd.get("description") ?? "").trim() || null,
     dueDate: String(fd.get("dueDate") ?? "").trim() || null,
+    reminderLeadMinutes: reminderLead > 0 ? reminderLead : null,
   };
 }
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { REMINDER_LEAD_OPTIONS } from "@/lib/shared";
 import { todayInputValue } from "@/lib/taskbookDates";
 import { useTaskbook } from "./store";
 import {
@@ -19,8 +20,8 @@ import { AutoGrowTextarea } from "./shared";
 import type { CategoryOption, HabitCardVM, ModalState, ProjectCardVM, ProjectOption, RoutineItemVM } from "./types";
 
 const inputClass =
-  "w-full rounded-lg border border-[#d3c9b3] bg-[#faf7ef] px-3 py-2 text-sm text-[#2a2622] outline-none focus:border-[#17399b]";
-const labelTextClass = "mb-1 block text-[11px] uppercase tracking-[0.14em] text-[#8a8069]";
+  "w-full rounded-lg border border-(--border-strong) bg-(--card) px-3 py-2 text-sm text-(--ink) outline-none focus:border-(--accent-text)";
+const labelTextClass = "mb-1 block text-[11px] uppercase tracking-[0.14em] text-(--ink-muted)";
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 // Displayed Monday-first to match how people actually think about a week; daysOfWeek values
 // underneath are still 0=Sunday..6=Saturday throughout the rest of the app.
@@ -76,22 +77,22 @@ export default function ItemModal({
   const sharedWithDescription = { ...shared, descriptionValue: sharedDescription, onDescriptionChange: setSharedDescription };
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-[rgba(42,38,34,.35)] p-6" onClick={onClose}>
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-(--overlay) p-6" onClick={onClose}>
       <div
-        className="w-full max-w-105 rounded-2xl border border-[#ddd4c1] bg-[#faf7ef] p-6 shadow-[0_20px_60px_rgba(70,55,30,.3)] font-serif"
+        className="w-full max-w-105 rounded-2xl border border-(--border) bg-(--card) p-6 shadow-[0_20px_60px_rgba(70,55,30,.3)] font-serif"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-xl text-[#2a2622]">{heading}</h2>
-          <button type="button" onClick={onClose} aria-label="Close" className="cursor-pointer text-[#8a8069]">
+          <h2 className="text-xl text-(--ink)">{heading}</h2>
+          <button type="button" onClick={onClose} aria-label="Close" className="cursor-pointer text-(--ink-muted)">
             <svg width="18" height="18" viewBox="0 -960 960 960">
-              <path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z" fill="#8a8069" />
+              <path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z" style={{ fill: "var(--ink-muted)" }} />
             </svg>
           </button>
         </div>
 
         {isAdd && (
-          <div className="mb-4 flex gap-1 rounded-full border border-[#d3c9b3] p-1">
+          <div className="mb-4 flex gap-1 rounded-full border border-(--border-strong) p-1">
             {KIND_TABS.map((k) => (
               <button
                 key={k.kind}
@@ -99,8 +100,8 @@ export default function ItemModal({
                 onClick={() => setAddKind(k.kind)}
                 className="flex-1 cursor-pointer rounded-full py-1.5 text-xs"
                 style={{
-                  background: addKind === k.kind ? "#17399b" : "transparent",
-                  color: addKind === k.kind ? "#fff" : "#8a8069",
+                  background: addKind === k.kind ? "var(--accent)" : "transparent",
+                  color: addKind === k.kind ? "var(--on-accent)" : "var(--ink-muted)",
                 }}
               >
                 {k.name}
@@ -150,7 +151,7 @@ export default function ItemModal({
 function Actions({ submitLabel }: { submitLabel: string }) {
   return (
     <div className="mt-5 flex justify-end gap-2.5">
-      <button type="submit" className="cursor-pointer rounded-full bg-[#17399b] px-5 py-2 text-sm text-white">
+      <button type="submit" className="cursor-pointer rounded-full bg-(--accent) px-5 py-2 text-sm text-(--on-accent)">
         {submitLabel}
       </button>
     </div>
@@ -219,7 +220,7 @@ function TaskForm({
           <button
             type="button"
             onClick={() => setShowManageCategories((v) => !v)}
-            className="mb-1 cursor-pointer text-[11px] text-[#557694]"
+            className="mb-1 cursor-pointer text-[11px] text-(--info)"
           >
             {showManageCategories ? "Done" : "Manage"}
           </button>
@@ -275,8 +276,20 @@ function TaskForm({
           </select>
         </div>
       </div>
+      {dueDate && (
+        <div>
+          <label className={labelTextClass}>Remind me</label>
+          <select name="reminderLeadMinutes" defaultValue="" className={inputClass}>
+            {REMINDER_LEAD_OPTIONS.map((o) => (
+              <option key={o.label} value={o.value ?? ""}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       {dueOpen && (
-        <div ref={duePanelRef} className="w-fit rounded-lg border border-[#17399b] bg-[#faf7ef] p-2.5">
+        <div ref={duePanelRef} className="w-fit rounded-lg border border-(--accent-text) bg-(--card) p-2.5">
           <DateTimePickerPanel dateValue={dueDate} timeValue={dueTime} onChangeDate={setDueDate} onChangeTime={setDueTime} />
           <button
             type="button"
@@ -284,7 +297,7 @@ function TaskForm({
               setDueDate("");
               setDueTime("");
             }}
-            className="mt-2 cursor-pointer text-xs text-[#b3a988] hover:text-[#8a4040]"
+            className="mt-2 cursor-pointer text-xs text-(--ink-faint) hover:text-(--danger)"
           >
             Clear
           </button>
@@ -305,21 +318,39 @@ function ProjectForm({
   onClose: () => void;
   shared?: SharedTitleProps & SharedDescriptionProps;
 }) {
-  const { actions } = useTaskbook();
+  const { actions, data } = useTaskbook();
+  // Add mode only: start from an existing project instead of blank — the server copies its
+  // tasks/sections with dates and completion reset (see duplicateProject).
+  const [templateId, setTemplateId] = useState("");
 
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        const input = parseProjectForm(new FormData(e.currentTarget));
+        const fd = new FormData(e.currentTarget);
+        const input = parseProjectForm(fd);
         if (input.name) {
           if (item) actions.editProject(item.id, input);
+          else if (templateId) actions.duplicateProject(templateId, input.name);
           else actions.addProject(input);
         }
         onClose();
       }}
       className="flex flex-col gap-3"
     >
+      {!item && data.projectOptions.length > 0 && (
+        <div>
+          <label className={labelTextClass}>Start from</label>
+          <select value={templateId} onChange={(e) => setTemplateId(e.target.value)} className={inputClass}>
+            <option value="">Blank project</option>
+            {data.projectOptions.map((p) => (
+              <option key={p.id} value={p.id}>
+                Copy of: {p.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       <div>
         <label className={labelTextClass}>Name</label>
         {shared ? (
@@ -352,6 +383,16 @@ function ProjectForm({
       <div>
         <label className={labelTextClass}>Due date</label>
         <input name="dueDate" type="date" defaultValue={item?.dueDateValue} className={inputClass} />
+      </div>
+      <div>
+        <label className={labelTextClass}>Remind me</label>
+        <select name="reminderLeadMinutes" defaultValue={item?.reminderLeadMinutes ?? ""} className={inputClass}>
+          {REMINDER_LEAD_OPTIONS.map((o) => (
+            <option key={o.label} value={o.value ?? ""}>
+              {o.label}
+            </option>
+          ))}
+        </select>
       </div>
       <Actions submitLabel={item ? "Save" : "Add project"} />
     </form>
@@ -420,7 +461,7 @@ function RoutineForm({
             onChange={(e) => setIntervalStr(e.target.value.replace(/\D/g, ""))}
             className={`${inputClass} w-16! shrink-0 text-center`}
           />
-          <div className="flex flex-1 gap-1 rounded-lg border border-[#d3c9b3] p-1">
+          <div className="flex flex-1 gap-1 rounded-lg border border-(--border-strong) p-1">
             {ROUTINE_FREQUENCY_OPTIONS.map((f) => (
               <button
                 key={f.value}
@@ -428,8 +469,8 @@ function RoutineForm({
                 onClick={() => setFrequency(f.value)}
                 className="flex-1 cursor-pointer rounded-md py-1.5 text-xs"
                 style={{
-                  background: frequency === f.value ? "#17399b" : "transparent",
-                  color: frequency === f.value ? "#fff" : "#8a8069",
+                  background: frequency === f.value ? "var(--accent)" : "transparent",
+                  color: frequency === f.value ? "var(--on-accent)" : "var(--ink-muted)",
                 }}
               >
                 {isSingular ? f.singular : f.plural}
@@ -452,9 +493,9 @@ function RoutineForm({
                 onClick={() => setDaysOfWeek((cur) => (cur.includes(idx) ? cur.filter((d) => d !== idx) : [...cur, idx]))}
                 className="flex h-8.5 w-8.5 cursor-pointer items-center justify-center rounded-full text-xs"
                 style={{
-                  background: daysOfWeek.includes(idx) ? "#17399b" : "transparent",
-                  color: daysOfWeek.includes(idx) ? "#fff" : "#8a8069",
-                  border: daysOfWeek.includes(idx) ? "none" : "1px solid #d3c9b3",
+                  background: daysOfWeek.includes(idx) ? "var(--accent)" : "transparent",
+                  color: daysOfWeek.includes(idx) ? "var(--on-accent)" : "var(--ink-muted)",
+                  border: daysOfWeek.includes(idx) ? "none" : "1px solid var(--border-strong)",
                 }}
               >
                 {DAY_NAMES[idx][0]}
@@ -470,7 +511,7 @@ function RoutineForm({
       {frequency === "MONTHLY" && (
         <div>
           <label className={labelTextClass}>On</label>
-          <div className="mb-2.5 flex gap-1 rounded-full border border-[#d3c9b3] p-1">
+          <div className="mb-2.5 flex gap-1 rounded-full border border-(--border-strong) p-1">
             {(["DATE", "WEEKDAY"] as const).map((mode) => (
               <button
                 key={mode}
@@ -478,8 +519,8 @@ function RoutineForm({
                 onClick={() => setMonthlyMode(mode)}
                 className="flex-1 cursor-pointer rounded-full py-1.5 text-xs"
                 style={{
-                  background: monthlyMode === mode ? "#17399b" : "transparent",
-                  color: monthlyMode === mode ? "#fff" : "#8a8069",
+                  background: monthlyMode === mode ? "var(--accent)" : "transparent",
+                  color: monthlyMode === mode ? "var(--on-accent)" : "var(--ink-muted)",
                 }}
               >
                 {mode === "DATE" ? "Each date" : "On the"}
@@ -498,8 +539,8 @@ function RoutineForm({
                     onClick={() => setDayOfMonth(day)}
                     className="flex h-7.5 w-7.5 cursor-pointer items-center justify-center rounded-full text-[11px]"
                     style={{
-                      background: dayOfMonth === day ? "#17399b" : "transparent",
-                      color: dayOfMonth === day ? "#fff" : "#2a2622",
+                      background: dayOfMonth === day ? "var(--accent)" : "transparent",
+                      color: dayOfMonth === day ? "var(--on-accent)" : "var(--ink)",
                     }}
                   >
                     {day}
@@ -511,9 +552,9 @@ function RoutineForm({
                 onClick={() => setDayOfMonth(-1)}
                 className="mt-1.5 w-full cursor-pointer rounded-lg py-1.5 text-xs"
                 style={{
-                  background: dayOfMonth === -1 ? "#17399b" : "transparent",
-                  color: dayOfMonth === -1 ? "#fff" : "#557694",
-                  border: dayOfMonth === -1 ? "none" : "1px solid #d3c9b3",
+                  background: dayOfMonth === -1 ? "var(--accent)" : "transparent",
+                  color: dayOfMonth === -1 ? "var(--on-accent)" : "var(--info)",
+                  border: dayOfMonth === -1 ? "none" : "1px solid var(--border-strong)",
                 }}
               >
                 Last day of the month
@@ -616,7 +657,7 @@ function HabitForm({
             onChange={(e) => setIntervalValue(e.target.value.replace(/\D/g, ""))}
             className={`${inputClass} w-16! shrink-0 text-center`}
           />
-          <div className="flex flex-1 gap-1 rounded-lg border border-[#d3c9b3] p-1">
+          <div className="flex flex-1 gap-1 rounded-lg border border-(--border-strong) p-1">
             {HABIT_UNIT_OPTIONS.map((u) => (
               <button
                 key={u.unit}
@@ -624,8 +665,8 @@ function HabitForm({
                 onClick={() => setIntervalUnit(u.unit)}
                 className="flex-1 cursor-pointer rounded-md py-1.5 text-xs"
                 style={{
-                  background: intervalUnit === u.unit ? "#17399b" : "transparent",
-                  color: intervalUnit === u.unit ? "#fff" : "#8a8069",
+                  background: intervalUnit === u.unit ? "var(--accent)" : "transparent",
+                  color: intervalUnit === u.unit ? "var(--on-accent)" : "var(--ink-muted)",
                 }}
               >
                 {isSingular ? u.singular : u.plural}

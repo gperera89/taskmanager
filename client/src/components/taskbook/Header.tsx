@@ -44,6 +44,8 @@ export default function Header({
   pendingCaptures,
   onEditCapture,
   onOpenSettings,
+  onOpenLogbook,
+  onOpenReview,
   isMobile,
 }: {
   todayLabel: string;
@@ -52,11 +54,13 @@ export default function Header({
   pendingCaptures: VoiceCaptureVM[];
   onEditCapture: (kind: CapturedKind, entityId: string) => void;
   onOpenSettings: () => void;
+  onOpenLogbook: () => void;
+  onOpenReview: () => void;
   isMobile: boolean;
 }) {
   const router = useRouter();
   const { openAdd } = useModalActions();
-  const { actions, mode, setMode } = useTaskbook();
+  const { actions, mode, setMode, offline } = useTaskbook();
   const [showNotif, setShowNotif] = useState(false);
   // On mobile, settings/notifications/mode toggle are portaled into the sign-out bar in
   // layout.tsx (top-right) instead of rendered here, since they'd otherwise overflow off-screen
@@ -218,11 +222,38 @@ export default function Header({
 
       <button
         type="button"
+        title="Logbook"
+        aria-label="Logbook — completion history"
+        onClick={onOpenLogbook}
+        className="flex h-9 w-9 cursor-pointer items-center justify-center"
+      >
+        {/* Material Symbols "history" */}
+        <svg width="18" height="18" viewBox="0 -960 960 960" style={{ fill: "var(--info)" }}>
+          <path d="M480-120q-138 0-240.5-91.5T122-440h82q14 104 92.5 172T480-200q117 0 198.5-81.5T760-480q0-117-81.5-198.5T480-760q-69 0-129 32t-101 88h110v80H120v-240h80v94q51-64 124.5-99T480-840q75 0 140.5 28.5t114 77q48.5 48.5 77 114T840-480q0 75-28.5 140.5t-77 114q-48.5 48.5-114 77T480-120Zm112-192L440-464v-216h80v184l128 128-56 56Z" />
+        </svg>
+      </button>
+
+      <button
+        type="button"
+        title="Weekly review"
+        aria-label="Weekly review"
+        onClick={onOpenReview}
+        className="flex h-9 w-9 cursor-pointer items-center justify-center"
+      >
+        {/* Material Symbols "checklist" */}
+        <svg width="18" height="18" viewBox="0 -960 960 960" style={{ fill: "var(--info)" }}>
+          <path d="M222-200 80-342l56-56 85 85 170-170 56 57-225 226Zm0-320L80-662l56-56 85 85 170-170 56 57-225 226Zm298 240v-80h360v80H520Zm0-320v-80h360v80H520Z" />
+        </svg>
+      </button>
+
+      <button
+        type="button"
         title="Settings"
+        aria-label="Settings"
         onClick={onOpenSettings}
         className="flex h-9 w-9 cursor-pointer items-center justify-center"
       >
-        <svg width="18" height="18" viewBox="0 -960 960 960" fill="#557694">
+        <svg width="18" height="18" viewBox="0 -960 960 960" style={{ fill: "var(--info)" }}>
           <path d="m370-80-16-128q-13-5-24.5-12T307-235l-119 50L78-375l103-78q-1-7-1-13.5v-27q0-6.5 1-13.5L78-585l110-190 119 50q11-8 23-15t24-12l16-128h220l16 128q13 5 24.5 12t22.5 15l119-50 110 190-103 78q1 7 1 13.5v27q0 6.5-2 13.5l103 78-110 190-118-50q-11 8-23 15t-24 12L590-80H370Zm70-80h79l14-106q31-8 57.5-23.5T639-327l99 41 39-68-86-65q5-14 7-29.5t2-31.5q0-16-2-31.5t-7-29.5l86-65-39-68-99 42q-22-23-48.5-38.5T533-694l-13-106h-79l-14 106q-31 8-57.5 23.5T321-633l-99-41-39 68 86 64q-5 15-7 30t-2 32q0 16 2 31t7 30l-86 65 39 68 99-42q22 23 48.5 38.5T427-266l13 106Zm42-180q58 0 99-41t41-99q0-58-41-99t-99-41q-59 0-99.5 41T342-480q0 58 40.5 99t99.5 41Zm-2-140Z" />
         </svg>
       </button>
@@ -234,21 +265,21 @@ export default function Header({
           className="relative flex h-9 w-9 cursor-pointer items-center justify-center"
         >
           {pendingCaptures.length > 0 ? (
-            <svg width="19" height="19" viewBox="0 -960 960 960" fill="#557694">
+            <svg width="19" height="19" viewBox="0 -960 960 960" style={{ fill: "var(--info)" }}>
               <path d="M480-80q-33 0-56.5-23.5T400-160h160q0 33-23.5 56.5T480-80Zm0-420ZM160-200v-80h80v-280q0-83 50-147.5T420-792v-28q0-25 17.5-42.5T480-880q25 0 42.5 17.5T540-820v13q-11 22-16 45t-4 47q-10-2-19.5-3.5T480-720q-66 0-113 47t-47 113v280h320v-257q18 8 38.5 12.5T720-520v240h80v80H160Zm475-435q-35-35-35-85t35-85q35-35 85-35t85 35q35 35 35 85t-35 85q-35 35-85 35t-85-35Z" />
             </svg>
           ) : (
-            <svg width="19" height="19" viewBox="0 -960 960 960" fill="#557694">
+            <svg width="19" height="19" viewBox="0 -960 960 960" style={{ fill: "var(--info)" }}>
               <path d="M160-200v-80h80v-280q0-83 50-147.5T420-792v-28q0-25 17.5-42.5T480-880q25 0 42.5 17.5T540-820v28q80 20 130 84.5T720-560v280h80v80H160Zm320-300Zm0 420q-33 0-56.5-23.5T400-160h160q0 33-23.5 56.5T480-80ZM320-280h320v-280q0-66-47-113t-113-47q-66 0-113 47t-47 113v280Z" />
             </svg>
           )}
         </button>
         {showNotif && (
-          <div className="absolute right-0 top-[46px] z-30 w-[330px] rounded-xl border border-[#ddd4c1] bg-[#faf7ef] p-4 shadow-[0_16px_40px_rgba(70,55,30,.22)]">
-            <div className="mb-1 text-[11px] uppercase tracking-[0.16em] text-[#a49a82]">Added by voice</div>
-            <div className="mb-2.5 text-xs italic text-[#a49a82]">Filed automatically — check it landed right.</div>
+          <div className="absolute right-0 top-[46px] z-30 w-[330px] rounded-xl border border-(--border) bg-(--card) p-4 shadow-[0_16px_40px_rgba(70,55,30,.22)]">
+            <div className="mb-1 text-[11px] uppercase tracking-[0.16em] text-(--ink-soft)">Added by voice</div>
+            <div className="mb-2.5 text-xs italic text-(--ink-soft)">Filed automatically — check it landed right.</div>
             {pendingCaptures.length === 0 ? (
-              <div className="py-3.5 text-sm italic text-[#a49a82]">All caught up.</div>
+              <div className="py-3.5 text-sm italic text-(--ink-soft)">All caught up.</div>
             ) : (
               <div className="flex max-h-80 flex-col gap-2.5 overflow-y-auto">
                 {pendingCaptures.map((c) => (
@@ -263,7 +294,7 @@ export default function Header({
   );
 
   return (
-    <div className="flex flex-none items-center justify-between border-b border-[#ddd4c1] px-8 py-4">
+    <div className="flex flex-none items-center justify-between border-b border-(--border) px-8 py-4">
       <div className="relative flex items-center gap-3">
         <button
           type="button"
@@ -271,10 +302,10 @@ export default function Header({
             openAdd();
             setShowNotif(false);
           }}
-          className="flex items-center gap-2 rounded-full bg-[#17399b] py-2 pl-3 pr-3.5 text-white cursor-pointer"
+          className="flex items-center gap-2 rounded-full bg-(--accent) py-2 pl-3 pr-3.5 text-(--on-accent) cursor-pointer"
         >
           <svg width="16" height="16" viewBox="0 -960 960 960">
-            <path d={ADD_ICON_PATH} fill="#fff" />
+            <path d={ADD_ICON_PATH} style={{ fill: "var(--on-accent)" }} />
           </svg>
           <span className="text-sm">Add</span>
         </button>
@@ -283,62 +314,65 @@ export default function Header({
       <div className="hidden items-center gap-4 lg:flex">
         <div className="relative" ref={chatRef}>
           <div className="flex items-center gap-1.5">
-            <div className="flex items-center gap-0.5 rounded-full border border-[#d3c9b3] p-1">
+            <div className="flex items-center gap-0.5 rounded-full border border-(--border-strong) p-1">
               <button
                 type="button"
                 title="Search"
                 aria-pressed={barMode === "search"}
                 onClick={selectSearchMode}
                 className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-full"
-                style={{ background: barMode === "search" ? "rgba(23,57,155,.12)" : "transparent" }}
+                style={{ background: barMode === "search" ? "var(--accent-wash-strong)" : "transparent" }}
               >
                 <svg width="13" height="13" viewBox="0 -960 960 960">
-                  <path d={BAR_ICON_PATH.search} fill={barMode === "search" ? "#17399b" : "#a49a82"} />
+                  <path d={BAR_ICON_PATH.search} style={{ fill: barMode === "search" ? "var(--accent-text)" : "var(--ink-soft)" }} />
                 </svg>
               </button>
               <button
                 type="button"
-                title="Chat"
+                title={offline ? "Chat needs a connection" : "Chat"}
+                disabled={offline}
                 aria-pressed={barMode === "chat"}
                 onClick={selectChatMode}
-                className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-full"
-                style={{ background: barMode === "chat" ? "rgba(23,57,155,.12)" : "transparent" }}
+                className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-full disabled:cursor-not-allowed disabled:opacity-50"
+                style={{ background: barMode === "chat" ? "var(--accent-wash-strong)" : "transparent" }}
               >
                 <svg width="13" height="13" viewBox="0 -960 960 960">
-                  <path d={BAR_ICON_PATH.chat} fill={barMode === "chat" ? "#17399b" : "#a49a82"} />
+                  <path d={BAR_ICON_PATH.chat} style={{ fill: barMode === "chat" ? "var(--accent-text)" : "var(--ink-soft)" }} />
                 </svg>
               </button>
               <button
                 type="button"
-                title="Speak to add"
-                disabled={processing && barMode !== "mic"}
+                title={offline ? "Voice capture needs a connection" : "Speak to add"}
+                disabled={offline || (processing && barMode !== "mic")}
                 aria-pressed={barMode === "mic"}
                 onClick={selectMicMode}
                 className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-full disabled:cursor-not-allowed disabled:opacity-60"
-                style={{ background: barMode === "mic" ? "rgba(23,57,155,.12)" : "transparent" }}
+                style={{ background: barMode === "mic" ? "var(--accent-wash-strong)" : "transparent" }}
               >
                 <svg width="13" height="13" viewBox="0 -960 960 960">
                   <path
                     d={BAR_ICON_PATH.mic}
-                    fill={barMode === "mic" ? "#17399b" : "#a49a82"}
+                    style={{ fill: barMode === "mic" ? "var(--accent-text)" : "var(--ink-soft)" }}
                   />
                 </svg>
               </button>
             </div>
 
             <div
-              className="flex w-65 items-center gap-2 rounded-full border border-[#d3c9b3] px-3.5 py-1.5 text-[#a49a82]"
+              className="flex w-65 items-center gap-2 rounded-full border border-(--border-strong) px-3.5 py-1.5 text-(--ink-soft)"
               style={{ animation: barMode === "mic" && listening ? "mic-pulse 1.6s ease-in-out infinite" : undefined }}
             >
               <svg width="15" height="15" viewBox="0 -960 960 960" className="flex-none">
-                <path d={BAR_ICON_PATH[barMode === "chat" ? "chat" : barMode === "mic" ? "mic" : "search"]} fill="#b3a988" />
+                <path d={BAR_ICON_PATH[barMode === "chat" ? "chat" : barMode === "mic" ? "mic" : "search"]} style={{ fill: "var(--ink-faint)" }} />
               </svg>
               {barMode === "search" && (
                 <input
+                  id="taskbook-search"
                   value={query}
                   onChange={(e) => onQueryChange(e.target.value)}
                   placeholder="Search tasks…"
-                  className="w-full min-w-0 bg-transparent text-[13.5px] text-[#2a2622] outline-none placeholder:text-[#a49a82]"
+                  aria-label="Search tasks"
+                  className="w-full min-w-0 bg-transparent text-[13.5px] text-(--ink) outline-none placeholder:text-(--ink-soft)"
                 />
               )}
               {barMode === "chat" && (
@@ -354,7 +388,7 @@ export default function Header({
                   }}
                   placeholder="Ask about your tasks, or tell me to add one…"
                   disabled={chatLoading}
-                  className="w-full min-w-0 bg-transparent text-[13.5px] text-[#2a2622] outline-none placeholder:text-[#a49a82] disabled:opacity-60"
+                  className="w-full min-w-0 bg-transparent text-[13.5px] text-(--ink) outline-none placeholder:text-(--ink-soft) disabled:opacity-60"
                 />
               )}
               {barMode === "mic" && (
@@ -365,7 +399,7 @@ export default function Header({
                         key={i}
                         className="block h-3 w-0.75 rounded-full"
                         style={{
-                          background: captureError ? "#8a4040" : "#17399b",
+                          background: captureError ? "var(--danger)" : "var(--accent)",
                           animation:
                             listening || processing ? `mic-bar 0.9s ${i * 0.12}s ease-in-out infinite` : undefined,
                           opacity: listening || processing ? 1 : 0.4,
@@ -375,7 +409,7 @@ export default function Header({
                   </div>
                   <span
                     className="truncate text-[13.5px] italic"
-                    style={{ color: captureError ? "#8a4040" : "#17399b" }}
+                    style={{ color: captureError ? "var(--danger)" : "var(--accent-text)" }}
                   >
                     {captureError ?? (processing ? "Transcribing…" : listening ? "Listening… tap to stop" : "Tap the mic to start")}
                   </span>
@@ -385,21 +419,21 @@ export default function Header({
           </div>
 
           {barMode === "chat" && chatPanelOpen && (
-            <div className="absolute left-0 top-[46px] z-30 w-95 rounded-xl border border-[#ddd4c1] bg-[#faf7ef] p-4 shadow-[0_16px_40px_rgba(70,55,30,.22)]">
+            <div className="absolute left-0 top-[46px] z-30 w-95 rounded-xl border border-(--border) bg-(--card) p-4 shadow-[0_16px_40px_rgba(70,55,30,.22)]">
               <div className="mb-2 flex items-center justify-between">
-                <div className="text-[11px] uppercase tracking-[0.16em] text-[#a49a82]">Ask about your tasks</div>
+                <div className="text-[11px] uppercase tracking-[0.16em] text-(--ink-soft)">Ask about your tasks</div>
                 {chatMessages.length > 0 && (
                   <button
                     type="button"
                     onClick={() => setChatMessages([])}
-                    className="cursor-pointer text-xs text-[#b3a988] hover:text-[#8a4040]"
+                    className="cursor-pointer text-xs text-(--ink-faint) hover:text-(--danger)"
                   >
                     Clear
                   </button>
                 )}
               </div>
               {chatMessages.length === 0 && !chatLoading ? (
-                <div className="py-3.5 text-sm italic text-[#a49a82]">
+                <div className="py-3.5 text-sm italic text-(--ink-soft)">
                   Try &ldquo;what&apos;s due today?&rdquo; or &ldquo;add a task to call the vet tomorrow&rdquo;.
                 </div>
               ) : (
@@ -409,23 +443,23 @@ export default function Header({
                       key={i}
                       className={
                         m.role === "user"
-                          ? "self-end rounded-lg bg-[#17399b] px-3 py-1.5 text-sm text-white"
-                          : "self-start rounded-lg border border-[#ddd4c1] bg-white px-3 py-1.5 text-sm text-[#2a2622]"
+                          ? "self-end rounded-lg bg-(--accent) px-3 py-1.5 text-sm text-(--on-accent)"
+                          : "self-start rounded-lg border border-(--border) bg-white px-3 py-1.5 text-sm text-(--ink)"
                       }
                       style={{ maxWidth: "85%" }}
                     >
                       {m.role === "assistant" ? renderMarkdownLite(m.content) : m.content}
                     </div>
                   ))}
-                  {chatLoading && <div className="self-start text-sm italic text-[#a49a82]">Thinking…</div>}
+                  {chatLoading && <div className="self-start text-sm italic text-(--ink-soft)">Thinking…</div>}
                 </div>
               )}
-              {chatError && <div className="mt-2 text-[11px] italic text-[#8a4040]">{chatError}</div>}
+              {chatError && <div className="mt-2 text-[11px] italic text-(--danger)">{chatError}</div>}
             </div>
           )}
         </div>
 
-        <span className="text-[13px] text-[#8a8069]">{todayLabel}</span>
+        <span className="text-[13px] text-(--ink-muted)">{todayLabel}</span>
 
         {!isMobile && actionsCluster}
       </div>
@@ -438,24 +472,24 @@ export default function Header({
 function CapturedItem({ capture, onEdit }: { capture: VoiceCaptureVM; onEdit: (capture: VoiceCaptureVM) => void }) {
   const { actions } = useTaskbook();
   return (
-    <div className="rounded-lg border border-[#ddd4c1] bg-[#faf7ef] p-2.5">
-      <div className="mb-0.5 text-[11px] uppercase tracking-[0.14em] text-[#a49a82]">{KIND_LABEL[capture.kind]}</div>
-      <div className="text-sm text-[#2a2622]">{capture.summary}</div>
+    <div className="rounded-lg border border-(--border) bg-(--card) p-2.5">
+      <div className="mb-0.5 text-[11px] uppercase tracking-[0.14em] text-(--ink-soft)">{KIND_LABEL[capture.kind]}</div>
+      <div className="text-sm text-(--ink)">{capture.summary}</div>
       {capture.parseError && (
-        <div className="mt-0.5 text-[11px] italic text-[#8a4040]">
+        <div className="mt-0.5 text-[11px] italic text-(--danger)">
           Couldn&apos;t fully understand this one — worth a check.
         </div>
       )}
-      <div className="mt-1.5 text-[11px] italic text-[#a49a82]">&ldquo;{capture.transcript}&rdquo;</div>
+      <div className="mt-1.5 text-[11px] italic text-(--ink-soft)">&ldquo;{capture.transcript}&rdquo;</div>
       <div className="mt-2 flex justify-end gap-3">
         <button
           type="button"
           onClick={() => actions.dismissCapture(capture.id)}
-          className="cursor-pointer text-xs text-[#b3a988] hover:text-[#8a4040]"
+          className="cursor-pointer text-xs text-(--ink-faint) hover:text-(--danger)"
         >
           Mark as read
         </button>
-        <button type="button" onClick={() => onEdit(capture)} className="cursor-pointer text-xs text-[#17399b]">
+        <button type="button" onClick={() => onEdit(capture)} className="cursor-pointer text-xs text-(--accent-text)">
           Edit
         </button>
       </div>

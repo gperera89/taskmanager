@@ -19,7 +19,7 @@ const MODE_ORDER: { key: Mode; title: string }[] = [
 
 export default function ModeToggle({ mode, onChange }: { mode: Mode; onChange: (mode: Mode) => void }) {
   return (
-    <div className="flex items-center gap-0.5 rounded-full border border-[#d3c9b3] p-1">
+    <div className="flex items-center gap-0.5 rounded-full border border-(--border-strong) p-1">
       {MODE_ORDER.map(({ key, title }) => {
         const active = mode === key;
         return (
@@ -31,10 +31,10 @@ export default function ModeToggle({ mode, onChange }: { mode: Mode; onChange: (
             aria-pressed={active}
             onClick={() => onChange(key)}
             className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-full transition-colors"
-            style={{ background: active ? "rgba(23,57,155,.12)" : "transparent" }}
+            style={{ background: active ? "var(--accent-wash-strong)" : "transparent" }}
           >
             <svg width="16" height="16" viewBox="0 -960 960 960">
-              <path d={ICON_PATH[key]} fill={active ? "#17399b" : "#a49a82"} />
+              <path d={ICON_PATH[key]} style={{ fill: active ? "var(--accent-text)" : "var(--ink-soft)" }} />
             </svg>
           </button>
         );

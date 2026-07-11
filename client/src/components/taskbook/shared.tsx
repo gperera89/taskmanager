@@ -48,8 +48,8 @@ export function AutoGrowTextarea({
 export function Chip({ children, variant = "default" }: { children: React.ReactNode; variant?: "default" | "project" }) {
   const style =
     variant === "project"
-      ? { color: "#8a8069", background: "rgba(138,128,105,.13)" }
-      : { color: "#557694", background: "rgba(85,118,148,.1)" };
+      ? { color: "var(--ink-muted)", background: "var(--muted-wash)" }
+      : { color: "var(--info)", background: "var(--info-wash)" };
   return (
     <span className="whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11.5px]" style={style}>
       {children}
@@ -79,8 +79,8 @@ export function CheckSquare({
       style={{
         width: size,
         height: size,
-        border: `1.5px solid ${showTick ? "#17399b" : "#b3a988"}`,
-        background: showTick ? "rgba(23,57,155,.06)" : "transparent",
+        border: `1.5px solid ${showTick ? "var(--accent-text)" : "var(--ink-faint)"}`,
+        background: showTick ? "var(--accent-wash)" : "transparent",
         transition: "border-color .15s, background .15s",
       }}
     >
@@ -88,11 +88,13 @@ export function CheckSquare({
         <svg width={size * 0.64} height={size * 0.64} viewBox="0 0 24 24" fill="none">
           <path
             d="M4 13.5 L9.5 18.5 L20 5.5"
-            stroke="#17399b"
             strokeWidth="2.6"
             strokeLinecap="round"
             strokeLinejoin="round"
-            style={completing ? { strokeDasharray: 26, strokeDashoffset: 26, animation: "check-draw .32s ease-out forwards" } : undefined}
+            style={{
+              stroke: "var(--accent-text)",
+              ...(completing ? { strokeDasharray: 26, strokeDashoffset: 26, animation: "check-draw .32s ease-out forwards" } : undefined),
+            }}
           />
         </svg>
       )}
@@ -109,7 +111,7 @@ export function StrikeSweep() {
   return (
     <span
       aria-hidden
-      className="pointer-events-none absolute left-0 top-2.5 h-[1.5px] w-full origin-left bg-[#17399b]"
+      className="pointer-events-none absolute left-0 top-2.5 h-[1.5px] w-full origin-left bg-(--accent)"
       style={{ animation: "strike-draw .36s .08s ease-out both" }}
     />
   );
@@ -149,12 +151,12 @@ export function CalendarTaskItem({
       <div className="min-w-0 flex-1">
         <div
           className={`relative ${textClassName}`}
-          style={{ color: isCompleted ? "#a49a82" : "#2a2622", textDecoration: isCompleted && !completing ? "line-through" : "none" }}
+          style={{ color: isCompleted ? "var(--ink-soft)" : "var(--ink)", textDecoration: isCompleted && !completing ? "line-through" : "none" }}
         >
           {title}
           {completing && <StrikeSweep />}
         </div>
-        {projectName && <div className="mt-px text-[11.5px] text-[#a49a82]">{projectName}</div>}
+        {projectName && <div className="mt-px text-[11.5px] text-(--ink-soft)">{projectName}</div>}
       </div>
     </>
   );
@@ -190,7 +192,7 @@ export function CalendarEventMarker({
         height={size * 0.72}
         viewBox="0 -960 960 960"
       >
-        <path d={iconPath} fill="#a49a82" />
+        <path d={iconPath} style={{ fill: "var(--ink-soft)" }} />
       </svg>
       <svg
         className="absolute opacity-0 transition-opacity group-hover:opacity-100"
@@ -200,7 +202,7 @@ export function CalendarEventMarker({
       >
         <path
           d="m336-280-56-56 144-144-144-143 56-56 144 144 143-144 56 56-144 143 144 144-56 56-143-144-144 144Z"
-          fill="#8a4040"
+          style={{ fill: "var(--danger)" }}
         />
       </svg>
     </button>
@@ -237,14 +239,14 @@ export function RowDeleteButton({ action }: { action: () => void }) {
       onClick={action}
       title="Delete"
       aria-label="Delete"
-      className="cursor-pointer text-[13px] text-[#b3a988] opacity-0 transition-opacity hover:text-[#8a4040] group-hover:opacity-100"
+      className="cursor-pointer text-[13px] text-(--ink-faint) opacity-0 transition-opacity hover:text-(--danger) group-hover:opacity-100"
     >
       Delete
     </button>
   );
 }
 
-export const labelClass = "text-[11px] uppercase tracking-[0.16em] text-[#a49a82]";
+export const labelClass = "text-[11px] uppercase tracking-[0.16em] text-(--ink-soft)";
 
 /** Renders `children` on one line, shrinking the font size (down to `minFontSize`) so it never
     overflows the container's width — for decorative script text where letter widths vary too

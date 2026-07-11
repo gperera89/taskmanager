@@ -9,7 +9,7 @@ import { TaskRow } from "./TasksView";
 import type { CategoryOption, ProjectCardVM, ProjectOption } from "./types";
 
 const fieldInputClass =
-  "w-full rounded-md border border-[#d3c9b3] bg-[#faf7ef] px-2 py-1 text-[13.5px] text-[#2a2622] outline-none focus:border-[#17399b]";
+  "w-full rounded-md border border-(--border-strong) bg-(--card) px-2 py-1 text-[13.5px] text-(--ink) outline-none focus:border-(--accent-text)";
 
 const VIEW_MODES = ["unchecked", "all", "none"] as const;
 type ProjectViewMode = (typeof VIEW_MODES)[number];
@@ -36,10 +36,10 @@ function ProjectExpandToggle({ mode, onCycle }: { mode: ProjectViewMode; onCycle
       onClick={onCycle}
       title={label}
       aria-label={label}
-      className="flex flex-none cursor-pointer items-center justify-center text-[#a49a82]"
+      className="flex flex-none cursor-pointer items-center justify-center text-(--ink-soft)"
     >
       <svg width="17" height="17" viewBox="0 -960 960 960">
-        <path d={VIEW_MODE_ICON_PATH[mode]} fill="#a49a82" />
+        <path d={VIEW_MODE_ICON_PATH[mode]} style={{ fill: "var(--ink-soft)" }} />
       </svg>
     </button>
   );
@@ -64,13 +64,13 @@ export default function ProjectsView({
   return (
     <div>
       <div className="flex items-end justify-between">
-        <div className="font-script text-[62px] leading-[0.8] text-[#2a2622]">Projects</div>
-        <div className="pb-2.5 text-[13px] text-[#8a8069]">{activeCount} active</div>
+        <div className="font-script text-[62px] leading-[0.8] text-(--ink)">Projects</div>
+        <div className="pb-2.5 text-[13px] text-(--ink-muted)">{activeCount} active</div>
       </div>
-      <div className="my-5 mb-6 h-px bg-[#d5cbb4]" />
+      <div className="my-5 mb-6 h-px bg-(--rule)" />
 
       {filtered.length === 0 && (
-        <p className="py-8 text-[15px] italic text-[#a49a82]">
+        <p className="py-8 text-[15px] italic text-(--ink-soft)">
           {q ? "No projects match your search." : "Nothing here yet."}
         </p>
       )}
@@ -102,15 +102,20 @@ function ProjectCard({
   const [viewMode, setViewMode] = useState<ProjectViewMode>("unchecked");
   const cycleViewMode = () =>
     setViewMode((mode) => VIEW_MODES[(VIEW_MODES.indexOf(mode) + 1) % VIEW_MODES.length]);
-  const visibleTasks =
+  // Sections keep their grouping under every view mode; a section with nothing visible drops out.
+  const visibleSections =
     viewMode === "none"
       ? []
-      : viewMode === "unchecked"
-        ? project.tasks.filter((t) => !t.isCompleted || isHeld(t.id))
-        : project.tasks;
+      : project.sections
+          .map((s) => ({
+            ...s,
+            tasks: viewMode === "unchecked" ? s.tasks.filter((t) => !t.isCompleted || isHeld(t.id)) : s.tasks,
+          }))
+          .filter((s) => s.tasks.length > 0);
+  const visibleCount = visibleSections.reduce((n, s) => n + s.tasks.length, 0);
 
   return (
-    <div className="group rounded-xl border border-[#e1d8c4] bg-[#f2ecdf] px-5.5 pb-5 pt-5.5">
+    <div className="group rounded-xl border border-(--border-soft) bg-(--card-tint) px-5.5 pb-5 pt-5.5">
       <div className="flex items-baseline justify-between gap-2">
         {editingName ? (
           <form
@@ -132,19 +137,31 @@ function ProjectCard({
               onKeyDown={(e) => {
                 if (e.key === "Escape") setEditingName(false);
               }}
-              className="w-full border-b border-[#17399b] bg-transparent text-[21px] font-semibold text-[#2a2622] outline-none"
+              className="w-full border-b border-(--accent-text) bg-transparent text-[21px] font-semibold text-(--ink) outline-none"
             />
           </form>
         ) : (
-          <div className="cursor-pointer text-[21px] font-semibold text-[#2a2622]" onClick={() => setEditingName(true)}>
+          <div className="cursor-pointer text-[21px] font-semibold text-(--ink)" onClick={() => setEditingName(true)}>
             {project.name}
           </div>
         )}
         <div className="flex flex-none items-center gap-2.5">
-          <span className="text-[13px] text-[#557694]">
+          <span className="text-[13px] text-(--info)">
             {project.done} / {project.total}
           </span>
           <ProjectExpandToggle mode={viewMode} onCycle={cycleViewMode} />
+          <button
+            type="button"
+            title="Duplicate as a fresh copy (templates)"
+            aria-label={`Duplicate ${project.name}`}
+            onClick={() => {
+              const name = window.prompt("Name for the copy", `${project.name} copy`);
+              if (name !== null) actions.duplicateProject(project.id, name.trim() || `${project.name} copy`);
+            }}
+            className="cursor-pointer text-[13px] text-(--ink-faint) opacity-0 transition-opacity hover:text-(--info) group-hover:opacity-100"
+          >
+            Duplicate
+          </button>
           <RowDeleteButton action={() => actions.removeProject(project.id)} />
         </div>
       </div>
@@ -172,7 +189,7 @@ function ProjectCard({
           />
         </form>
       ) : (
-        <div className="mt-1.5 cursor-pointer text-[13.5px] italic leading-snug text-[#8a8069]" onClick={() => setEditingDescription(true)}>
+        <div className="mt-1.5 cursor-pointer text-[13.5px] italic leading-snug text-(--ink-muted)" onClick={() => setEditingDescription(true)}>
           {project.description || "Add description"}
         </div>
       )}
@@ -197,7 +214,7 @@ function ProjectCard({
               onKeyDown={(e) => {
                 if (e.key === "Escape") setEditingDueDate(false);
               }}
-              className="rounded-md border border-[#d3c9b3] bg-[#faf7ef] px-2 py-1 text-[12.5px] text-[#2a2622] outline-none focus:border-[#17399b]"
+              className="rounded-md border border-(--border-strong) bg-(--card) px-2 py-1 text-[12.5px] text-(--ink) outline-none focus:border-(--accent-text)"
             />
           </form>
         ) : (
@@ -207,18 +224,35 @@ function ProjectCard({
         )}
       </div>
 
-      <div className="my-2.5 mb-4 h-1 overflow-hidden rounded-full bg-[#e1d8c4]">
-        <div className="h-full rounded-full bg-[#17399b]" style={{ width: `${project.progressPct}%` }} />
+      <div className="my-2.5 mb-4 h-1 overflow-hidden rounded-full bg-(--border-soft)">
+        <div className="h-full rounded-full bg-(--accent)" style={{ width: `${project.progressPct}%` }} />
       </div>
       <div className="flex flex-col gap-3">
-        {visibleTasks.map((item) => (
-          <TaskRow key={item.id} task={item} categoryOptions={categoryOptions} projectOptions={projectOptions} onCompleting={hold} />
+        {visibleSections.map((section) => (
+          <div key={section.name ?? "__none__"}>
+            {section.name && (
+              <div className={`${labelClass} mb-1 mt-1`}>{section.name}</div>
+            )}
+            <div className="flex flex-col gap-3">
+              {section.tasks.map((item) => (
+                <TaskRow
+                  key={item.id}
+                  task={item}
+                  categoryOptions={categoryOptions}
+                  projectOptions={projectOptions}
+                  onCompleting={hold}
+                  reorderIds={section.tasks.map((t) => t.id)}
+                  sectionOptions={project.sectionNames}
+                />
+              ))}
+            </div>
+          </div>
         ))}
         {viewMode === "none" && project.total > 0 && (
-          <div className="pl-8 text-[13px] italic text-[#a49a82]">{project.total} tasks hidden</div>
+          <div className="pl-8 text-[13px] italic text-(--ink-soft)">{project.total} tasks hidden</div>
         )}
-        {viewMode === "unchecked" && visibleTasks.length === 0 && project.total > 0 && (
-          <div className="pl-8 text-[13px] italic text-[#a49a82]">All tasks complete</div>
+        {viewMode === "unchecked" && visibleCount === 0 && project.total > 0 && (
+          <div className="pl-8 text-[13px] italic text-(--ink-soft)">All tasks complete</div>
         )}
         {addingTask ? (
           <form
@@ -244,7 +278,7 @@ function ProjectCard({
               onKeyDown={(e) => {
                 if (e.key === "Escape") setAddingTask(false);
               }}
-              className="min-w-0 flex-1 border-b border-[#17399b] bg-transparent text-[15px] text-[#2a2622] outline-none"
+              className="min-w-0 flex-1 border-b border-(--accent-text) bg-transparent text-[15px] text-(--ink) outline-none"
             />
             <input
               type="date"
@@ -257,7 +291,7 @@ function ProjectCard({
               onKeyDown={(e) => {
                 if (e.key === "Escape") setAddingTask(false);
               }}
-              className="flex-none rounded-md border border-[#d3c9b3] bg-[#faf7ef] px-1.5 py-0.5 text-[12px] text-[#8a8069] outline-none"
+              className="flex-none rounded-md border border-(--border-strong) bg-(--card) px-1.5 py-0.5 text-[12px] text-(--ink-muted) outline-none"
             />
           </form>
         ) : (

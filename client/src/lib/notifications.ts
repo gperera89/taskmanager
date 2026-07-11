@@ -1,6 +1,7 @@
 import "server-only";
 import webpush from "web-push";
 import {
+  completeRoutineCluster,
   deletePushSubscription,
   getActiveTopLevelRoutines,
   getAppSettings,
@@ -9,33 +10,97 @@ import {
   getUnnotifiedDueTasks,
   isRoutineTickedNow,
   markProjectNotified,
-  markRoutineNotified,
   markTaskNotified,
-  ROUTINE_TICK_EXPIRY_MS,
 } from "@/lib/api";
 import { isRoutineDueToday } from "@/lib/taskRecurrence";
 import { dueInstant, getTimeZoneOffsetMs, pad2, zonedNow } from "@/lib/taskbookDates";
 
-webpush.setVapidDetails(
-  process.env.VAPID_SUBJECT!,
-  process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!,
-  process.env.VAPID_PRIVATE_KEY!
+// --- Delivery layer -------------------------------------------------------------------------
+//
+// Primary channel: ntfy (https://ntfy.sh) — a real push app on iOS/Android/desktop with
+// reliable APNs/FCM delivery and a persistent per-topic history, so a notification survives
+// as a record even after the app auto-ticks the routine it announced. Configure with:
+//   NTFY_TOPIC   (required to enable; treat as a secret — anyone who knows it can read/send)
+//   NTFY_SERVER  (optional, defaults to https://ntfy.sh — set for a self-hosted instance)
+//   NTFY_TOKEN   (optional, for reserved topics)
+//   APP_URL      (optional, absolute URL the notification's tap/click opens)
+//
+// Secondary channel: the pre-existing Web Push path (VAPID env vars + per-device
+// subscriptions). Kept as a fallback; skipped entirely when its env vars are absent. The old
+// "silent push then close-by-tag" auto-dismiss trick is GONE — iOS treats repeated pushes
+// that show nothing as abuse and silently revokes the subscription, which is the most likely
+// reason notifications "just stopped" on the phone.
+
+type NotifyAction = {
+  label: string;
+  // Path under APP_URL the button POSTs to (an /api/notify-action variant). The request
+  // carries the cron secret so ntfy's button can authenticate without a session.
+  path: string;
+};
+
+type PushPayload = {
+  title: string;
+  body: string;
+  url: string;
+  tag?: string;
+  actions?: NotifyAction[];
+};
+
+const WEB_PUSH_ENABLED = Boolean(
+  process.env.VAPID_SUBJECT && process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY
 );
+if (WEB_PUSH_ENABLED) {
+  webpush.setVapidDetails(
+    process.env.VAPID_SUBJECT!,
+    process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!,
+    process.env.VAPID_PRIVATE_KEY!
+  );
+}
 
-// `tag` groups related notifications so a later push replaces an earlier one with the same
-// tag instead of stacking (used to keep a routine cluster to a single notification). `close`
-// tells the service worker to just close whatever notification already has `tag` rather than
-// show a new one — see checkAndNotifyDueRoutines' 1-hour auto-dismiss.
-type PushPayload = { title: string; body: string; url: string; tag?: string; close?: true };
+function appUrl(path: string): string {
+  const base = (process.env.APP_URL ?? "").replace(/\/$/, "");
+  return base ? `${base}${path}` : path;
+}
 
-async function sendToAllSubscriptions(payload: PushPayload) {
+// ntfy action buttons ride in a single "Actions" header:
+//   http, <label>, <url>, method=POST, headers.Authorization=Bearer <secret>
+// Commas/semicolons are ntfy's delimiters, so labels are kept to safe words.
+function ntfyActionsHeader(actions: NotifyAction[]): string {
+  const secret = process.env.CRON_SECRET ?? "";
+  return actions
+    .map((a) => `http, ${a.label}, ${appUrl(a.path)}, method=POST, headers.Authorization=Bearer ${secret}`)
+    .join("; ");
+}
+
+async function deliverNtfy(payload: PushPayload): Promise<void> {
+  const topic = process.env.NTFY_TOPIC;
+  if (!topic) return;
+  const server = (process.env.NTFY_SERVER ?? "https://ntfy.sh").replace(/\/$/, "");
+  const headers: Record<string, string> = {
+    // Non-ASCII in header values breaks fetch; ntfy reads UTF-8 titles from this RFC 2047-free
+    // fallback fine for this app's plain-English titles, but strip anything unsafe defensively.
+    Title: payload.title.replace(/[^\x20-\x7e]/g, "").slice(0, 250) || "Reminder",
+    Priority: "default",
+    Tags: "spiral_calendar",
+  };
+  const click = appUrl(payload.url);
+  if (click.startsWith("http")) headers.Click = click;
+  if (process.env.NTFY_TOKEN) headers.Authorization = `Bearer ${process.env.NTFY_TOKEN}`;
+  if (payload.actions?.length && process.env.CRON_SECRET) headers.Actions = ntfyActionsHeader(payload.actions);
+
+  const res = await fetch(`${server}/${topic}`, { method: "POST", body: payload.body, headers });
+  if (!res.ok) console.error("[notifications] ntfy publish failed:", res.status, await res.text().catch(() => ""));
+}
+
+async function deliverWebPush(payload: PushPayload): Promise<void> {
+  if (!WEB_PUSH_ENABLED) return;
   const subscriptions = await getPushSubscriptions();
   await Promise.all(
     subscriptions.map(async (sub) => {
       try {
         await webpush.sendNotification(
           { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
-          JSON.stringify(payload)
+          JSON.stringify({ title: payload.title, body: payload.body, url: payload.url, tag: payload.tag })
         );
       } catch (err) {
         const statusCode = (err as { statusCode?: number }).statusCode;
@@ -43,31 +108,39 @@ async function sendToAllSubscriptions(payload: PushPayload) {
         if (statusCode === 404 || statusCode === 410) {
           await deletePushSubscription(sub.endpoint);
         } else {
-          console.error("[notifications] push failed for", sub.endpoint, err);
+          console.error("[notifications] web push failed for", sub.endpoint, err);
         }
       }
     })
   );
 }
 
+// Both channels fire; a failure in one never blocks the other.
+export async function deliver(payload: PushPayload): Promise<void> {
+  const results = await Promise.allSettled([deliverNtfy(payload), deliverWebPush(payload)]);
+  for (const r of results) {
+    if (r.status === "rejected") console.error("[notifications] delivery channel failed:", r.reason);
+  }
+}
+
+// --- Due checks (called by /api/cron/check-due) ----------------------------------------------
+
 function zonedDateKey(at: Date, timeZone: string): string {
   const z = zonedNow(at.getTime(), timeZone);
   return `${z.getUTCFullYear()}-${z.getUTCMonth()}-${z.getUTCDate()}`;
 }
 
-// The external scheduler is expected to hit /api/cron/check-due roughly once a minute; this is
-// the tolerance window for the "auto-close an unactioned notification" check below, wide enough
-// to absorb scheduler jitter without missing the moment. Closing an already-closed notification
-// is a no-op, so a wider window risks harmless double-closes, not incorrect ones.
-const CLOSE_CHECK_WINDOW_MS = 3 * 60 * 1000;
+// The longest configurable reminder lead — widens the over-fetch window so a "1 day before"
+// reminder is still picked up by the dueDate <= until query.
+const MAX_LEAD_MS = 24 * 60 * 60 * 1000;
 
 // Finds every routine cluster (a top-level routine plus its sub-routines) whose schedule and
-// reminder time have arrived today and hasn't been notified about yet, sends ONE push per
-// cluster naming every sub-routine so they read and dismiss together like "Wake Up Routine" ->
-// "Make coffee · Brush teeth · Shave", and marks it notified so it won't re-fire today. Also
-// finds clusters notified over an hour ago that were never ticked and closes their still-open
-// notification (see the PushPayload.close comment) so a stale reminder doesn't linger forever.
-async function checkAndNotifyDueRoutines(now: Date, timeZone: string): Promise<{ notified: number; closed: number }> {
+// reminder time have arrived today and hasn't fired yet, sends ONE notification per cluster
+// naming every sub-routine, and AUTO-TICKS the cluster: the routine completes itself the
+// moment it's announced, while the notification persists in ntfy's history as the record.
+// The notification carries a "Not done" action button that un-ticks it for routines the user
+// didn't actually do (see /api/notify-action).
+async function checkAndNotifyDueRoutines(now: Date, timeZone: string): Promise<{ notified: number }> {
   const local = zonedNow(now.getTime(), timeZone);
   const nowHHMM = `${pad2(local.getUTCHours())}:${pad2(local.getUTCMinutes())}`;
 
@@ -87,54 +160,68 @@ async function checkAndNotifyDueRoutines(now: Date, timeZone: string): Promise<{
     return isRoutineDueToday(r, local);
   });
 
-  const toClose = routines.filter((r) => {
-    if (!r.notifiedAt || isRoutineTickedNow(r)) return false;
-    const age = now.getTime() - r.notifiedAt.getTime();
-    return age >= ROUTINE_TICK_EXPIRY_MS && age < ROUTINE_TICK_EXPIRY_MS + CLOSE_CHECK_WINDOW_MS;
-  });
+  await Promise.all(
+    due.map(async (r) => {
+      const body = r.subroutines.length ? r.subroutines.map((s) => s.title).join(" · ") : "Ticked off automatically";
+      await deliver({
+        title: r.title,
+        body,
+        url: "/",
+        tag: `routine-${r.id}`,
+        actions: [{ label: "Not done", path: `/api/notify-action?kind=untick-routine&id=${r.id}` }],
+      });
+      // Auto-tick: stamps lastCompletedAt + notifiedAt on the whole cluster and writes the
+      // CompletionLog row flagged auto=true.
+      await completeRoutineCluster(r.id, true);
+    })
+  );
 
-  await Promise.all([
-    ...due.map(async (r) => {
-      const tag = `routine-${r.id}`;
-      const body = r.subroutines.length ? r.subroutines.map((s) => s.title).join(" · ") : "Tap to mark done";
-      await sendToAllSubscriptions({ title: r.title, body, url: "/", tag });
-      await markRoutineNotified(r.id, now);
-    }),
-    ...toClose.map((r) => sendToAllSubscriptions({ title: r.title, body: "", url: "/", tag: `routine-${r.id}`, close: true })),
-  ]);
-
-  return { notified: due.length, closed: toClose.length };
+  return { notified: due.length };
 }
 
-// Finds every task/project/routine cluster that has come due and hasn't been notified about
-// yet, sends a push to every registered device, and marks each as notified so it won't re-fire.
+// Finds every task/project that has reached its reminder instant (due time minus its optional
+// reminderLeadMinutes) and hasn't been notified, sends a notification, and marks it notified.
 // Meant to be called on a short interval (e.g. every minute) by an external scheduler hitting
-// /api/cron/check-due, since Vercel Hobby cron can't run that often.
+// /api/cron/check-due — see markCronRun's heartbeat for detecting when that scheduler lapses.
 export async function checkAndNotifyDueItems(): Promise<{
   tasksNotified: number;
   projectsNotified: number;
   routinesNotified: number;
-  routinesClosed: number;
 }> {
   const now = new Date();
   const { timeZone } = await getAppSettings();
-  const until = new Date(now.getTime() + getTimeZoneOffsetMs(now, timeZone));
+  const until = new Date(now.getTime() + getTimeZoneOffsetMs(now, timeZone) + MAX_LEAD_MS);
 
   const [tasks, projects, routineResult] = await Promise.all([
     getUnnotifiedDueTasks(until),
     getUnnotifiedDueProjects(until),
     checkAndNotifyDueRoutines(now, timeZone),
   ]);
-  const dueTasks = tasks.filter((t) => t.dueDate && dueInstant(t.dueDate, timeZone) <= now);
-  const dueProjects = projects.filter((p) => p.dueDate && dueInstant(p.dueDate, timeZone) <= now);
+
+  const reminderInstant = (due: Date, leadMinutes: number | null) =>
+    new Date(dueInstant(due, timeZone).getTime() - (leadMinutes ?? 0) * 60_000);
+
+  const dueTasks = tasks.filter((t) => t.dueDate && reminderInstant(t.dueDate, t.reminderLeadMinutes) <= now);
+  const dueProjects = projects.filter((p) => p.dueDate && reminderInstant(p.dueDate, p.reminderLeadMinutes) <= now);
 
   await Promise.all([
     ...dueTasks.map(async (t) => {
-      await sendToAllSubscriptions({ title: "Task due", body: t.title, url: "/" });
+      await deliver({
+        title: t.reminderLeadMinutes ? "Task coming up" : "Task due",
+        body: t.title,
+        url: "/",
+        tag: `task-${t.id}`,
+        actions: [{ label: "Snooze 1 day", path: `/api/notify-action?kind=snooze-task&id=${t.id}&days=1` }],
+      });
       await markTaskNotified(t.id, now);
     }),
     ...dueProjects.map(async (p) => {
-      await sendToAllSubscriptions({ title: "Project due", body: p.name, url: "/" });
+      await deliver({
+        title: p.reminderLeadMinutes ? "Project deadline coming up" : "Project due",
+        body: p.name,
+        url: "/",
+        tag: `project-${p.id}`,
+      });
       await markProjectNotified(p.id, now);
     }),
   ]);
@@ -143,6 +230,5 @@ export async function checkAndNotifyDueItems(): Promise<{
     tasksNotified: dueTasks.length,
     projectsNotified: dueProjects.length,
     routinesNotified: routineResult.notified,
-    routinesClosed: routineResult.closed,
   };
 }

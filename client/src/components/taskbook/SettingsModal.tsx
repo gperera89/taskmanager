@@ -1,8 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import { formatUtcOffset, getTimeZoneOffsetMs, OTHER_TIME_ZONES, SUPPORTED_TIME_ZONES } from "@/lib/taskbookDates";
 import CategoryManager from "./CategoryManager";
 import NotificationSetup from "./NotificationSetup";
+import { useTaskbook } from "./store";
 import type { CategoryOption } from "./types";
 
 export default function SettingsModal({
@@ -21,28 +23,28 @@ export default function SettingsModal({
     `${z.label} (${formatUtcOffset(getTimeZoneOffsetMs(now, z.id))})`;
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-[rgba(42,38,34,.35)] p-6" onClick={onClose}>
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-(--overlay) p-6" onClick={onClose}>
       <div
-        className="w-full max-w-105 rounded-2xl border border-[#ddd4c1] bg-[#faf7ef] p-6 shadow-[0_20px_60px_rgba(70,55,30,.3)] font-serif"
+        className="w-full max-w-105 rounded-2xl border border-(--border) bg-(--card) p-6 shadow-[0_20px_60px_rgba(70,55,30,.3)] font-serif"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-xl text-[#2a2622]">Settings</h2>
-          <button type="button" onClick={onClose} aria-label="Close" className="cursor-pointer text-[#8a8069]">
+          <h2 className="text-xl text-(--ink)">Settings</h2>
+          <button type="button" onClick={onClose} aria-label="Close" className="cursor-pointer text-(--ink-muted)">
             <svg width="18" height="18" viewBox="0 -960 960 960">
-              <path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z" fill="#8a8069" />
+              <path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z" style={{ fill: "var(--ink-muted)" }} />
             </svg>
           </button>
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <label className="mb-1 block text-[11px] uppercase tracking-[0.14em] text-[#8a8069]">Categories</label>
+          <label className="mb-1 block text-[11px] uppercase tracking-[0.14em] text-(--ink-muted)">Categories</label>
           <CategoryManager categoryOptions={categoryOptions} />
         </div>
 
         <div className="mt-4 flex flex-col gap-1.5">
-          <label className="mb-1 block text-[11px] uppercase tracking-[0.14em] text-[#8a8069]">Timezone</label>
-          <p className="mb-1 text-xs text-[#8a8069]">
+          <label className="mb-1 block text-[11px] uppercase tracking-[0.14em] text-(--ink-muted)">Timezone</label>
+          <p className="mb-1 text-xs text-(--ink-muted)">
             Governs due-date/reminder times and how calendar events are displayed.
           </p>
           <div className="flex flex-wrap gap-1.5">
@@ -54,8 +56,8 @@ export default function SettingsModal({
                 className="cursor-pointer rounded-md border px-2.5 py-1 text-xs"
                 style={
                   z.id === timeZone
-                    ? { background: "#17399b", borderColor: "#17399b", color: "#fff" }
-                    : { background: "transparent", borderColor: "#d3c9b3", color: "#2a2622" }
+                    ? { background: "var(--accent)", borderColor: "var(--accent-text)", color: "var(--on-accent)" }
+                    : { background: "transparent", borderColor: "var(--border-strong)", color: "var(--ink)" }
                 }
               >
                 {zoneLabel(z)}
@@ -70,8 +72,8 @@ export default function SettingsModal({
             className="mt-1.5 cursor-pointer rounded-md border px-2.5 py-1 text-xs"
             style={
               OTHER_TIME_ZONES.some((z) => z.id === timeZone)
-                ? { background: "#17399b", borderColor: "#17399b", color: "#fff" }
-                : { background: "transparent", borderColor: "#d3c9b3", color: "#2a2622" }
+                ? { background: "var(--accent)", borderColor: "var(--accent-text)", color: "var(--on-accent)" }
+                : { background: "transparent", borderColor: "var(--border-strong)", color: "var(--ink)" }
             }
           >
             <option value="" disabled>
@@ -86,9 +88,56 @@ export default function SettingsModal({
         </div>
 
         <div className="mt-4 flex flex-col gap-1.5">
-          <label className="mb-1 block text-[11px] uppercase tracking-[0.14em] text-[#8a8069]">Notifications</label>
+          <label className="mb-1 block text-[11px] uppercase tracking-[0.14em] text-(--ink-muted)">Notifications</label>
+          <NotificationHealth />
           <NotificationSetup />
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Heartbeat status + a test-send button, so "are notifications actually working" is
+// answerable from inside the app instead of by waiting for something to come due.
+function NotificationHealth() {
+  const { data, nowMs } = useTaskbook();
+  const [testState, setTestState] = useState<"idle" | "sending" | "sent" | "failed">("idle");
+
+  async function sendTest() {
+    setTestState("sending");
+    try {
+      const res = await fetch("/api/push/test", { method: "POST" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const body = (await res.json()) as { ntfyConfigured?: boolean };
+      setTestState("sent");
+      if (body.ntfyConfigured === false) {
+        console.warn("[notifications] NTFY_TOPIC is not configured — only web push was attempted.");
+      }
+    } catch (err) {
+      console.error("[notifications] test send failed:", err);
+      setTestState("failed");
+    }
+  }
+
+  const staleMin = data.lastCronAtMs === null ? null : Math.round((nowMs - data.lastCronAtMs) / 60000);
+  return (
+    <div className="rounded-lg border border-(--border-strong) bg-(--card) p-2.5 text-sm">
+      <div className="flex items-center justify-between gap-2">
+        <span className={staleMin !== null && staleMin <= 10 ? "text-(--info)" : "text-(--danger)"}>
+          {staleMin === null
+            ? "Reminder checker has never run — set up the external cron."
+            : staleMin <= 10
+              ? `Reminder checker healthy (last ran ${staleMin <= 1 ? "just now" : `${staleMin} min ago`}).`
+              : `Reminder checker last ran ${staleMin} min ago — the scheduler may have stopped.`}
+        </span>
+        <button
+          type="button"
+          onClick={() => void sendTest()}
+          disabled={testState === "sending"}
+          className="cursor-pointer whitespace-nowrap rounded-md bg-(--accent) px-2.5 py-1 text-xs text-(--on-accent) disabled:opacity-60"
+        >
+          {testState === "sending" ? "Sending…" : testState === "sent" ? "Sent ✓" : testState === "failed" ? "Failed — retry" : "Send test"}
+        </button>
       </div>
     </div>
   );

@@ -16,6 +16,16 @@ datasource db {
 model Category {
   id   String @id @default(uuid())
   name String @unique
+  // Which top-bar mode (work/home) tasks in this category belong to. NONE means "both": the
+  // task stays visible in every mode rather than silently vanishing outside "all" (the old
+  // behavior matched only the literal names "Work"/"Home").
+  scope CategoryScope @default(NONE)
+}
+
+enum CategoryScope {
+  WORK
+  HOME
+  NONE
 }
 
 // Single-row app-wide settings (this is a single-user app). Lazily created on first read (see
@@ -24,6 +34,9 @@ model AppSettings {
   id       String @id @default("app")
   // IANA zone name used to interpret due/reminder clock times and display calendar events.
   timeZone String @default("Asia/Shanghai")
+  // Stamped by /api/cron/check-due on every run — the notification system's heartbeat. The UI
+  // warns when this goes stale, making a lapsed external scheduler visible instead of silent.
+  lastCronAt DateTime?
 }
 
 // One row per dismissed calendar (ICS) event instance, so a dismissal survives across
@@ -44,6 +57,8 @@ model Project {
   // Set once a due-date push notification has been sent for this dueDate, so the notification
   // cron never re-sends for the same deadline. Cleared implicitly whenever dueDate changes.
   notifiedAt  DateTime?
+  // Notify this many minutes before the due instant instead of at it (null = at the due time).
+  reminderLeadMinutes Int?
   tasks       Task[]
 }
 
@@ -54,10 +69,22 @@ model Task {
   category    String
   dueDate     DateTime?
   isCompleted Boolean   @default(false)
+  // When isCompleted last flipped true — cleared on un-complete. Drives the 30-day archive
+  // window (getTasks) and the Logbook; older completed tasks stop being fetched entirely.
+  completedAt DateTime?
   createdAt   DateTime  @default(now())
   // Set once a due-date push notification has been sent for this dueDate, so the notification
   // cron never re-sends for the same deadline. Cleared implicitly whenever dueDate changes.
   notifiedAt  DateTime?
+  // Notify this many minutes before the due instant instead of at it (null = at the due time).
+  reminderLeadMinutes Int?
+  // Optional grouping heading within a project's card (Things-style sections). Free text,
+  // meaningful only for tasks with a projectId.
+  section     String?
+  // Manual ordering within a due bucket / project section (fractional indexing — reorders
+  // assign midpoints, occasional bulk rewrites renumber a whole group). Null = no manual
+  // position: sorts after ordered tasks, by due time then creation.
+  sortOrder   Float?
 
   // Repeating tasks: null repeatFrequency means the task doesn't repeat. Unlike Routines
   // (which just track "is today active"), a repeating Task has one concrete dueDate that gets
@@ -95,6 +122,22 @@ enum CapturedKind {
   PROJECT
   ROUTINE
   HABIT
+}
+
+// One row per completion event — the app's history. Written when a task completes (including
+// a repeating task rolling forward, which otherwise leaves no trace), a routine cluster ticks
+// (auto = ticked by the notification cron rather than the user), or a habit is marked done.
+// `title` is denormalized so history survives the entity being renamed or deleted.
+model CompletionLog {
+  id          String   @id @default(uuid())
+  entityType  CapturedKind
+  entityId    String
+  title       String
+  completedAt DateTime @default(now())
+  auto        Boolean  @default(false)
+
+  @@index([completedAt])
+  @@index([entityType, entityId])
 }
 
 // A voice memo transcribed by Whisper and parsed by an LLM into a Task/Project/Routine/Habit,

@@ -1,3 +1,4 @@
+import { markCronRun, sweepDismissedCalendarEvents } from "@/lib/api";
 import { checkAndNotifyDueItems } from "@/lib/notifications";
 
 // Hit on a short interval (e.g. every minute) by an external scheduler — see the project's
@@ -12,6 +13,13 @@ export async function GET(request: Request) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const result = await checkAndNotifyDueItems();
+  const now = new Date();
+  const [result] = await Promise.all([
+    checkAndNotifyDueItems(),
+    // Heartbeat: the UI warns when this stamp goes stale (external scheduler lapsed).
+    markCronRun(now),
+    // Housekeeping that used to run a delete on the page-load read path.
+    sweepDismissedCalendarEvents(),
+  ]);
   return Response.json(result);
 }

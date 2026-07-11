@@ -125,21 +125,21 @@ export function DateTimePickerPanel({
         <div className="mb-2 flex items-center justify-between">
           <button type="button" onClick={goPrevMonth} aria-label="Previous month" className="cursor-pointer p-0.5">
             <svg width="12" height="12" viewBox="0 -960 960 960">
-              <path d="M400-80 0-480l400-400 71 71-329 329 329 329-71 71Z" fill="#8a8069" />
+              <path d="M400-80 0-480l400-400 71 71-329 329 329 329-71 71Z" style={{ fill: "var(--ink-muted)" }} />
             </svg>
           </button>
-          <span className="text-[12.5px] text-[#2a2622]">
+          <span className="text-[12.5px] text-(--ink)">
             {MONTH_NAMES[viewedMonth0]} {viewedYear}
           </span>
           <button type="button" onClick={goNextMonth} aria-label="Next month" className="cursor-pointer p-0.5">
             <svg width="12" height="12" viewBox="0 -960 960 960">
-              <path d="m321-80-71-71 329-329-329-329 71-71 400 400L321-80Z" fill="#8a8069" />
+              <path d="m321-80-71-71 329-329-329-329 71-71 400 400L321-80Z" style={{ fill: "var(--ink-muted)" }} />
             </svg>
           </button>
         </div>
         <div className="mb-1 grid grid-cols-7">
           {WEEKDAY_HEADERS.map((w, i) => (
-            <div key={i} className="text-center text-[9.5px] uppercase tracking-widest text-[#a49a82]">
+            <div key={i} className="text-center text-[9.5px] uppercase tracking-widest text-(--ink-soft)">
               {w}
             </div>
           ))}
@@ -166,8 +166,8 @@ export function DateTimePickerPanel({
                 disabled={!handleClick}
                 className="flex h-7 items-center justify-center rounded-md text-[12px] select-none"
                 style={{
-                  color: isSelected ? "#fff" : cell.inMonth ? "#2a2622" : "#c3b9a1",
-                  background: isSelected ? "#17399b" : cell.isToday ? "rgba(23,57,155,.08)" : "transparent",
+                  color: isSelected ? "var(--on-accent)" : cell.inMonth ? "var(--ink)" : "var(--ink-disabled)",
+                  background: isSelected ? "var(--accent)" : cell.isToday ? "var(--accent-wash)" : "transparent",
                   cursor: handleClick ? "pointer" : "default",
                 }}
               >
@@ -177,14 +177,14 @@ export function DateTimePickerPanel({
           })}
         </div>
       </div>
-      <div className="w-22 flex-none border-l border-[#e1d8c4] pl-2.5">
+      <div className="w-22 flex-none border-l border-(--border-soft) pl-2.5">
         <button
           type="button"
           onClick={() => onChangeTime("")}
           className="mb-1 flex w-full flex-none items-center rounded px-1.5 py-1 text-left text-[11px] italic"
           style={{
-            color: !timeValue ? "#17399b" : "#a49a82",
-            background: !timeValue ? "rgba(23,57,155,.08)" : "transparent",
+            color: !timeValue ? "var(--accent-text)" : "var(--ink-soft)",
+            background: !timeValue ? "var(--accent-wash)" : "transparent",
           }}
         >
           No time
@@ -200,12 +200,12 @@ export function DateTimePickerPanel({
                 ref={isActive ? activeTimeRef : undefined}
                 onClick={() => onChangeTime(t)}
                 className="flex flex-none items-center justify-between gap-1 rounded px-1.5 py-1 text-left text-[12px] whitespace-nowrap"
-                style={{ background: isSet ? "rgba(23,57,155,.08)" : "transparent", color: isSet ? "#17399b" : "#4a4436" }}
+                style={{ background: isSet ? "var(--accent-wash)" : "transparent", color: isSet ? "var(--accent)" : "var(--ink-strong)" }}
               >
                 {formatTimeLabel(t)}
                 {isSet && (
                   <svg width="10" height="10" viewBox="0 -960 960 960">
-                    <path d="M378-208 122-464l67-67 189 189 383-383 67 67-450 450Z" fill="#17399b" />
+                    <path d="M378-208 122-464l67-67 189 189 383-383 67 67-450 450Z" style={{ fill: "var(--accent-text)" }} />
                   </svg>
                 )}
               </button>

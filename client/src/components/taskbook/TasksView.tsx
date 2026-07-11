@@ -2,12 +2,18 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { FocusEvent } from "react";
+import { REMINDER_LEAD_OPTIONS } from "@/lib/shared";
 import { useTaskbook } from "./store";
 import type { TaskRepeatInput } from "./store";
 import { AutoGrowTextarea, CheckSquare, RowDeleteButton, StrikeSweep, labelClass, useCompletionHold } from "./shared";
 import { DateTimePickerPanel } from "./DateTimePicker";
+import QuickAdd from "./QuickAdd";
 import RepeatFields from "./RepeatFields";
 import type { CategoryOption, ProjectOption, TaskGroupVM, TaskItemVM } from "./types";
+
+// Drag-to-reorder passes the dragged task id between rows of the same group via this shared
+// ref (dataTransfer is unreadable during dragover). Module-level is fine: one drag at a time.
+let draggingTaskId: string | null = null;
 
 export default function TasksView({
   groups,
@@ -36,14 +42,16 @@ export default function TasksView({
   return (
     <div>
       <div className="flex max-w-[680px] items-end justify-between">
-        <div className="font-script text-[62px] leading-[0.8] text-[#2a2622]">Tasks</div>
-        <div className="pb-2.5 text-[13px] text-[#8a8069]">{remainingToday} remaining today</div>
+        <div className="font-script text-[62px] leading-[0.8] text-(--ink)">Tasks</div>
+        <div className="pb-2.5 text-[13px] text-(--ink-muted)">{remainingToday} remaining today</div>
       </div>
-      <div className="my-5 mt-5 mb-1 h-px max-w-[680px] bg-[#d5cbb4]" />
+      <div className="my-5 mt-5 mb-1 h-px max-w-[680px] bg-(--rule)" />
+
+      <QuickAdd />
 
       <div className="max-w-[680px]">
         {filtered.length === 0 && completedTasks.length === 0 && (
-          <p className="py-8 text-[15px] italic text-[#a49a82]">
+          <p className="py-8 text-[15px] italic text-(--ink-soft)">
             {q ? "No tasks match your search." : "Nothing here yet."}
           </p>
         )}
@@ -62,14 +70,21 @@ export default function TasksView({
                   <button
                     type="button"
                     onClick={() => setExpandedGroups((prev) => ({ ...prev, [group.key]: !isExpanded }))}
-                    className="cursor-pointer normal-case tracking-normal text-[#8a8069] underline decoration-dotted underline-offset-2"
+                    className="cursor-pointer normal-case tracking-normal text-(--ink-muted) underline decoration-dotted underline-offset-2"
                   >
                     {isExpanded ? "Show less" : `+${hiddenCount} more`}
                   </button>
                 )}
               </div>
               {visibleTasks.map((task) => (
-                <TaskRow key={task.id} task={task} categoryOptions={categoryOptions} projectOptions={projectOptions} onCompleting={hold} />
+                <TaskRow
+                  key={task.id}
+                  task={task}
+                  categoryOptions={categoryOptions}
+                  projectOptions={projectOptions}
+                  onCompleting={hold}
+                  reorderIds={group.tasks.map((t) => t.id)}
+                />
               ))}
             </div>
           );
@@ -89,7 +104,7 @@ export default function TasksView({
                 viewBox="0 -960 960 960"
                 style={{ transform: showCompleted ? "rotate(90deg)" : "none", transition: "transform .15s" }}
               >
-                <path d="M504-480 320-664l56-56 240 240-240 240-56-56 184-184Z" fill="#a49a82" />
+                <path d="M504-480 320-664l56-56 240 240-240 240-56-56 184-184Z" style={{ fill: "var(--ink-soft)" }} />
               </svg>
               Completed ({completedTasks.length})
             </button>
@@ -109,12 +124,17 @@ const GROUP_PREVIEW_COUNT = 4;
 const chipSelectClass =
   "cursor-pointer whitespace-nowrap rounded-full border-none px-2.5 py-0.5 text-[11.5px] outline-none";
 
+// The dropdown caret is an SVG data URI, which cannot resolve var() — these are fixed
+// mid-tones chosen to read acceptably on the chip washes in BOTH light and dark themes.
+const CARET_INFO = "#7d97b5";
+const CARET_MUTED = "#988f7a";
+
 // The two chip <select>s below reuse chipSelectClass but also need the OS-native dropdown
 // caret replaced — by default it renders flush against the pill's right edge with a lot of
 // dead space before it. This swaps in a small Material "arrow_drop_down" glyph pulled in
 // closer to the label instead, colored to match each select's text.
-function chipSelectArrowStyle(color: string): React.CSSProperties {
-  const fill = encodeURIComponent(color);
+function chipSelectArrowStyle(literalHex: string): React.CSSProperties {
+  const fill = encodeURIComponent(literalHex);
   return {
     appearance: "none",
     WebkitAppearance: "none",
@@ -131,15 +151,37 @@ export function TaskRow({
   categoryOptions,
   projectOptions,
   onCompleting,
+  reorderIds,
+  sectionOptions,
 }: {
   task: TaskItemVM;
   categoryOptions: CategoryOption[];
   projectOptions: ProjectOption[];
   onCompleting?: (id: string) => void;
+  // Ids of every task in this row's display group, in order — enables drag-to-reorder within
+  // the group (a due bucket or a project section). Omitted where reordering has no meaning.
+  reorderIds?: string[];
+  // Existing section names in the row's project — shows the section picker chip (project cards).
+  sectionOptions?: string[];
 }) {
   const { actions } = useTaskbook();
   const hasSubtasks = task.subtasksTotal > 0;
   const progressPct = hasSubtasks ? Math.round((task.subtasksDone / task.subtasksTotal) * 100) : 0;
+  const [subtasksOpen, setSubtasksOpen] = useState(false);
+  const [addingSubtask, setAddingSubtask] = useState(false);
+  const [snoozeOpen, setSnoozeOpen] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+
+  // Drop the dragged row in front of this one and persist the group's new order.
+  function handleDrop() {
+    setDragOver(false);
+    if (!reorderIds || !draggingTaskId || draggingTaskId === task.id) return;
+    const without = reorderIds.filter((id) => id !== draggingTaskId);
+    const at = without.indexOf(task.id);
+    if (at === -1) return;
+    const next = [...without.slice(0, at), draggingTaskId, ...without.slice(at)];
+    actions.reorderGroup(next);
+  }
 
   const [completing, setCompleting] = useState(false);
   function handleToggle() {
@@ -238,7 +280,26 @@ export function TaskRow({
   }
 
   return (
-    <div className="group flex items-start gap-3.5 border-b border-[#e1d8c4] py-3.5 px-0.5">
+    <div
+      className="group flex items-start gap-3.5 border-b py-3.5 px-0.5"
+      style={{ borderBottomColor: dragOver ? "var(--accent-text)" : "var(--border-soft)", borderBottomWidth: dragOver ? 2 : 1 }}
+      draggable={Boolean(reorderIds)}
+      onDragStart={(e) => {
+        draggingTaskId = task.id;
+        e.dataTransfer.effectAllowed = "move";
+      }}
+      onDragEnd={() => {
+        draggingTaskId = null;
+        setDragOver(false);
+      }}
+      onDragOver={(e) => {
+        if (!reorderIds || !draggingTaskId || draggingTaskId === task.id) return;
+        e.preventDefault();
+        setDragOver(true);
+      }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={handleDrop}
+    >
       <CheckSquare action={handleToggle} checked={task.isCompleted} completing={completing} />
       <div className="min-w-0 flex-1">
         {editingTitle ? (
@@ -256,13 +317,13 @@ export function TaskRow({
                 setEditingTitle(false);
               }
             }}
-            className="w-full rounded border border-[#17399b] bg-[#faf7ef] px-1.5 py-0.5 text-[17px] text-[#2a2622] outline-none"
+            className="w-full rounded border border-(--accent-text) bg-(--card) px-1.5 py-0.5 text-[17px] text-(--ink) outline-none"
           />
         ) : (
           <div
             className="relative cursor-text text-[17px] leading-5.5"
             style={{
-              color: task.isCompleted ? "#a49a82" : "#2a2622",
+              color: task.isCompleted ? "var(--ink-soft)" : "var(--ink)",
               textDecoration: task.isCompleted && !completing ? "line-through" : "none",
             }}
             onClick={() => setEditingTitle(true)}
@@ -285,17 +346,17 @@ export function TaskRow({
                 setEditingDescription(false);
               }
             }}
-            className="mt-1 w-full rounded border border-[#17399b] bg-[#faf7ef] px-1.5 py-1 text-[13.5px] text-[#2a2622] outline-none"
+            className="mt-1 w-full rounded border border-(--accent-text) bg-(--card) px-1.5 py-1 text-[13.5px] text-(--ink) outline-none"
           />
         ) : task.description ? (
           <div
-            className="mt-0.5 cursor-text text-[13.5px] leading-snug text-[#8a8069]"
+            className="mt-0.5 cursor-text text-[13.5px] leading-snug text-(--ink-muted)"
             onClick={() => setEditingDescription(true)}
           >
             {task.description}
           </div>
         ) : (
-          <div className="mt-0.5 cursor-text text-[13.5px] italic text-[#c4bba3]" onClick={() => setEditingDescription(true)}>
+          <div className="mt-0.5 cursor-text text-[13.5px] italic text-(--ink-ghost)" onClick={() => setEditingDescription(true)}>
             Add description
           </div>
         )}
@@ -305,7 +366,7 @@ export function TaskRow({
             value={task.category}
             onChange={(e) => commitCategory(e.target.value)}
             className={chipSelectClass}
-            style={{ color: "#557694", background: "rgba(85,118,148,.1)", ...chipSelectArrowStyle("#557694") }}
+            style={{ color: "var(--info)", background: "var(--info-wash)", ...chipSelectArrowStyle(CARET_INFO) }}
           >
             {categoryOptions.map((c) => (
               <option key={c.id} value={c.name}>
@@ -318,7 +379,7 @@ export function TaskRow({
             value={task.projectId ?? ""}
             onChange={(e) => commitProject(e.target.value)}
             className={chipSelectClass}
-            style={{ color: "#8a8069", background: "rgba(138,128,105,.13)", ...chipSelectArrowStyle("#8a8069") }}
+            style={{ color: "var(--ink-muted)", background: "var(--muted-wash)", ...chipSelectArrowStyle(CARET_MUTED) }}
           >
             <option value="">No project</option>
             {projectOptions.map((p) => (
@@ -333,9 +394,9 @@ export function TaskRow({
             onClick={() => (repeatOpen ? setRepeatOpen(false) : openRepeat())}
             className={chipSelectClass}
             style={{
-              color: task.repeatLabel ? "#557694" : "#b3a988",
-              background: task.repeatLabel ? "rgba(85,118,148,.1)" : "transparent",
-              border: task.repeatLabel ? "none" : "1px dashed #d3c9b3",
+              color: task.repeatLabel ? "var(--info)" : "var(--ink-faint)",
+              background: task.repeatLabel ? "var(--info-wash)" : "transparent",
+              border: task.repeatLabel ? "none" : "1px dashed var(--border-strong)",
             }}
           >
             {task.repeatLabel ? `↻ ${task.repeatLabel}` : "Repeat"}
@@ -346,37 +407,112 @@ export function TaskRow({
             onClick={() => (dueOpen ? setDueOpen(false) : openDue())}
             className={chipSelectClass}
             style={{
-              color: task.dueLabel ? "#557694" : "#b3a988",
-              background: task.dueLabel ? "rgba(85,118,148,.1)" : "transparent",
-              border: task.dueLabel ? "none" : "1px dashed #d3c9b3",
+              color: task.dueLabel ? "var(--info)" : "var(--ink-faint)",
+              background: task.dueLabel ? "var(--info-wash)" : "transparent",
+              border: task.dueLabel ? "none" : "1px dashed var(--border-strong)",
             }}
           >
             {task.dueLabel ?? "Set date"}
           </button>
+
+          {task.dueLabel && !task.isCompleted && (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setSnoozeOpen((v) => !v)}
+                aria-label="Snooze"
+                title="Snooze"
+                className={chipSelectClass}
+                style={{ color: "var(--ink-faint)", background: "transparent", border: "1px dashed var(--border-strong)" }}
+              >
+                zzz
+              </button>
+              {snoozeOpen && (
+                <div className="absolute left-0 top-7 z-20 flex flex-col rounded-lg border border-(--border-strong) bg-(--card) py-1 shadow-[0_8px_24px_rgba(70,55,30,.18)]">
+                  {[
+                    { days: 1, label: "Tomorrow" },
+                    { days: 3, label: "In 3 days" },
+                    { days: 7, label: "Next week" },
+                  ].map((o) => (
+                    <button
+                      key={o.days}
+                      type="button"
+                      onClick={() => {
+                        actions.snoozeTask(task.id, o.days);
+                        setSnoozeOpen(false);
+                      }}
+                      className="cursor-pointer whitespace-nowrap px-3 py-1 text-left text-xs text-(--ink) hover:bg-[rgba(85,118,148,.08)]"
+                    >
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {sectionOptions && (
+            <select
+              value={task.section ?? ""}
+              onChange={(e) => {
+                if (e.target.value === "__new__") {
+                  const name = window.prompt("New section name");
+                  if (name?.trim()) actions.setTaskSection(task.id, name.trim());
+                } else {
+                  actions.setTaskSection(task.id, e.target.value);
+                }
+              }}
+              aria-label="Section"
+              className={chipSelectClass}
+              style={{ color: "var(--ink-muted)", background: "var(--muted-wash)", ...chipSelectArrowStyle(CARET_MUTED) }}
+            >
+              <option value="">No section</option>
+              {sectionOptions.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+              <option value="__new__">New section…</option>
+            </select>
+          )}
         </div>
 
         {dueOpen && (
-          <div ref={duePanelRef} className="mt-2 w-fit rounded-lg border border-[#17399b] bg-[#faf7ef] p-2.5">
+          <div ref={duePanelRef} className="mt-2 w-fit rounded-lg border border-(--accent-text) bg-(--card) p-2.5">
             <DateTimePickerPanel
               dateValue={dueDateDraft}
               timeValue={dueTimeDraft}
               onChangeDate={(d) => updateDueDraft(d, dueTimeDraft)}
               onChangeTime={(t) => updateDueDraft(dueDateDraft, t)}
             />
-            {task.dueDateValue && (
-              <button
-                type="button"
-                onClick={clearDue}
-                className="mt-2 cursor-pointer text-xs text-[#b3a988] hover:text-[#8a4040]"
+            <div className="mt-2 flex items-center justify-between gap-3">
+              <select
+                value={task.reminderLeadMinutes ?? ""}
+                onChange={(e) => actions.setTaskReminderLead(task.id, e.target.value ? Number(e.target.value) : null)}
+                aria-label="Remind me"
+                className="cursor-pointer rounded-md border border-(--border-strong) bg-transparent px-1.5 py-0.5 text-xs text-(--info) outline-none"
               >
-                Clear
-              </button>
-            )}
+                {REMINDER_LEAD_OPTIONS.map((o) => (
+                  <option key={o.label} value={o.value ?? ""}>
+                    Remind: {o.label}
+                  </option>
+                ))}
+              </select>
+              {task.dueDateValue && (
+                <button
+                  type="button"
+                  onClick={clearDue}
+                  className="cursor-pointer text-xs text-(--ink-faint) hover:text-(--danger)"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
           </div>
         )}
 
         {repeatOpen && (
-          <div className="mt-2 rounded-lg border border-[#17399b] bg-[#faf7ef] p-3" onBlur={commitRepeatBlur}>
+          <div className="mt-2 rounded-lg border border-(--accent-text) bg-(--card) p-3" onBlur={commitRepeatBlur}>
             <RepeatFields
               initial={{
                 frequency: task.repeatFrequency,
@@ -406,15 +542,100 @@ export function TaskRow({
           </div>
         )}
 
-        {hasSubtasks && (
-          <div className="mt-2 flex items-center gap-2">
-            <span className="text-xs text-[#557694]">
-              {task.subtasksDone} of {task.subtasksTotal} subtasks
-            </span>
-            <span className="relative inline-block h-[3px] w-[100px] overflow-hidden rounded-full bg-[#e1d8c4]">
-              <span className="absolute inset-y-0 left-0 rounded-full bg-[#557694]" style={{ width: `${progressPct}%` }} />
-            </span>
-          </div>
+        <div className="mt-2 flex items-center gap-2">
+          {hasSubtasks && (
+            <>
+              <button
+                type="button"
+                onClick={() => setSubtasksOpen((v) => !v)}
+                aria-expanded={subtasksOpen}
+                className="flex cursor-pointer items-center gap-1.5 text-xs text-(--info)"
+              >
+                <svg
+                  width="9"
+                  height="9"
+                  viewBox="0 -960 960 960"
+                  style={{ transform: subtasksOpen ? "rotate(90deg)" : "none", transition: "transform .15s" }}
+                >
+                  <path d="M504-480 320-664l56-56 240 240-240 240-56-56 184-184Z" style={{ fill: "var(--info)" }} />
+                </svg>
+                {task.subtasksDone} of {task.subtasksTotal} subtasks
+              </button>
+              <span className="relative inline-block h-[3px] w-[100px] overflow-hidden rounded-full bg-(--border-soft)">
+                <span className="absolute inset-y-0 left-0 rounded-full bg-(--info)" style={{ width: `${progressPct}%` }} />
+              </span>
+            </>
+          )}
+          {!hasSubtasks && !task.isCompleted && (
+            <button
+              type="button"
+              onClick={() => {
+                setSubtasksOpen(true);
+                setAddingSubtask(true);
+              }}
+              className="cursor-pointer text-xs text-(--ink-faint) opacity-0 transition-opacity hover:text-(--info) group-hover:opacity-100"
+            >
+              + Subtask
+            </button>
+          )}
+        </div>
+
+        {subtasksOpen && (
+          <ul className="mt-1.5 flex flex-col gap-1.5 pl-1">
+            {task.subtasks.map((s) => (
+              <li key={s.id} className="group/sub flex items-center gap-2">
+                <CheckSquare action={() => actions.toggleTask(s.id, s.isCompleted)} checked={s.isCompleted} size={16} />
+                <span
+                  className="flex-1 text-[13px]"
+                  style={{ color: s.isCompleted ? "var(--ink-strike)" : "var(--ink-muted)", textDecoration: s.isCompleted ? "line-through" : "none" }}
+                >
+                  {s.title}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => actions.removeTask(s.id)}
+                  aria-label={`Remove subtask ${s.title}`}
+                  className="cursor-pointer text-xs text-(--ink-faint) opacity-0 transition-opacity hover:text-(--danger) group-hover/sub:opacity-100"
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+            <li>
+              {addingSubtask ? (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const title = String(new FormData(e.currentTarget).get("title") ?? "").trim();
+                    if (title) {
+                      actions.addTask({ title, category: task.category, parentId: task.id });
+                      (e.target as HTMLFormElement).reset();
+                    } else {
+                      setAddingSubtask(false);
+                    }
+                  }}
+                  className="flex items-center gap-2"
+                >
+                  <input
+                    name="title"
+                    autoFocus
+                    placeholder="Subtask"
+                    onBlur={(e) => {
+                      if (!e.currentTarget.value.trim()) setAddingSubtask(false);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") setAddingSubtask(false);
+                    }}
+                    className="rounded-md border border-(--border-strong) bg-(--card) px-2 py-0.5 text-[13px] text-(--ink) outline-none focus:border-(--accent-text)"
+                  />
+                </form>
+              ) : (
+                <button type="button" onClick={() => setAddingSubtask(true)} className="cursor-pointer text-xs text-(--info)">
+                  + Add subtask
+                </button>
+              )}
+            </li>
+          </ul>
         )}
       </div>
       <div className="flex flex-none items-start pt-0.5">
