@@ -4,8 +4,8 @@ import type { MetadataRoute } from "next";
 // been added to the home screen this way — a plain Safari tab can't receive push at all.
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Taskbook",
-    short_name: "Taskbook",
+    name: "Cura",
+    short_name: "Cura",
     start_url: "/",
     display: "standalone",
     background_color: "#efe9dc",
