@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Lora, Pinyon_Script } from "next/font/google";
 import "./globals.css";
 import { auth, signOut } from "@/auth";
@@ -17,6 +17,15 @@ const pinyon = Pinyon_Script({
 export const metadata: Metadata = {
   title: "Cura - Gayan Perera",
   description: "Tasks, projects, routines and habits in one place.",
+};
+
+// Lock the viewport at 100% so mobile browsers don't auto-zoom when a text field is focused
+// (iOS zooms toward any input under 16px), which otherwise forces the user to pinch back out.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
 };
 
 export default async function RootLayout({

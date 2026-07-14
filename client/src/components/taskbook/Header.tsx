@@ -71,6 +71,9 @@ export default function Header({
   const [captureError, setCaptureError] = useState<string | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
+  // Set true when the user cancels — read inside the recorder's onstop so a cancelled recording
+  // is thrown away instead of being uploaded (which would send background noise to the API).
+  const canceledRef = useRef(false);
   const notifRef = useRef<HTMLDivElement>(null);
 
   // Search/chat/mic toggle for the search bar — "barMode" to avoid confusion with the unrelated
@@ -171,11 +174,16 @@ export default function Header({
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = new MediaRecorder(stream);
       chunksRef.current = [];
+      canceledRef.current = false;
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data);
       };
       recorder.onstop = () => {
         stream.getTracks().forEach((t) => t.stop());
+        if (canceledRef.current) {
+          chunksRef.current = [];
+          return;
+        }
         void uploadRecording(new Blob(chunksRef.current, { type: recorder.mimeType }));
       };
       recorder.start();
@@ -185,6 +193,18 @@ export default function Header({
       console.error("[voice] microphone access failed:", err);
       setCaptureError("Couldn't access the microphone.");
     }
+  }
+
+  // Discard an in-flight recording without uploading — for when the mic was tapped by accident
+  // and would otherwise send background noise to the API.
+  function cancelListening() {
+    if (!listening) return;
+    canceledRef.current = true;
+    mediaRecorderRef.current?.stop();
+    mediaRecorderRef.current = null;
+    setListening(false);
+    setCaptureError(null);
+    setBarMode("search");
   }
 
   // Selecting search/chat while a recording is in flight stops it (still processes/uploads
@@ -413,6 +433,22 @@ export default function Header({
                   >
                     {captureError ?? (processing ? "Transcribing…" : listening ? "Listening… tap to stop" : "Tap the mic to start")}
                   </span>
+                  {listening && (
+                    <button
+                      type="button"
+                      title="Cancel — discard this recording"
+                      aria-label="Cancel recording"
+                      onClick={cancelListening}
+                      className="ml-auto flex h-5 w-5 flex-none cursor-pointer items-center justify-center rounded-full hover:bg-(--danger-surface)"
+                    >
+                      <svg width="12" height="12" viewBox="0 -960 960 960">
+                        <path
+                          d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z"
+                          style={{ fill: "var(--danger)" }}
+                        />
+                      </svg>
+                    </button>
+                  )}
                 </div>
               )}
             </div>
