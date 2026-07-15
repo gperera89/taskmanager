@@ -3,6 +3,7 @@
 // takes, so a create/edit updates the UI instantly and the same shape is sent to the server.
 
 import type { HabitIntervalUnit, RoutineFrequency, RoutineMonthlyMode } from "@prisma/client";
+import { parseDurationInput } from "@/lib/shared";
 import type { HabitInput, ProjectInput, RoutineInput, TaskCreateInput, TaskRepeatInput } from "./store";
 
 const ROUTINE_FREQUENCIES: RoutineFrequency[] = ["DAILY", "WEEKLY", "MONTHLY"];
@@ -42,6 +43,7 @@ export function parseTaskForm(fd: FormData): TaskCreateInput {
     parentId: String(fd.get("parentId") ?? "").trim() || null,
     section: String(fd.get("section") ?? "").trim() || null,
     reminderLeadMinutes: reminderLead > 0 ? reminderLead : null,
+    durationMinutes: parseDurationInput(String(fd.get("duration") ?? "")),
     repeat: parseTaskRepeat(fd),
   };
 }
@@ -53,6 +55,7 @@ export function parseProjectForm(fd: FormData): ProjectInput {
     description: String(fd.get("description") ?? "").trim() || null,
     dueDate: String(fd.get("dueDate") ?? "").trim() || null,
     reminderLeadMinutes: reminderLead > 0 ? reminderLead : null,
+    durationMinutes: parseDurationInput(String(fd.get("duration") ?? "")),
   };
 }
 
@@ -61,6 +64,7 @@ export function parseHabitForm(fd: FormData): HabitInput {
     title: String(fd.get("title") ?? "").trim(),
     intervalValue: Number(fd.get("intervalValue") ?? ""),
     intervalUnit: String(fd.get("intervalUnit") ?? "") as HabitIntervalUnit,
+    durationMinutes: parseDurationInput(String(fd.get("duration") ?? "")),
   };
 }
 
@@ -71,6 +75,7 @@ export function parseRoutineForm(fd: FormData): RoutineInput {
   return {
     title: String(fd.get("title") ?? "").trim(),
     reminderTime: String(fd.get("reminderTime") ?? "").trim(),
+    durationMinutes: parseDurationInput(String(fd.get("duration") ?? "")),
     frequency: String(fd.get("frequency") ?? "DAILY") as RoutineFrequency,
     interval: Number(fd.get("interval") ?? "1"),
     daysOfWeek: fd

@@ -16,7 +16,7 @@ import {
 import CategoryManager from "./CategoryManager";
 import { DateTimePickerPanel, formatPickerLabel } from "./DateTimePicker";
 import RepeatFields from "./RepeatFields";
-import { AutoGrowTextarea } from "./shared";
+import { AutoGrowTextarea, DurationField } from "./shared";
 import type { CategoryOption, HabitCardVM, ModalState, ProjectCardVM, ProjectOption, RoutineItemVM } from "./types";
 
 const inputClass =
@@ -275,6 +275,10 @@ function TaskForm({
             ))}
           </select>
         </div>
+        <div className="min-w-35 flex-1">
+          <label className={labelTextClass}>Duration</label>
+          <DurationField className={inputClass} id="task-duration" />
+        </div>
       </div>
       {dueDate && (
         <div>
@@ -394,6 +398,10 @@ function ProjectForm({
           ))}
         </select>
       </div>
+      <div>
+        <label className={labelTextClass}>Duration</label>
+        <DurationField className={inputClass} id="project-duration" defaultValue={item?.durationLabel ?? ""} />
+      </div>
       <Actions submitLabel={item ? "Save" : "Add project"} />
     </form>
   );
@@ -449,6 +457,10 @@ function RoutineForm({
       <div>
         <label className={labelTextClass}>Reminder time</label>
         <input name="reminderTime" required placeholder="08:00" defaultValue={item?.reminderTime} className={inputClass} />
+      </div>
+      <div>
+        <label className={labelTextClass}>Duration</label>
+        <DurationField className={inputClass} id="routine-duration" defaultValue={item?.durationLabel ?? ""} />
       </div>
       <div>
         <label className={labelTextClass}>Repeat every</label>
@@ -675,6 +687,10 @@ function HabitForm({
           </div>
           <input type="hidden" name="intervalUnit" value={intervalUnit} />
         </div>
+      </div>
+      <div>
+        <label className={labelTextClass}>Duration</label>
+        <DurationField className={inputClass} id="habit-duration" defaultValue={item?.durationLabel ?? ""} />
       </div>
       <Actions submitLabel={item ? "Save" : "Add habit"} />
     </form>

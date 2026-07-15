@@ -34,6 +34,8 @@ export type TaskItemVM = {
   section: string | null; // grouping heading within a project card
   sortOrder: number | null; // manual position within its bucket/section (fractional index)
   reminderLeadMinutes: number | null; // notify this long before the due time (null = at it)
+  durationMinutes: number | null; // expected time to complete, in minutes (null = unset)
+  durationLabel: string | null; // e.g. "30 min" or "1.5 hours", null when unset
   subtasks: SubtaskVM[];
 };
 
@@ -61,6 +63,8 @@ export type ProjectCardVM = {
   dueDateValue: string;
   dueLabel: string | null;
   reminderLeadMinutes: number | null;
+  durationMinutes: number | null;
+  durationLabel: string | null;
   done: number;
   total: number;
   progressPct: number;
@@ -82,6 +86,8 @@ export type HabitCardVM = {
   lapsed: boolean;
   isDoneThisPeriod: boolean;
   detailLabel: string;
+  durationMinutes: number | null;
+  durationLabel: string | null;
 };
 
 export type SubroutineVM = { id: string; title: string };
@@ -97,6 +103,8 @@ export type RoutineItemVM = {
   dayOfMonth: number | null;
   monthlyOrdinal: number | null;
   monthlyWeekday: number | null;
+  durationMinutes: number | null;
+  durationLabel: string | null;
   isActive: boolean;
   isTicked: boolean;
   scheduleLabel: string;

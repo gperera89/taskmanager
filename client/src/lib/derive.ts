@@ -7,7 +7,7 @@
 // needs resurrecting).
 
 import type { Task, Project, Habit, Routine, Category, VoiceCapture } from "@prisma/client";
-import { habitPeriodStatus, taskOrderCompare, MS_PER_DAY, ROUTINE_TICK_EXPIRY_MS } from "@/lib/shared";
+import { formatDuration, habitPeriodStatus, taskOrderCompare, MS_PER_DAY, ROUTINE_TICK_EXPIRY_MS } from "@/lib/shared";
 export { combineDueDateTime, ROUTINE_TICK_EXPIRY_MS } from "@/lib/shared";
 import {
   bucketForDue,
@@ -187,6 +187,8 @@ function toTaskVM(t: RawTask, projectNameById: Map<string, string>): TaskItemVM 
     section: t.section,
     sortOrder: t.sortOrder,
     reminderLeadMinutes: t.reminderLeadMinutes,
+    durationMinutes: t.durationMinutes,
+    durationLabel: t.durationMinutes != null ? formatDuration(t.durationMinutes) : null,
     subtasks: t.subtasks.map((s) => ({ id: s.id, title: s.title, isCompleted: s.isCompleted })),
   };
 }
@@ -313,6 +315,8 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
       dueDateValue: toDateInputValue(p.dueDate),
       dueLabel: p.dueDate ? formatShortDate(calendarDateFromDue(new Date(p.dueDate))) : null,
       reminderLeadMinutes: p.reminderLeadMinutes,
+      durationMinutes: p.durationMinutes,
+      durationLabel: p.durationMinutes != null ? formatDuration(p.durationMinutes) : null,
       done,
       total,
       progressPct,
@@ -352,6 +356,8 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
       dayOfMonth: r.dayOfMonth,
       monthlyOrdinal: r.monthlyOrdinal,
       monthlyWeekday: r.monthlyWeekday,
+      durationMinutes: r.durationMinutes,
+      durationLabel: r.durationMinutes != null ? formatDuration(r.durationMinutes) : null,
       isActive: r.isActive,
       isTicked: isRoutineTickedNow(r, nowMs),
       scheduleLabel: scheduleLabel(r),
@@ -404,6 +410,8 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
     lapsed: hs.lapsed,
     isDoneThisPeriod: hs.isDoneThisPeriod,
     detailLabel: habitDetailLabel(hs),
+    durationMinutes: hs.habit.durationMinutes,
+    durationLabel: hs.habit.durationMinutes != null ? formatDuration(hs.habit.durationMinutes) : null,
   }));
   const habitSuggested = habitVMs.filter((h) => !h.isDoneThisPeriod);
   const habitOnTrack = habitVMs.filter((h) => h.isDoneThisPeriod);

@@ -102,13 +102,15 @@ export type TaskCreateInput = {
   repeat?: TaskRepeatInput;
   section?: string | null;
   reminderLeadMinutes?: number | null;
+  durationMinutes?: number | null;
 };
 
-export type ProjectInput = { name: string; description?: string | null; dueDate?: string | null; reminderLeadMinutes?: number | null };
-export type HabitInput = { title: string; intervalValue: number; intervalUnit: HabitIntervalUnit };
+export type ProjectInput = { name: string; description?: string | null; dueDate?: string | null; reminderLeadMinutes?: number | null; durationMinutes?: number | null };
+export type HabitInput = { title: string; intervalValue: number; intervalUnit: HabitIntervalUnit; durationMinutes?: number | null };
 export type RoutineInput = {
   title: string;
   reminderTime: string;
+  durationMinutes: number | null;
   frequency: RoutineFrequency;
   interval: number;
   daysOfWeek: number[];
@@ -138,6 +140,7 @@ export type TaskbookActions = {
   setTaskRepeat: (id: string, repeat: TaskRepeatInput) => void;
   setTaskSection: (id: string, section: string) => void;
   setTaskReminderLead: (id: string, minutes: number | null) => void;
+  setTaskDuration: (id: string, minutes: number | null) => void;
   snoozeTask: (id: string, days: number) => void;
   reorderGroup: (orderedIds: string[]) => void;
   // Projects
@@ -273,6 +276,7 @@ function routineToFd(input: RoutineInput): FormData {
   const fd = new FormData();
   fd.set("title", input.title);
   fd.set("reminderTime", input.reminderTime);
+  if (input.durationMinutes != null) fd.set("duration", String(input.durationMinutes));
   fd.set("frequency", input.frequency);
   fd.set("interval", String(input.interval));
   fd.set("monthlyMode", input.monthlyMode);
@@ -306,6 +310,7 @@ const REGISTRY: Record<string, RegistryEntry> = {
   setTaskRepeat: { fn: serverActions.updateTaskRepeat },
   setTaskSection: { fn: serverActions.updateTaskSection },
   setTaskReminderLead: { fn: serverActions.updateTaskReminderLead },
+  setTaskDuration: { fn: serverActions.updateTaskDuration },
   snoozeTask: { fn: serverActions.snoozeTask },
   reorderGroup: { fn: serverActions.reorderTaskGroup },
   addProject: {
@@ -703,6 +708,7 @@ export function StoreProvider({
           section: input.section?.trim() || null,
           sortOrder: null,
           reminderLeadMinutes: input.reminderLeadMinutes ?? null,
+          durationMinutes: input.durationMinutes ?? null,
           subtasks: [],
           ...repeatFields(input.repeat ?? null),
         };
@@ -716,6 +722,7 @@ export function StoreProvider({
         if (row.parentId) fd.set("parentId", row.parentId);
         if (row.section) fd.set("section", row.section);
         if (row.reminderLeadMinutes) fd.set("reminderLeadMinutes", String(row.reminderLeadMinutes));
+        if (row.durationMinutes) fd.set("duration", String(row.durationMinutes));
         repeatToFd(fd, input.repeat ?? null);
         create(
           (r) =>
@@ -830,6 +837,15 @@ export function StoreProvider({
           [id, fd]
         );
       },
+      setTaskDuration: (id, minutes) => {
+        const fd = new FormData();
+        fd.set("duration", minutes ? String(minutes) : "");
+        mutate(
+          (r) => ({ ...r, tasks: mapTask(r.tasks, id, (t) => ({ ...t, durationMinutes: minutes })) }),
+          "setTaskDuration",
+          [id, fd]
+        );
+      },
       snoozeTask: (id, days) =>
         mutate(
           (r) => ({
@@ -865,6 +881,7 @@ export function StoreProvider({
         if (input.description) fd.set("description", input.description);
         if (input.dueDate) fd.set("dueDate", input.dueDate);
         if (input.reminderLeadMinutes) fd.set("reminderLeadMinutes", String(input.reminderLeadMinutes));
+        if (input.durationMinutes) fd.set("duration", String(input.durationMinutes));
         create(
           (r) => ({
             ...r,
@@ -878,6 +895,7 @@ export function StoreProvider({
                 dueDate: input.dueDate ? new Date(input.dueDate) : null,
                 notifiedAt: null,
                 reminderLeadMinutes: input.reminderLeadMinutes ?? null,
+                durationMinutes: input.durationMinutes ?? null,
               },
             ],
           }),
@@ -892,6 +910,7 @@ export function StoreProvider({
         if (input.description) fd.set("description", input.description);
         if (input.dueDate) fd.set("dueDate", input.dueDate);
         if (input.reminderLeadMinutes) fd.set("reminderLeadMinutes", String(input.reminderLeadMinutes));
+        if (input.durationMinutes) fd.set("duration", String(input.durationMinutes));
         mutate(
           (r) => ({
             ...r,
@@ -903,6 +922,7 @@ export function StoreProvider({
                     description: input.description?.trim() || null,
                     dueDate: input.dueDate ? new Date(input.dueDate) : null,
                     reminderLeadMinutes: input.reminderLeadMinutes ?? null,
+                    durationMinutes: input.durationMinutes ?? null,
                   }
                 : p
             ),
@@ -975,6 +995,7 @@ export function StoreProvider({
         fd.set("title", input.title);
         fd.set("intervalValue", String(input.intervalValue));
         fd.set("intervalUnit", input.intervalUnit);
+        if (input.durationMinutes) fd.set("duration", String(input.durationMinutes));
         create(
           (r) => ({
             ...r,
@@ -988,6 +1009,7 @@ export function StoreProvider({
                 currentStreak: 0,
                 longestStreak: 0,
                 lastCompletedDate: null,
+                durationMinutes: input.durationMinutes ?? null,
               },
             ],
           }),
@@ -1001,11 +1023,12 @@ export function StoreProvider({
         fd.set("title", input.title);
         fd.set("intervalValue", String(input.intervalValue));
         fd.set("intervalUnit", input.intervalUnit);
+        if (input.durationMinutes) fd.set("duration", String(input.durationMinutes));
         mutate(
           (r) => ({
             ...r,
             habits: r.habits.map((h) =>
-              h.id === id ? { ...h, title: input.title.trim(), intervalValue: input.intervalValue, intervalUnit: input.intervalUnit } : h
+              h.id === id ? { ...h, title: input.title.trim(), intervalValue: input.intervalValue, intervalUnit: input.intervalUnit, durationMinutes: input.durationMinutes ?? null } : h
             ),
           }),
           "editHabit",
@@ -1056,6 +1079,7 @@ export function StoreProvider({
                 dayOfMonth: input.dayOfMonth,
                 monthlyOrdinal: input.monthlyOrdinal,
                 monthlyWeekday: input.monthlyWeekday,
+                durationMinutes: input.durationMinutes,
                 isActive: true,
                 lastCompletedAt: null,
                 notifiedAt: null,
@@ -1087,6 +1111,7 @@ export function StoreProvider({
                     dayOfMonth: input.dayOfMonth,
                     monthlyOrdinal: input.monthlyOrdinal,
                     monthlyWeekday: input.monthlyWeekday,
+                    durationMinutes: input.durationMinutes,
                   }
                 : rt
             ),
@@ -1115,6 +1140,7 @@ export function StoreProvider({
                 dayOfMonth: rt.dayOfMonth,
                 monthlyOrdinal: rt.monthlyOrdinal,
                 monthlyWeekday: rt.monthlyWeekday,
+                durationMinutes: null,
                 isActive: rt.isActive,
                 lastCompletedAt: null,
                 notifiedAt: null,

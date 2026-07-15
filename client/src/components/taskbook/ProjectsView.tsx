@@ -222,6 +222,7 @@ function ProjectCard({
             <Chip>{project.dueLabel ?? "Set due date"}</Chip>
           </span>
         )}
+        {project.durationLabel && <Chip>◷ {project.durationLabel}</Chip>}
       </div>
 
       <div className="my-2.5 mb-4 h-1 overflow-hidden rounded-full bg-(--border-soft)">

@@ -91,7 +91,10 @@ function HabitRow({ habit }: { habit: HabitCardVM }) {
     <div className="group flex items-center justify-between gap-3 border-b border-(--border-soft) py-3.5">
       <div className="min-w-0 cursor-pointer" onClick={() => openEdit({ mode: "edit", kind: "habit", item: habit })}>
         <div className="text-base text-(--ink)">{habit.title}</div>
-        <div className="mt-0.5 text-xs text-(--ink-muted)">{habit.detailLabel}</div>
+        <div className="mt-0.5 text-xs text-(--ink-muted)">
+          {habit.detailLabel}
+          {habit.durationLabel && ` · ◷ ${habit.durationLabel}`}
+        </div>
       </div>
       <div className="flex flex-none items-center gap-3">
         <HabitFlameButton habit={habit} />

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { FocusEvent } from "react";
-import { REMINDER_LEAD_OPTIONS } from "@/lib/shared";
+import { DURATION_OPTIONS, REMINDER_LEAD_OPTIONS, parseDurationInput } from "@/lib/shared";
 import { useTaskbook } from "./store";
 import type { TaskRepeatInput } from "./store";
 import { AutoGrowTextarea, CheckSquare, RowDeleteButton, StrikeSweep, labelClass, useCompletionHold } from "./shared";
@@ -203,6 +203,8 @@ export function TaskRow({
   const [dueDateDraft, setDueDateDraft] = useState(task.dueDateValue);
   const [dueTimeDraft, setDueTimeDraft] = useState(task.dueTimeValue);
   const [repeatOpen, setRepeatOpen] = useState(false);
+  const [durationOpen, setDurationOpen] = useState(false);
+  const [durationDraft, setDurationDraft] = useState(task.durationLabel ?? "");
   const repeatChangedRef = useRef(false);
   const repeatDraftRef = useRef<TaskRepeatInput>(null);
 
@@ -266,6 +268,25 @@ export function TaskRow({
     actions.setTaskDue(task.id, "", "");
     setDueOpen(false);
   }
+
+  function openDuration() {
+    setDurationDraft(task.durationLabel ?? "");
+    setDurationOpen(true);
+  }
+
+  // Same click-away commit as the due panel above — pointerdown outside, not onBlur.
+  const durationPanelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!durationOpen) return;
+    function handlePointerDown(e: PointerEvent) {
+      if (durationPanelRef.current?.contains(e.target as Node)) return;
+      setDurationOpen(false);
+      const minutes = parseDurationInput(durationDraft);
+      if (minutes !== task.durationMinutes) actions.setTaskDuration(task.id, minutes);
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [durationOpen, durationDraft, task.id, task.durationMinutes, actions]);
 
   function openRepeat() {
     repeatChangedRef.current = false;
@@ -414,6 +435,66 @@ export function TaskRow({
           >
             {task.dueLabel ?? "Set date"}
           </button>
+
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => (durationOpen ? setDurationOpen(false) : openDuration())}
+              className={chipSelectClass}
+              style={{
+                color: task.durationLabel ? "var(--info)" : "var(--ink-faint)",
+                background: task.durationLabel ? "var(--info-wash)" : "transparent",
+                border: task.durationLabel ? "none" : "1px dashed var(--border-strong)",
+              }}
+            >
+              {task.durationLabel ? `◷ ${task.durationLabel}` : "Duration"}
+            </button>
+            {durationOpen && (
+              <div
+                ref={durationPanelRef}
+                className="absolute left-0 top-7 z-20 w-44 rounded-lg border border-(--accent-text) bg-(--card) p-2.5 shadow-[0_8px_24px_rgba(70,55,30,.18)]"
+              >
+                <input
+                  autoFocus
+                  list={`dur-${task.id}`}
+                  value={durationDraft}
+                  onChange={(e) => setDurationDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      const minutes = parseDurationInput(durationDraft);
+                      if (minutes !== task.durationMinutes) actions.setTaskDuration(task.id, minutes);
+                      setDurationOpen(false);
+                    } else if (e.key === "Escape") {
+                      setDurationDraft(task.durationLabel ?? "");
+                      setDurationOpen(false);
+                    }
+                  }}
+                  placeholder="e.g. 30 min, 1.5 hours"
+                  autoComplete="off"
+                  className="w-full rounded-md border border-(--border-strong) bg-(--card) px-2 py-1 text-xs text-(--ink) outline-none"
+                />
+                <datalist id={`dur-${task.id}`}>
+                  {DURATION_OPTIONS.map((o) => (
+                    <option key={o} value={o} />
+                  ))}
+                </datalist>
+                {task.durationLabel && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDurationDraft("");
+                      actions.setTaskDuration(task.id, null);
+                      setDurationOpen(false);
+                    }}
+                    className="mt-1.5 cursor-pointer text-xs text-(--ink-faint) hover:text-(--danger)"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
 
           {task.dueLabel && !task.isCompleted && (
             <div className="relative">

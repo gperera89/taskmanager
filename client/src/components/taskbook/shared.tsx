@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { DURATION_OPTIONS } from "@/lib/shared";
 import { ICON_PATH } from "./ModeToggle";
 
 const AUTO_GROW_MAX_LINES = 3;
@@ -42,6 +43,38 @@ export function AutoGrowTextarea({
       }}
       {...props}
     />
+  );
+}
+
+// A free-text duration box backed by a datalist of preset suggestions (5 min … 1.5 hours). The
+// raw text is submitted under name="duration" and parsed into whole minutes by
+// parseDurationInput (server + client), so custom values like "20 min" work too.
+export function DurationField({
+  className,
+  defaultValue,
+  id,
+}: {
+  className?: string;
+  defaultValue?: string;
+  id?: string;
+}) {
+  const listId = `${id ?? "duration"}-presets`;
+  return (
+    <>
+      <input
+        name="duration"
+        list={listId}
+        defaultValue={defaultValue}
+        placeholder="e.g. 30 min, 1.5 hours"
+        autoComplete="off"
+        className={className}
+      />
+      <datalist id={listId}>
+        {DURATION_OPTIONS.map((o) => (
+          <option key={o} value={o} />
+        ))}
+      </datalist>
+    </>
   );
 }
 

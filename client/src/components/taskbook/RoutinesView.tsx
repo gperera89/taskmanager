@@ -97,6 +97,11 @@ function RoutineRow({ routine }: { routine: RoutineItemVM }) {
                 <Chip>{routine.scheduleLabel}</Chip>
               </span>
             )}
+            {routine.durationLabel && (
+              <span className="hidden lg:inline">
+                <Chip>◷ {routine.durationLabel}</Chip>
+              </span>
+            )}
           </div>
           {routine.isTicked && !routine.scheduleLabel && (
             <div className="mt-0.5 text-xs italic text-(--ink-faint)">auto-resets within the hour</div>

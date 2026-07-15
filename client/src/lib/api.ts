@@ -107,6 +107,7 @@ export function createTask(input: {
   section?: string | null;
   sortOrder?: number | null;
   reminderLeadMinutes?: number | null;
+  durationMinutes?: number | null;
 }) {
   const title = input.title.trim();
   const category = input.category.trim();
@@ -123,6 +124,7 @@ export function createTask(input: {
       section: input.section || null,
       sortOrder: input.sortOrder ?? null,
       reminderLeadMinutes: input.reminderLeadMinutes ?? null,
+      durationMinutes: input.durationMinutes ?? null,
       ...repeatToPrismaData(input.repeat ?? null),
     },
   });
@@ -142,6 +144,7 @@ export function updateTask(
     repeat: TaskRepeatInput | null;
     section: string | null;
     reminderLeadMinutes: number | null;
+    durationMinutes: number | null;
   }>
 ) {
   return notFoundAsError("Task not found", () =>
@@ -160,6 +163,7 @@ export function updateTask(
         parentId: input.parentId === undefined ? undefined : input.parentId || null,
         section: input.section === undefined ? undefined : input.section || null,
         reminderLeadMinutes: input.reminderLeadMinutes,
+        durationMinutes: input.durationMinutes,
         ...(input.repeat === undefined ? {} : repeatToPrismaData(input.repeat)),
       },
     })
@@ -227,7 +231,7 @@ export async function toggleTaskCompletion(id: string, isCompleted: boolean) {
 
 export const getProjects = () => prisma.project.findMany();
 
-export function createProject(input: { name: string; description?: string | null; dueDate?: string | null; reminderLeadMinutes?: number | null }) {
+export function createProject(input: { name: string; description?: string | null; dueDate?: string | null; reminderLeadMinutes?: number | null; durationMinutes?: number | null }) {
   const name = input.name.trim();
   if (!name) throw new Error("Name is required");
 
@@ -237,13 +241,14 @@ export function createProject(input: { name: string; description?: string | null
       description: input.description,
       dueDate: input.dueDate ? new Date(input.dueDate) : null,
       reminderLeadMinutes: input.reminderLeadMinutes ?? null,
+      durationMinutes: input.durationMinutes ?? null,
     },
   });
 }
 
 export function updateProject(
   id: string,
-  input: Partial<{ name: string; description: string | null; isCompleted: boolean; dueDate: string | null; reminderLeadMinutes: number | null }>
+  input: Partial<{ name: string; description: string | null; isCompleted: boolean; dueDate: string | null; reminderLeadMinutes: number | null; durationMinutes: number | null }>
 ) {
   return notFoundAsError("Project not found", async () => {
     const project = await prisma.project.update({
@@ -256,6 +261,7 @@ export function updateProject(
         // A changed due date is a new deadline to notify about.
         notifiedAt: input.dueDate === undefined ? undefined : null,
         reminderLeadMinutes: input.reminderLeadMinutes,
+        durationMinutes: input.durationMinutes,
       },
     });
     if (input.isCompleted === true) await logCompletion("PROJECT", project.id, project.name);
@@ -274,7 +280,7 @@ export async function duplicateProject(id: string, name?: string | null) {
       include: { tasks: { include: { subtasks: true } } },
     });
     const project = await prisma.project.create({
-      data: { name: name?.trim() || `${source.name} copy`, description: source.description },
+      data: { name: name?.trim() || `${source.name} copy`, description: source.description, durationMinutes: source.durationMinutes },
     });
     // Only top-level tasks carry their subtasks; a subtask row also appears in source.tasks
     // (it has projectId? no — subtasks created via addTask carry projectId only if set).
@@ -289,6 +295,7 @@ export async function duplicateProject(id: string, name?: string | null) {
           section: t.section,
           sortOrder: t.sortOrder,
           reminderLeadMinutes: t.reminderLeadMinutes,
+          durationMinutes: t.durationMinutes,
           repeatFrequency: t.repeatFrequency,
           repeatInterval: t.repeatInterval,
           repeatDaysOfWeek: t.repeatDaysOfWeek,
@@ -320,7 +327,7 @@ export function deleteProject(id: string) {
 
 export const getHabits = () => prisma.habit.findMany();
 
-export function createHabit(input: { title: string; intervalValue: number; intervalUnit: HabitIntervalUnit }) {
+export function createHabit(input: { title: string; intervalValue: number; intervalUnit: HabitIntervalUnit; durationMinutes?: number | null }) {
   const title = input.title.trim();
   if (!title) throw new Error("Title is required");
   if (!HABIT_INTERVAL_UNITS.includes(input.intervalUnit)) {
@@ -331,7 +338,7 @@ export function createHabit(input: { title: string; intervalValue: number; inter
   }
 
   return prisma.habit.create({
-    data: { title, intervalValue: input.intervalValue, intervalUnit: input.intervalUnit },
+    data: { title, intervalValue: input.intervalValue, intervalUnit: input.intervalUnit, durationMinutes: input.durationMinutes ?? null },
   });
 }
 
@@ -351,7 +358,7 @@ export async function completeHabit(id: string): Promise<Habit> {
 
 export function updateHabit(
   id: string,
-  input: Partial<{ title: string; intervalValue: number; intervalUnit: HabitIntervalUnit }>
+  input: Partial<{ title: string; intervalValue: number; intervalUnit: HabitIntervalUnit; durationMinutes: number | null }>
 ) {
   if (input.intervalUnit !== undefined && !HABIT_INTERVAL_UNITS.includes(input.intervalUnit)) {
     throw new Error(`intervalUnit must be one of: ${HABIT_INTERVAL_UNITS.join(", ")}`);
@@ -363,7 +370,7 @@ export function updateHabit(
   return notFoundAsError("Habit not found", () =>
     prisma.habit.update({
       where: { id },
-      data: { title: input.title, intervalValue: input.intervalValue, intervalUnit: input.intervalUnit },
+      data: { title: input.title, intervalValue: input.intervalValue, intervalUnit: input.intervalUnit, durationMinutes: input.durationMinutes },
     })
   );
 }
@@ -440,13 +447,13 @@ function resolveRoutineRecurrence(input: RoutineRecurrenceInput) {
   };
 }
 
-export function createRoutine(input: { title: string; reminderTime: string } & RoutineRecurrenceInput) {
+export function createRoutine(input: { title: string; reminderTime: string; durationMinutes?: number | null } & RoutineRecurrenceInput) {
   const title = input.title.trim();
   const reminderTime = input.reminderTime.trim();
   if (!title || !reminderTime) throw new Error("Title and reminder time are required");
 
   return prisma.routine.create({
-    data: { title, reminderTime, ...resolveRoutineRecurrence(input) },
+    data: { title, reminderTime, durationMinutes: input.durationMinutes ?? null, ...resolveRoutineRecurrence(input) },
   });
 }
 
@@ -478,7 +485,7 @@ export async function createSubroutine(parentId: string, title: string) {
 
 export function updateRoutine(
   id: string,
-  input: Partial<{ title: string; reminderTime: string; isActive: boolean; pausedUntil: string | null } & RoutineRecurrenceInput>
+  input: Partial<{ title: string; reminderTime: string; isActive: boolean; pausedUntil: string | null; durationMinutes: number | null } & RoutineRecurrenceInput>
 ) {
   const recurrence = input.frequency === undefined ? undefined : resolveRoutineRecurrence(input as RoutineRecurrenceInput);
 
@@ -490,6 +497,7 @@ export function updateRoutine(
         reminderTime: input.reminderTime,
         isActive: input.isActive,
         pausedUntil: input.pausedUntil === undefined ? undefined : input.pausedUntil ? new Date(input.pausedUntil) : null,
+        durationMinutes: input.durationMinutes,
         ...recurrence,
       },
     })

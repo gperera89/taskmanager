@@ -133,3 +133,47 @@ export const REMINDER_LEAD_OPTIONS: { value: number | null; label: string }[] = 
   { value: 240, label: "4 hours before" },
   { value: 1440, label: "1 day before" },
 ];
+
+// Preset duration labels offered in the datalist dropdown on every add/edit form. The field is
+// a free-text box, so these are just suggestions — a custom value like "20 min" is also allowed.
+// Each label must round-trip through parseDurationInput/formatDuration below.
+export const DURATION_OPTIONS = ["5 min", "10 min", "15 min", "30 min", "45 min", "1 hour", "1.5 hours"] as const;
+
+// Parses a free-text duration into whole minutes. Accepts a bare number (minutes), or hour/
+// minute units in most spellings: "45 min", "1h", "1.5 hours", "1h 30m". Returns null for
+// empty/unparseable input or a non-positive result (so an empty box clears the field).
+export function parseDurationInput(raw: string): number | null {
+  const s = raw.trim().toLowerCase();
+  if (!s) return null;
+  // Bare number = minutes ("30" -> 30).
+  if (/^\d+(\.\d+)?$/.test(s)) {
+    const n = Math.round(parseFloat(s));
+    return n > 0 ? n : null;
+  }
+  let total = 0;
+  let matched = false;
+  const hourMatch = s.match(/(\d+(?:\.\d+)?)\s*(?:h|hr|hrs|hour|hours)\b/);
+  if (hourMatch) {
+    total += parseFloat(hourMatch[1]) * 60;
+    matched = true;
+  }
+  const minMatch = s.match(/(\d+(?:\.\d+)?)\s*(?:m|min|mins|minute|minutes)\b/);
+  if (minMatch) {
+    total += parseFloat(minMatch[1]);
+    matched = true;
+  }
+  if (!matched) return null;
+  const rounded = Math.round(total);
+  return rounded > 0 ? rounded : null;
+}
+
+// Formats whole minutes back into a human label for display and for pre-filling the edit box.
+// Chosen so the presets and half-hours round-trip exactly (90 -> "1.5 hours" -> 90).
+export function formatDuration(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (m === 0) return h === 1 ? "1 hour" : `${h} hours`;
+  if (m === 30) return `${h}.5 hours`;
+  return `${h}h ${m}m`;
+}

@@ -59,6 +59,9 @@ model Project {
   notifiedAt  DateTime?
   // Notify this many minutes before the due instant instead of at it (null = at the due time).
   reminderLeadMinutes Int?
+  // How long this is expected to take, in minutes (null = unset). Lets a dated item occupy a
+  // block of time on the schedule rather than a single instant.
+  durationMinutes Int?
   tasks       Task[]
 }
 
@@ -78,6 +81,9 @@ model Task {
   notifiedAt  DateTime?
   // Notify this many minutes before the due instant instead of at it (null = at the due time).
   reminderLeadMinutes Int?
+  // How long this task is expected to take, in minutes (null = unset). Lets a dated task occupy
+  // a block of time on the schedule rather than a single instant.
+  durationMinutes Int?
   // Optional grouping heading within a project's card (Things-style sections). Free text,
   // meaningful only for tasks with a projectId.
   section     String?
@@ -181,6 +187,8 @@ model Habit {
   currentStreak     Int               @default(0)
   longestStreak     Int               @default(0)
   lastCompletedDate DateTime?
+  // How long each occurrence is expected to take, in minutes (null = unset).
+  durationMinutes   Int?
 }
 
 enum RoutineFrequency {
@@ -213,6 +221,8 @@ model Routine {
   monthlyOrdinal Int?
   // MONTHLY + monthlyMode=WEEKDAY: 0=Sunday..6=Saturday.
   monthlyWeekday Int?
+  // How long this routine is expected to take, in minutes (null = unset).
+  durationMinutes Int?
   isActive     Boolean          @default(true)
   // When it was last ticked; ticking auto-expires after 1 hour and resets on the next scheduled occurrence.
   lastCompletedAt DateTime?

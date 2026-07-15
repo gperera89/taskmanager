@@ -36,6 +36,7 @@ import {
   updateTask,
   updateTimeZone as updateTimeZoneApi,
 } from "@/lib/api";
+import { parseDurationInput } from "@/lib/shared";
 
 // NOTE ON REVALIDATION: these actions no longer call revalidatePath("/"). The client applies
 // every change optimistically (see components/taskbook/store.tsx) and reconciles with server
@@ -101,6 +102,7 @@ export async function addTask(formData: FormData): Promise<string | undefined> {
     parentId: parentId || null,
     section: section || null,
     reminderLeadMinutes: reminderLead > 0 ? reminderLead : null,
+    durationMinutes: parseDurationInput(String(formData.get("duration") ?? "")),
     repeat: parseTaskRepeat(formData),
   });
   return task.id;
@@ -168,6 +170,11 @@ export async function updateTaskReminderLead(id: string, formData: FormData) {
   await updateTask(id, { reminderLeadMinutes: lead > 0 ? lead : null });
 }
 
+export async function updateTaskDuration(id: string, formData: FormData) {
+  await requireSession();
+  await updateTask(id, { durationMinutes: parseDurationInput(String(formData.get("duration") ?? "")) });
+}
+
 // Rewrites the manual order of a whole group (due bucket / project section) in one call —
 // the ids arrive in their new display order.
 export async function reorderTaskGroup(formData: FormData) {
@@ -195,6 +202,7 @@ export async function addProject(formData: FormData): Promise<string | undefined
     description: description || null,
     dueDate: dueDate || null,
     reminderLeadMinutes: reminderLead > 0 ? reminderLead : null,
+    durationMinutes: parseDurationInput(String(formData.get("duration") ?? "")),
   });
   return project.id;
 }
@@ -223,6 +231,7 @@ export async function editProject(id: string, formData: FormData) {
     description: description || null,
     dueDate: dueDate || null,
     reminderLeadMinutes: reminderLead > 0 ? reminderLead : null,
+    durationMinutes: parseDurationInput(String(formData.get("duration") ?? "")),
   });
 }
 
@@ -263,7 +272,7 @@ export async function addHabit(formData: FormData): Promise<string | undefined> 
   const intervalUnit = String(formData.get("intervalUnit") ?? "") as HabitIntervalUnit;
   if (!title || !intervalValue || !HABIT_INTERVAL_UNITS.includes(intervalUnit)) return;
 
-  const habit = await createHabit({ title, intervalValue, intervalUnit });
+  const habit = await createHabit({ title, intervalValue, intervalUnit, durationMinutes: parseDurationInput(String(formData.get("duration") ?? "")) });
   return habit.id;
 }
 
@@ -275,7 +284,7 @@ export async function editHabit(id: string, formData: FormData) {
   const intervalUnit = String(formData.get("intervalUnit") ?? "") as HabitIntervalUnit;
   if (!title || !intervalValue || !HABIT_INTERVAL_UNITS.includes(intervalUnit)) return;
 
-  await updateHabit(id, { title, intervalValue, intervalUnit });
+  await updateHabit(id, { title, intervalValue, intervalUnit, durationMinutes: parseDurationInput(String(formData.get("duration") ?? "")) });
 }
 
 export async function markHabitDone(id: string) {
@@ -321,7 +330,7 @@ export async function addRoutine(formData: FormData): Promise<string | undefined
   const recurrence = parseRoutineRecurrence(formData);
   if (!title || !reminderTime || !ROUTINE_FREQUENCIES.includes(recurrence.frequency)) return;
 
-  const routine = await createRoutine({ title, reminderTime, ...recurrence });
+  const routine = await createRoutine({ title, reminderTime, durationMinutes: parseDurationInput(String(formData.get("duration") ?? "")), ...recurrence });
   return routine.id;
 }
 
@@ -333,7 +342,7 @@ export async function editRoutine(id: string, formData: FormData) {
   const recurrence = parseRoutineRecurrence(formData);
   if (!title || !reminderTime || !ROUTINE_FREQUENCIES.includes(recurrence.frequency)) return;
 
-  await updateRoutine(id, { title, reminderTime, ...recurrence });
+  await updateRoutine(id, { title, reminderTime, durationMinutes: parseDurationInput(String(formData.get("duration") ?? "")), ...recurrence });
 }
 
 export async function updateRoutinePause(id: string, formData: FormData) {
