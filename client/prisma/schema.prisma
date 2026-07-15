@@ -140,19 +140,29 @@ model CompletionLog {
   @@index([entityType, entityId])
 }
 
-// A voice memo transcribed by Whisper and parsed by an LLM into a Task/Project/Routine/Habit,
-// which is created immediately. This row is just the unread notice pointing at that entity —
-// marking it read or opening it for editing deletes the row (see dismissVoiceCapture).
+// How a capture notice was created — a spoken memo (Whisper + LLM) or an inbound email
+// (LLM extraction). Drives the label shown in the notification panel.
+enum CaptureSource {
+  VOICE
+  EMAIL
+}
+
+// A capture — either a voice memo transcribed by Whisper, or an inbound email — parsed by an
+// LLM into a Task/Project/Routine/Habit, which is created immediately. This row is just the
+// unread notice pointing at that entity — marking it read or opening it for editing deletes
+// the row (see dismissVoiceCapture).
 model VoiceCapture {
-  id          String       @id @default(uuid())
+  id          String        @id @default(uuid())
+  // The source text: the voice transcript, or the email subject/snippet.
   transcript  String
   kind        CapturedKind
   entityId    String
   summary     String
+  source      CaptureSource @default(VOICE)
   // Set when the LLM's JSON response couldn't be parsed, so the transcript was filed as a
   // plain task instead of being understood. Surfaced in the UI as "needs review".
-  parseError  Boolean      @default(false)
-  createdAt   DateTime     @default(now())
+  parseError  Boolean       @default(false)
+  createdAt   DateTime      @default(now())
 }
 
 enum HabitIntervalUnit {

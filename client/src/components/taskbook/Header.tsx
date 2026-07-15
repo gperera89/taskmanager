@@ -86,6 +86,14 @@ export default function Header({
   const [chatPanelOpen, setChatPanelOpen] = useState(false);
   const chatRef = useRef<HTMLDivElement>(null);
 
+  // Mobile only: the Add button opens a dropdown (Add item / Search / Chat / Voice); picking a
+  // tool opens a full-screen modal hosting it. `mobileTool` is which tool the modal shows —
+  // kept separate from the desktop `barMode` so the two surfaces don't fight over one piece of
+  // state. Desktop keeps its inline search/chat/mic bar and never touches these.
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [mobileTool, setMobileTool] = useState<BarMode | null>(null);
+  const addMenuRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     // One-time DOM query for the portal target rendered by layout.tsx, which exists before
     // this component mounts — not syncing to changing external state.
@@ -114,6 +122,31 @@ export default function Header({
     document.addEventListener("pointerdown", handlePointerDown);
     return () => document.removeEventListener("pointerdown", handlePointerDown);
   }, [chatPanelOpen]);
+
+  useEffect(() => {
+    if (!addMenuOpen) return;
+    function handlePointerDown(e: PointerEvent) {
+      if (addMenuRef.current && !addMenuRef.current.contains(e.target as Node)) {
+        setAddMenuOpen(false);
+      }
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [addMenuOpen]);
+
+  // Open a tool in the mobile modal. Voice starts recording straight away, matching the desktop
+  // mic tab's behavior.
+  function openMobileTool(tool: BarMode) {
+    setAddMenuOpen(false);
+    setMobileTool(tool);
+    if (tool === "mic" && !listening && !processing) void toggleListening();
+  }
+
+  // Close the mobile tool modal, discarding an in-flight recording so it isn't uploaded.
+  function closeMobileTool() {
+    if (listening) cancelListening();
+    setMobileTool(null);
+  }
 
   async function sendChatMessage() {
     const content = chatDraft.trim();
@@ -151,6 +184,9 @@ export default function Header({
       if (!res.ok) throw new Error(data.error || "Voice capture failed");
       setShowNotif(true);
       setBarMode("search");
+      // On mobile the mic lives in the tools modal — close it once the capture lands so the user
+      // isn't stranded on an idle mic screen (harmless on desktop, where mobileTool is null).
+      setMobileTool(null);
       router.refresh();
     } catch (err) {
       console.error("[voice] capture failed:", err);
@@ -228,6 +264,14 @@ export default function Header({
     void toggleListening();
   }
 
+  // Switch tools inside the mobile modal. Leaving the mic tab while recording stops and uploads
+  // (same as desktop's selectSearch/selectChat); entering it starts a fresh recording.
+  function switchMobileTool(tool: BarMode) {
+    if (mobileTool === "mic" && tool !== "mic" && listening) void toggleListening();
+    setMobileTool(tool);
+    if (tool === "mic" && !listening && !processing) void toggleListening();
+  }
+
   function handleEditCapture(capture: VoiceCaptureVM) {
     onEditCapture(capture.kind, capture.entityId);
     setShowNotif(false);
@@ -296,8 +340,8 @@ export default function Header({
         </button>
         {showNotif && (
           <div className="absolute right-0 top-[46px] z-30 w-[330px] rounded-xl border border-(--border) bg-(--card) p-4 shadow-[0_16px_40px_rgba(70,55,30,.22)]">
-            <div className="mb-1 text-[11px] uppercase tracking-[0.16em] text-(--ink-soft)">Added by voice</div>
-            <div className="mb-2.5 text-xs italic text-(--ink-soft)">Filed automatically — check it landed right.</div>
+            <div className="mb-1 text-[11px] uppercase tracking-[0.16em] text-(--ink-soft)">Added automatically</div>
+            <div className="mb-2.5 text-xs italic text-(--ink-soft)">Captured by voice or email — check it landed right.</div>
             {pendingCaptures.length === 0 ? (
               <div className="py-3.5 text-sm italic text-(--ink-soft)">All caught up.</div>
             ) : (
@@ -315,13 +359,21 @@ export default function Header({
 
   return (
     <div className="flex flex-none items-center justify-between border-b border-(--border) px-8 py-4">
-      <div className="relative flex items-center gap-3">
+      <div className="relative flex items-center gap-3" ref={addMenuRef}>
         <button
           type="button"
           onClick={() => {
-            openAdd();
             setShowNotif(false);
+            // Desktop keeps the direct "open Add form" behavior; mobile opens the tool menu,
+            // since search/chat/voice have no inline bar to live in below the lg breakpoint.
+            if (isMobile) {
+              setAddMenuOpen((v) => !v);
+            } else {
+              openAdd();
+            }
           }}
+          aria-haspopup={isMobile ? "menu" : undefined}
+          aria-expanded={isMobile ? addMenuOpen : undefined}
           className="flex items-center gap-2 rounded-full bg-(--accent) py-2 pl-3 pr-3.5 text-(--on-accent) cursor-pointer"
         >
           <svg width="16" height="16" viewBox="0 -960 960 960">
@@ -329,6 +381,41 @@ export default function Header({
           </svg>
           <span className="text-sm">Add</span>
         </button>
+
+        {isMobile && addMenuOpen && (
+          <div
+            role="menu"
+            className="absolute left-0 top-[46px] z-30 w-52 overflow-hidden rounded-xl border border-(--border) bg-(--card) py-1 shadow-[0_16px_40px_rgba(70,55,30,.22)]"
+          >
+            <MobileMenuItem
+              iconPath={ADD_ICON_PATH}
+              label="Add item"
+              onClick={() => {
+                setAddMenuOpen(false);
+                openAdd();
+              }}
+            />
+            <MobileMenuItem
+              iconPath={BAR_ICON_PATH.search}
+              label="Search"
+              onClick={() => openMobileTool("search")}
+            />
+            <MobileMenuItem
+              iconPath={BAR_ICON_PATH.chat}
+              label="Chat"
+              disabled={offline}
+              hint={offline ? "Needs a connection" : undefined}
+              onClick={() => openMobileTool("chat")}
+            />
+            <MobileMenuItem
+              iconPath={BAR_ICON_PATH.mic}
+              label="Voice"
+              disabled={offline}
+              hint={offline ? "Needs a connection" : undefined}
+              onClick={() => openMobileTool("mic")}
+            />
+          </div>
+        )}
       </div>
 
       <div className="hidden items-center gap-4 lg:flex">
@@ -501,7 +588,247 @@ export default function Header({
       </div>
 
       {isMobile && mobileActionsEl && createPortal(actionsCluster, mobileActionsEl)}
+
+      {isMobile &&
+        mobileTool &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-40 flex items-end justify-center bg-(--overlay) p-3 sm:items-center"
+            onClick={closeMobileTool}
+          >
+            <div
+              className="flex max-h-[80vh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-(--border) bg-(--card) shadow-[0_16px_40px_rgba(70,55,30,.22)]"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between border-b border-(--border) px-4 py-3">
+                <div className="flex items-center gap-0.5 rounded-full border border-(--border-strong) p-1">
+                  {(["search", "chat", "mic"] as BarMode[]).map((tool) => {
+                    const disabled = offline && tool !== "search";
+                    return (
+                      <button
+                        key={tool}
+                        type="button"
+                        aria-pressed={mobileTool === tool}
+                        disabled={disabled}
+                        onClick={() => switchMobileTool(tool)}
+                        title={tool === "search" ? "Search" : tool === "chat" ? "Chat" : "Voice"}
+                        className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-full disabled:cursor-not-allowed disabled:opacity-50"
+                        style={{ background: mobileTool === tool ? "var(--accent-wash-strong)" : "transparent" }}
+                      >
+                        <svg width="14" height="14" viewBox="0 -960 960 960">
+                          <path
+                            d={BAR_ICON_PATH[tool]}
+                            style={{ fill: mobileTool === tool ? "var(--accent-text)" : "var(--ink-soft)" }}
+                          />
+                        </svg>
+                      </button>
+                    );
+                  })}
+                </div>
+                <button
+                  type="button"
+                  aria-label="Close"
+                  onClick={closeMobileTool}
+                  className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full hover:bg-(--accent-wash)"
+                >
+                  <svg width="16" height="16" viewBox="0 -960 960 960">
+                    <path
+                      d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z"
+                      style={{ fill: "var(--ink-soft)" }}
+                    />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                {mobileTool === "search" && (
+                  <div>
+                    <div className="flex items-center gap-2 rounded-full border border-(--border-strong) px-3.5 py-2 text-(--ink-soft)">
+                      <svg width="15" height="15" viewBox="0 -960 960 960" className="flex-none">
+                        <path d={BAR_ICON_PATH.search} style={{ fill: "var(--ink-faint)" }} />
+                      </svg>
+                      <input
+                        autoFocus
+                        value={query}
+                        onChange={(e) => onQueryChange(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") closeMobileTool();
+                        }}
+                        placeholder="Search tasks…"
+                        aria-label="Search tasks"
+                        className="w-full min-w-0 bg-transparent text-sm text-(--ink) outline-none placeholder:text-(--ink-soft)"
+                      />
+                      {query && (
+                        <button
+                          type="button"
+                          aria-label="Clear search"
+                          onClick={() => onQueryChange("")}
+                          className="flex h-5 w-5 flex-none cursor-pointer items-center justify-center rounded-full"
+                        >
+                          <svg width="12" height="12" viewBox="0 -960 960 960">
+                            <path
+                              d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z"
+                              style={{ fill: "var(--ink-soft)" }}
+                            />
+                          </svg>
+                        </button>
+                      )}
+                    </div>
+                    <div className="mt-2 text-xs italic text-(--ink-soft)">
+                      Close to see the filtered lists behind.
+                    </div>
+                  </div>
+                )}
+
+                {mobileTool === "chat" && (
+                  <div className="flex flex-col gap-3">
+                    <div className="flex items-center gap-2 rounded-full border border-(--border-strong) px-3.5 py-2 text-(--ink-soft)">
+                      <svg width="15" height="15" viewBox="0 -960 960 960" className="flex-none">
+                        <path d={BAR_ICON_PATH.chat} style={{ fill: "var(--ink-faint)" }} />
+                      </svg>
+                      <input
+                        autoFocus
+                        value={chatDraft}
+                        onChange={(e) => setChatDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            void sendChatMessage();
+                          }
+                        }}
+                        placeholder="Ask about your tasks, or tell me to add one…"
+                        disabled={chatLoading}
+                        className="w-full min-w-0 bg-transparent text-sm text-(--ink) outline-none placeholder:text-(--ink-soft) disabled:opacity-60"
+                      />
+                    </div>
+                    {chatMessages.length === 0 && !chatLoading ? (
+                      <div className="py-2 text-sm italic text-(--ink-soft)">
+                        Try &ldquo;what&apos;s due today?&rdquo; or &ldquo;add a task to call the vet tomorrow&rdquo;.
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-2.5">
+                        {chatMessages.map((m, i) => (
+                          <div
+                            key={i}
+                            className={
+                              m.role === "user"
+                                ? "self-end rounded-lg bg-(--accent) px-3 py-1.5 text-sm text-(--on-accent)"
+                                : "self-start rounded-lg border border-(--border) bg-white px-3 py-1.5 text-sm text-(--ink)"
+                            }
+                            style={{ maxWidth: "85%" }}
+                          >
+                            {m.role === "assistant" ? renderMarkdownLite(m.content) : m.content}
+                          </div>
+                        ))}
+                        {chatLoading && <div className="self-start text-sm italic text-(--ink-soft)">Thinking…</div>}
+                      </div>
+                    )}
+                    {chatError && <div className="text-[11px] italic text-(--danger)">{chatError}</div>}
+                    {chatMessages.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setChatMessages([])}
+                        className="self-end cursor-pointer text-xs text-(--ink-faint) hover:text-(--danger)"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {mobileTool === "mic" && (
+                  <div
+                    className="flex flex-col items-center gap-4 py-6"
+                    style={{ animation: listening ? "mic-pulse 1.6s ease-in-out infinite" : undefined }}
+                  >
+                    <div className="flex items-center gap-1" aria-hidden>
+                      {[0, 1, 2, 3, 4].map((i) => (
+                        <span
+                          key={i}
+                          className="block w-1 rounded-full"
+                          style={{
+                            height: 28,
+                            background: captureError ? "var(--danger)" : "var(--accent)",
+                            animation: listening || processing ? `mic-bar 0.9s ${i * 0.12}s ease-in-out infinite` : undefined,
+                            opacity: listening || processing ? 1 : 0.4,
+                          }}
+                        />
+                      ))}
+                    </div>
+                    <span
+                      className="text-center text-sm italic"
+                      style={{ color: captureError ? "var(--danger)" : "var(--accent-text)" }}
+                    >
+                      {captureError ?? (processing ? "Transcribing…" : listening ? "Listening…" : "Tap the mic to start")}
+                    </span>
+                    <div className="flex items-center gap-3">
+                      {listening ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => void toggleListening()}
+                            className="rounded-full bg-(--accent) px-5 py-2 text-sm text-(--on-accent) cursor-pointer"
+                          >
+                            Stop &amp; file
+                          </button>
+                          <button
+                            type="button"
+                            onClick={cancelListening}
+                            className="rounded-full border border-(--border-strong) px-5 py-2 text-sm text-(--ink-soft) cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
+                        !processing && (
+                          <button
+                            type="button"
+                            onClick={() => void toggleListening()}
+                            className="rounded-full bg-(--accent) px-5 py-2 text-sm text-(--on-accent) cursor-pointer"
+                          >
+                            Start recording
+                          </button>
+                        )
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
+  );
+}
+
+function MobileMenuItem({
+  iconPath,
+  label,
+  hint,
+  disabled,
+  onClick,
+}: {
+  iconPath: string;
+  label: string;
+  hint?: string;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      disabled={disabled}
+      onClick={onClick}
+      className="flex w-full items-center gap-3 px-4 py-2.5 text-left disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      <svg width="16" height="16" viewBox="0 -960 960 960" className="flex-none">
+        <path d={iconPath} style={{ fill: "var(--ink-soft)" }} />
+      </svg>
+      <span className="flex-1 text-sm text-(--ink)">{label}</span>
+      {hint && <span className="text-[11px] italic text-(--ink-faint)">{hint}</span>}
+    </button>
   );
 }
 
@@ -509,7 +836,11 @@ function CapturedItem({ capture, onEdit }: { capture: VoiceCaptureVM; onEdit: (c
   const { actions } = useTaskbook();
   return (
     <div className="rounded-lg border border-(--border) bg-(--card) p-2.5">
-      <div className="mb-0.5 text-[11px] uppercase tracking-[0.14em] text-(--ink-soft)">{KIND_LABEL[capture.kind]}</div>
+      <div className="mb-0.5 flex items-center gap-1.5 text-[11px] uppercase tracking-[0.14em] text-(--ink-soft)">
+        <span>{KIND_LABEL[capture.kind]}</span>
+        <span aria-hidden>·</span>
+        <span>{capture.source === "email" ? "Email" : "Voice"}</span>
+      </div>
       <div className="text-sm text-(--ink)">{capture.summary}</div>
       {capture.parseError && (
         <div className="mt-0.5 text-[11px] italic text-(--danger)">

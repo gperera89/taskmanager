@@ -422,6 +422,7 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
     kind: CAPTURED_KIND_MAP[c.kind],
     entityId: c.entityId,
     summary: c.summary,
+    source: c.source === "EMAIL" ? "email" : "voice",
     parseError: c.parseError,
   }));
 

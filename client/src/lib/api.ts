@@ -11,10 +11,10 @@ import {
   NO_REPEAT,
 } from "@/lib/shared";
 
-export type { Task, Project, Habit, Routine, Category, CategoryScope, CompletionLog, HabitIntervalUnit, RoutineFrequency, RoutineMonthlyMode, CapturedKind } from "@prisma/client";
+export type { Task, Project, Habit, Routine, Category, CategoryScope, CompletionLog, HabitIntervalUnit, RoutineFrequency, RoutineMonthlyMode, CapturedKind, CaptureSource } from "@prisma/client";
 export { ROUTINE_TICK_EXPIRY_MS } from "@/lib/shared";
 import { ROUTINE_TICK_EXPIRY_MS } from "@/lib/shared";
-import type { CapturedKind, CategoryScope, Habit, HabitIntervalUnit, Routine, RoutineFrequency, RoutineMonthlyMode } from "@prisma/client";
+import type { CapturedKind, CaptureSource, CategoryScope, Habit, HabitIntervalUnit, Routine, RoutineFrequency, RoutineMonthlyMode } from "@prisma/client";
 
 const HABIT_INTERVAL_UNITS: HabitIntervalUnit[] = ["DAY", "WEEK", "MONTH"];
 const ROUTINE_FREQUENCIES: RoutineFrequency[] = ["DAILY", "WEEKLY", "MONTHLY"];
@@ -670,6 +670,7 @@ export function createVoiceCaptureNotice(input: {
   entityId: string;
   summary: string;
   parseError: boolean;
+  source?: CaptureSource;
 }) {
   return prisma.voiceCapture.create({ data: input });
 }

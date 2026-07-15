@@ -135,12 +135,15 @@ export type CategoryOption = { id: string; name: string; scope: CategoryScopeOpt
 
 export type CapturedKind = "task" | "project" | "routine" | "habit";
 
+export type CaptureSource = "voice" | "email";
+
 export type VoiceCaptureVM = {
   id: string;
   transcript: string;
   kind: CapturedKind;
   entityId: string;
   summary: string;
+  source: CaptureSource;
   parseError: boolean;
 };
 
