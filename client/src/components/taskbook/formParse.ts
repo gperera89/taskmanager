@@ -2,11 +2,12 @@
 // name= attributes; these turn a submitted form into the typed inputs the optimistic store
 // takes, so a create/edit updates the UI instantly and the same shape is sent to the server.
 
-import type { HabitIntervalUnit, RoutineFrequency, RoutineMonthlyMode } from "@prisma/client";
+import type { HabitScheduleType, RoutineFrequency, RoutineMonthlyMode } from "@prisma/client";
 import { parseDurationInput } from "@/lib/shared";
 import type { HabitInput, ProjectInput, RoutineInput, TaskCreateInput, TaskRepeatInput } from "./store";
 
 const ROUTINE_FREQUENCIES: RoutineFrequency[] = ["DAILY", "WEEKLY", "MONTHLY"];
+const HABIT_SCHEDULE_TYPES: HabitScheduleType[] = ["WEEKLY_DAYS", "WEEKLY_COUNT", "MONTHLY_COUNT"];
 
 export function parseTaskRepeat(fd: FormData): TaskRepeatInput {
   const frequency = String(fd.get("repeatFrequency") ?? "");
@@ -60,10 +61,16 @@ export function parseProjectForm(fd: FormData): ProjectInput {
 }
 
 export function parseHabitForm(fd: FormData): HabitInput {
+  const daysOfWeek = String(fd.get("daysOfWeek") ?? "")
+    .split(",")
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isInteger(n) && n >= 0 && n <= 6);
+  const targetCount = Number(fd.get("targetCount") ?? "");
   return {
     title: String(fd.get("title") ?? "").trim(),
-    intervalValue: Number(fd.get("intervalValue") ?? ""),
-    intervalUnit: String(fd.get("intervalUnit") ?? "") as HabitIntervalUnit,
+    scheduleType: String(fd.get("scheduleType") ?? "") as HabitScheduleType,
+    targetCount: Number.isInteger(targetCount) && targetCount > 0 ? targetCount : 1,
+    daysOfWeek,
     durationMinutes: parseDurationInput(String(fd.get("duration") ?? "")),
   };
 }
@@ -98,5 +105,7 @@ export function isValidRoutineForm(input: RoutineInput): boolean {
 }
 
 export function isValidHabitForm(input: HabitInput): boolean {
-  return Boolean(input.title && input.intervalValue && ["DAY", "WEEK", "MONTH"].includes(input.intervalUnit));
+  if (!input.title || !HABIT_SCHEDULE_TYPES.includes(input.scheduleType)) return false;
+  if (input.scheduleType === "WEEKLY_DAYS") return input.daysOfWeek.length > 0;
+  return input.targetCount >= 1;
 }

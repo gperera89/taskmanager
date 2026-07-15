@@ -2,6 +2,7 @@ import {
   getAppSettings,
   getCategories,
   getDismissedCalendarEventIds,
+  getHabitCompletions,
   getHabits,
   getProjects,
   getRoutines,
@@ -19,7 +20,7 @@ export default async function Home() {
   // fallback — the calendar (ICS parse of ~1000 events), voice captures, settings, and dismissed
   // events no longer sit behind the entity queries in a serial waterfall. Each non-critical fetch
   // resolves to a safe default on failure so a single failing section can't take down the page.
-  const entitiesPromise = Promise.all([getTasks(), getProjects(), getHabits(), getRoutines(), getCategories()]);
+  const entitiesPromise = Promise.all([getTasks(), getProjects(), getHabits(), getHabitCompletions(), getRoutines(), getCategories()]);
   const calendarPromise = getCalendarEvents().catch((err) => {
     console.error("[page] failed to load calendar events:", err);
     return { events: [] as Awaited<ReturnType<typeof getCalendarEvents>>["events"], errors: ["Could not load the calendar."] };
@@ -40,10 +41,11 @@ export default async function Home() {
   let tasks: Awaited<ReturnType<typeof getTasks>>;
   let projects: Awaited<ReturnType<typeof getProjects>>;
   let habits: Awaited<ReturnType<typeof getHabits>>;
+  let habitCompletions: Awaited<ReturnType<typeof getHabitCompletions>>;
   let routines: Awaited<ReturnType<typeof getRoutines>>;
   let categories: Awaited<ReturnType<typeof getCategories>>;
   try {
-    [tasks, projects, habits, routines, categories] = await entitiesPromise;
+    [tasks, projects, habits, habitCompletions, routines, categories] = await entitiesPromise;
   } catch (err) {
     console.error("[page] failed to load tasks/projects/habits/routines/categories:", err);
     // Settle the other in-flight promises so their rejections (if any) don't go unhandled.
@@ -71,6 +73,7 @@ export default async function Home() {
     tasks,
     projects,
     habits,
+    habitCompletions,
     routines,
     categories,
     captures,

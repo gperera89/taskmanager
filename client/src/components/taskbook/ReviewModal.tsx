@@ -31,7 +31,7 @@ export default function ReviewModal({ onClose }: { onClose: () => void }) {
         .filter((t) => !t.isCompleted),
     [data.taskGroups]
   );
-  const habitsAtRisk = useMemo(() => data.habitSuggested.filter((h) => h.atRisk || h.lapsed), [data.habitSuggested]);
+  const habitsAtRisk = useMemo(() => data.habits.filter((h) => h.atRisk || h.lapsed), [data.habits]);
 
   function TaskTriageRow({ task, showDue }: { task: TaskItemVM; showDue: boolean }) {
     return (

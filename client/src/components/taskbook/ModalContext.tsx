@@ -6,6 +6,8 @@ import type { ModalState } from "./types";
 type ModalContextValue = {
   openAdd: () => void;
   openEdit: (state: Extract<ModalState, { mode: "edit" }>) => void;
+  // Opens the completion heatmap for a habit (clicking the habit's title/row).
+  openHeatmap: (habitId: string) => void;
 };
 
 export const ModalContext = createContext<ModalContextValue | null>(null);

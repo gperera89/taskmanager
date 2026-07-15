@@ -12,6 +12,7 @@ import TasksView from "./TasksView";
 import ProjectsView from "./ProjectsView";
 import RoutinesView from "./RoutinesView";
 import HabitsView from "./HabitsView";
+import HabitHeatmap from "./HabitHeatmap";
 import DayView from "./DayView";
 import ItemModal from "./ItemModal";
 import SettingsModal from "./SettingsModal";
@@ -45,6 +46,8 @@ export default function TaskbookApp() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [logbookOpen, setLogbookOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
+  // The habit whose completion heatmap is open (by id, so it tracks live optimistic edits).
+  const [heatmapHabitId, setHeatmapHabitId] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   // While we programmatically snap the carousel to a tapped tab, ignore the scroll
@@ -92,6 +95,7 @@ export default function TaskbookApp() {
     () => ({
       openAdd: () => setModal({ mode: "add", initialKind: AREA_TO_KIND[area] }),
       openEdit: (state: Extract<ModalState, { mode: "edit" }>) => setModal(state),
+      openHeatmap: (habitId: string) => setHeatmapHabitId(habitId),
     }),
     [area]
   );
@@ -181,8 +185,7 @@ export default function TaskbookApp() {
       const item = data.routineList.find((r) => r.id === entityId);
       if (item) setModal({ mode: "edit", kind: "routine", item });
     } else if (kind === "habit") {
-      const all = [...data.habitSuggested, ...data.habitOnTrack];
-      const item = all.find((h) => h.id === entityId);
+      const item = data.habits.find((h) => h.id === entityId);
       if (item) setModal({ mode: "edit", kind: "habit", item });
     }
   }
@@ -213,6 +216,8 @@ export default function TaskbookApp() {
   }
 
   const dayDetail = selectedDay != null ? calendarView.dayDetails[selectedDay] : undefined;
+  // Look the heatmap habit up live so optimistic completion toggles re-render its grid.
+  const heatmapHabit = heatmapHabitId != null ? data.habits.find((h) => h.id === heatmapHabitId) : undefined;
 
   function viewFor(key: AreaKey) {
     switch (key) {
@@ -247,8 +252,7 @@ export default function TaskbookApp() {
       case "habits":
         return (
           <HabitsView
-            suggested={data.habitSuggested}
-            onTrack={data.habitOnTrack}
+            habits={data.habits}
             atRiskCount={data.habitAtRiskCount}
             query={query}
           />
@@ -375,6 +379,7 @@ export default function TaskbookApp() {
 
       {logbookOpen && <LogbookModal onClose={() => setLogbookOpen(false)} />}
       {reviewOpen && <ReviewModal onClose={() => setReviewOpen(false)} />}
+      {heatmapHabit && <HabitHeatmap habit={heatmapHabit} onClose={() => setHeatmapHabitId(null)} />}
       <Toasts />
     </ModalContext.Provider>
   );

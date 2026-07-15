@@ -73,19 +73,24 @@ export type ProjectCardVM = {
   sectionNames: string[]; // existing section names, for the per-task section picker
 };
 
-export type HabitIntervalUnit = "DAY" | "WEEK" | "MONTH";
+export type HabitScheduleType = "WEEKLY_DAYS" | "WEEKLY_COUNT" | "MONTHLY_COUNT";
 
 export type HabitCardVM = {
   id: string;
   title: string;
-  intervalValue: number;
-  intervalUnit: HabitIntervalUnit;
-  currentStreak: number;
-  longestStreak: number;
+  scheduleType: HabitScheduleType;
+  targetCount: number;
+  daysOfWeek: number[];
+  streak: number;
   atRisk: boolean;
   lapsed: boolean;
-  isDoneThisPeriod: boolean;
+  isDoneToday: boolean;
+  // Progress within the current period, shown as "done/target" beside the flame.
+  progressDone: number;
+  progressTarget: number;
   detailLabel: string;
+  // YYYY-MM-DD keys of every completed day (up to a year back) — feeds the heatmap.
+  completedDates: string[];
   durationMinutes: number | null;
   durationLabel: string | null;
 };
@@ -169,8 +174,7 @@ export type TaskbookData = {
   activeProjectCount: number;
   routineList: RoutineItemVM[]; // chronological by next occurrence
   routineTotalCount: number;
-  habitSuggested: HabitCardVM[];
-  habitOnTrack: HabitCardVM[];
+  habits: HabitCardVM[];
   habitAtRiskCount: number;
   calendarErrors: string[];
   projectOptions: ProjectOption[];

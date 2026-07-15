@@ -6,8 +6,8 @@
 // would have (this used to exclude the calendar rail; see git history if that distinction ever
 // needs resurrecting).
 
-import type { Task, Project, Habit, Routine, Category, VoiceCapture } from "@prisma/client";
-import { formatDuration, habitPeriodStatus, taskOrderCompare, MS_PER_DAY, ROUTINE_TICK_EXPIRY_MS } from "@/lib/shared";
+import type { Task, Project, Habit, HabitCompletion, Routine, Category, VoiceCapture } from "@prisma/client";
+import { formatDuration, habitDateKey, habitStatus, taskOrderCompare, MS_PER_DAY, ROUTINE_TICK_EXPIRY_MS } from "@/lib/shared";
 export { combineDueDateTime, ROUTINE_TICK_EXPIRY_MS } from "@/lib/shared";
 import {
   bucketForDue,
@@ -18,7 +18,6 @@ import {
   formatEventTime,
   formatFullDate,
   formatShortDate,
-  localDaysUntil,
   pad2,
   zonedCalendarDate,
   zonedDaysUntil,
@@ -52,6 +51,7 @@ export type RawState = {
   tasks: RawTask[]; // top-level tasks only, each with its subtasks nested (mirrors getTasks)
   projects: Project[];
   habits: Habit[];
+  habitCompletions: HabitCompletion[]; // up to a year back; feeds habit status + the heatmap
   routines: RawRoutine[]; // top-level routines only, each with its subroutines nested
   categories: Category[];
   captures: VoiceCapture[];
@@ -69,8 +69,7 @@ export type DerivedEntities = {
   activeProjectCount: number;
   routineList: RoutineItemVM[];
   routineTotalCount: number;
-  habitSuggested: HabitCardVM[];
-  habitOnTrack: HabitCardVM[];
+  habits: HabitCardVM[];
   habitAtRiskCount: number;
   projectOptions: ProjectOption[];
   categoryOptions: CategoryOption[];
@@ -110,13 +109,25 @@ export function isRoutineTickedNow(routine: Pick<Routine, "lastCompletedAt">, no
 
 const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const DOW_ABBR = WEEKDAY_NAMES;
-const HABIT_UNIT_WORD: Record<string, string> = { DAY: "day", WEEK: "week", MONTH: "month" };
 const ORDINAL_WORDS: Record<number, string> = { 1: "First", 2: "Second", 3: "Third", 4: "Fourth", 5: "Fifth", [-1]: "Last" };
 const WEEKDAY_FULL_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
-function habitIntervalLabel(value: number, unit: string): string {
-  const word = HABIT_UNIT_WORD[unit] ?? unit.toLowerCase();
-  return value === 1 ? `Every ${word}` : `Every ${value} ${word}s`;
+// Human label for a WEEKLY_DAYS schedule's daysOfWeek (0=Sun..6=Sat): "Every day", "Weekdays",
+// "Weekends", or a compact abbreviation list like "Mon, Wed, Fri".
+function formatDaysOfWeek(days: number[]): string {
+  const set = new Set(days);
+  if (set.size === 7) return "Every day";
+  const isWeekdays = set.size === 5 && [1, 2, 3, 4, 5].every((d) => set.has(d));
+  if (isWeekdays) return "Weekdays";
+  if (set.size === 2 && set.has(0) && set.has(6)) return "Weekends";
+  return [...days].sort((a, b) => a - b).map((d) => DOW_ABBR[d]).join(", ");
+}
+
+// The schedule description shown under a habit's title.
+function habitScheduleLabel(habit: Pick<Habit, "scheduleType" | "targetCount" | "daysOfWeek">): string {
+  if (habit.scheduleType === "WEEKLY_DAYS") return formatDaysOfWeek(habit.daysOfWeek);
+  if (habit.scheduleType === "MONTHLY_COUNT") return `${habit.targetCount}× per month`;
+  return `${habit.targetCount}× per week`;
 }
 
 function intervalWord(n: number, unit: string): string {
@@ -138,13 +149,6 @@ function toTimeInputValue(date: Date | null): string {
   const d = new Date(date);
   if (d.getUTCHours() === 0 && d.getUTCMinutes() === 0) return "";
   return `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}`;
-}
-
-function relativeDaysAgoLabel(d: Date, now: Date): string {
-  const diff = -localDaysUntil(new Date(d), now);
-  if (diff <= 0) return "today";
-  if (diff === 1) return "yesterday";
-  return `${diff} days ago`;
 }
 
 // --- Task VMs ---
@@ -370,51 +374,40 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
   const routineList = [...routineVMs].sort((a, b) => a.nextOccurrenceMs - b.nextOccurrenceMs);
   const routineTotalCount = routineVMs.length;
 
-  // Habits — status computed (period boundaries local-midnight-aligned in the configured
-  // zone, see lib/shared.ts), then ranked by urgency (soonest to break its streak first).
-  const habitStatuses = raw.habits
-    .map((habit) => {
-      const status = habitPeriodStatus(habit, now, raw.timeZone);
-      return {
-        habit,
-        daysRemaining: status.daysRemaining,
-        isDoneThisPeriod: status.isDoneThisPeriod,
-        lapsed: status.lapsed,
-        atRisk: status.atRisk,
-      };
-    })
-    .sort((a, b) => a.daysRemaining - b.daysRemaining);
-
-  function habitDetailLabel(hs: (typeof habitStatuses)[number]): string {
-    const freqLabel = habitIntervalLabel(hs.habit.intervalValue, hs.habit.intervalUnit);
-    if (hs.atRisk) {
-      const lastDoneLabel = hs.habit.lastCompletedDate
-        ? relativeDaysAgoLabel(new Date(hs.habit.lastCompletedDate), now)
-        : "not yet done";
-      return `Last done ${lastDoneLabel} · do it today to keep your ${hs.habit.currentStreak}-day streak.`;
-    }
-    if (hs.isDoneThisPeriod) return `${freqLabel} · done today`;
-    const daysLabel =
-      hs.daysRemaining <= 1 ? "1 day left to complete" : `${Math.ceil(hs.daysRemaining)} days left to complete`;
-    return `${freqLabel} · ${daysLabel}`;
+  // Habits — completions grouped per habit into tz-local YYYY-MM-DD day-keys, then status,
+  // progress and streak computed from those (see lib/shared.ts). One flat list, ranked so the
+  // ones needing attention (at risk / lapsed / not yet done) float to the top.
+  const completionKeysByHabit = new Map<string, string[]>();
+  for (const c of raw.habitCompletions) {
+    const key = habitDateKey(new Date(c.date), raw.timeZone);
+    const list = completionKeysByHabit.get(c.habitId);
+    if (list) list.push(key);
+    else completionKeysByHabit.set(c.habitId, [key]);
   }
 
-  const habitVMs: HabitCardVM[] = habitStatuses.map((hs) => ({
-    id: hs.habit.id,
-    title: hs.habit.title,
-    intervalValue: hs.habit.intervalValue,
-    intervalUnit: hs.habit.intervalUnit,
-    currentStreak: hs.habit.currentStreak,
-    longestStreak: hs.habit.longestStreak,
-    atRisk: hs.atRisk,
-    lapsed: hs.lapsed,
-    isDoneThisPeriod: hs.isDoneThisPeriod,
-    detailLabel: habitDetailLabel(hs),
-    durationMinutes: hs.habit.durationMinutes,
-    durationLabel: hs.habit.durationMinutes != null ? formatDuration(hs.habit.durationMinutes) : null,
-  }));
-  const habitSuggested = habitVMs.filter((h) => !h.isDoneThisPeriod);
-  const habitOnTrack = habitVMs.filter((h) => h.isDoneThisPeriod);
+  const habitVMs: HabitCardVM[] = raw.habits.map((habit) => {
+    const keys = completionKeysByHabit.get(habit.id) ?? [];
+    const status = habitStatus(habit, new Set(keys), now, raw.timeZone);
+    return {
+      id: habit.id,
+      title: habit.title,
+      scheduleType: habit.scheduleType,
+      targetCount: habit.targetCount,
+      daysOfWeek: habit.daysOfWeek,
+      streak: status.streak,
+      atRisk: status.atRisk,
+      lapsed: status.lapsed,
+      isDoneToday: status.isDoneToday,
+      progressDone: status.progressDone,
+      progressTarget: status.progressTarget,
+      detailLabel: habitScheduleLabel(habit),
+      completedDates: [...keys].sort(),
+      durationMinutes: habit.durationMinutes,
+      durationLabel: habit.durationMinutes != null ? formatDuration(habit.durationMinutes) : null,
+    };
+  });
+  const habitRank = (h: HabitCardVM) => (h.atRisk ? 0 : h.lapsed ? 1 : !h.isDoneToday ? 2 : 3);
+  habitVMs.sort((a, b) => habitRank(a) - habitRank(b) || a.title.localeCompare(b.title));
   const habitAtRiskCount = habitVMs.filter((h) => h.atRisk).length;
 
   // Voice captures (notification panel).
@@ -441,8 +434,7 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
     activeProjectCount,
     routineList,
     routineTotalCount,
-    habitSuggested,
-    habitOnTrack,
+    habits: habitVMs,
     habitAtRiskCount,
     projectOptions: raw.projects.map((p) => ({ id: p.id, name: p.name })),
     categoryOptions: raw.categories.map((c) => ({ id: c.id, name: c.name, scope: c.scope })),

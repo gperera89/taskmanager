@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useModalActions } from "./ModalContext";
 import { useTaskbook } from "./store";
-import { RowDeleteButton, labelClass } from "./shared";
+import { RowDeleteButton } from "./shared";
 import type { HabitCardVM } from "./types";
 
 // From James Clear's Atomic Habits — rotated in the space the "up next" card used to occupy
@@ -17,20 +17,16 @@ const HABIT_QUOTES = [
 ];
 
 export default function HabitsView({
-  suggested,
-  onTrack,
+  habits,
   atRiskCount,
   query,
 }: {
-  suggested: HabitCardVM[];
-  onTrack: HabitCardVM[];
+  habits: HabitCardVM[];
   atRiskCount: number;
   query: string;
 }) {
   const q = query.trim().toLowerCase();
-  const filteredSuggested = q ? suggested.filter((h) => h.title.toLowerCase().includes(q)) : suggested;
-  const filteredOnTrack = q ? onTrack.filter((h) => h.title.toLowerCase().includes(q)) : onTrack;
-  const isEmpty = suggested.length === 0 && onTrack.length === 0;
+  const filtered = q ? habits.filter((h) => h.title.toLowerCase().includes(q)) : habits;
 
   return (
     <div>
@@ -40,29 +36,14 @@ export default function HabitsView({
       </div>
       <div className="my-5 mb-6 h-px bg-(--rule)" />
 
-      {isEmpty && <p className="py-8 text-[15px] italic text-(--ink-soft)">Nothing here yet.</p>}
+      {habits.length === 0 && <p className="py-8 text-[15px] italic text-(--ink-soft)">Nothing here yet.</p>}
 
-      <div className="max-w-[920px]">
-        {!q && <HabitsQuoteBanner />}
+      <div className="max-w-[640px]">
+        {!q && habits.length > 0 && <HabitsQuoteBanner />}
 
-        <div className="mt-6.5 grid grid-cols-1 gap-11 lg:grid-cols-2">
-          {filteredSuggested.length > 0 && (
-            <div>
-              <div className={`${labelClass} mb-1.5`}>Suggested next</div>
-              {filteredSuggested.map((h) => (
-                <HabitRow key={h.id} habit={h} />
-              ))}
-            </div>
-          )}
-          {filteredOnTrack.length > 0 && (
-            <div>
-              <div className={`${labelClass} mb-1.5`}>On track</div>
-              {filteredOnTrack.map((h) => (
-                <HabitRow key={h.id} habit={h} />
-              ))}
-            </div>
-          )}
-        </div>
+        {filtered.map((h) => (
+          <HabitRow key={h.id} habit={h} />
+        ))}
       </div>
     </div>
   );
@@ -85,22 +66,50 @@ function HabitsQuoteBanner() {
 }
 
 function HabitRow({ habit }: { habit: HabitCardVM }) {
-  const { openEdit } = useModalActions();
+  const { openEdit, openHeatmap } = useModalActions();
   const { actions } = useTaskbook();
   return (
     <div className="group flex items-center justify-between gap-3 border-b border-(--border-soft) py-3.5">
-      <div className="min-w-0 cursor-pointer" onClick={() => openEdit({ mode: "edit", kind: "habit", item: habit })}>
+      <div
+        className="min-w-0 flex-1 cursor-pointer"
+        onClick={() => openHeatmap(habit.id)}
+        title="View completion history"
+      >
         <div className="text-base text-(--ink)">{habit.title}</div>
         <div className="mt-0.5 text-xs text-(--ink-muted)">
           {habit.detailLabel}
           {habit.durationLabel && ` · ◷ ${habit.durationLabel}`}
         </div>
       </div>
-      <div className="flex flex-none items-center gap-3">
+      <div className="flex flex-none items-center gap-2.5">
+        <button
+          type="button"
+          onClick={() => openEdit({ mode: "edit", kind: "habit", item: habit })}
+          title="Edit habit"
+          aria-label="Edit habit"
+          className="flex flex-none cursor-pointer items-center justify-center rounded-full p-1 text-(--ink-soft) opacity-0 transition-opacity hover:text-(--ink) group-hover:opacity-100"
+        >
+          <PencilIcon />
+        </button>
+        <span
+          className="tabular-nums text-[13px] text-(--ink-muted)"
+          title={`${habit.progressDone} of ${habit.progressTarget} ${habit.detailLabel.includes("month") ? "this month" : "this week"}`}
+        >
+          {habit.progressDone}/{habit.progressTarget}
+        </span>
         <HabitFlameButton habit={habit} />
         <RowDeleteButton action={() => actions.removeHabit(habit.id)} />
       </div>
     </div>
+  );
+}
+
+function PencilIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </svg>
   );
 }
 
@@ -111,7 +120,7 @@ function HabitFlameButton({ habit }: { habit: HabitCardVM }) {
   const [igniting, setIgniting] = useState(false);
 
   function handleComplete() {
-    if (habit.isDoneThisPeriod) return;
+    if (habit.isDoneToday) return;
     actions.markHabitDone(habit.id);
     setIgniting(true);
     window.setTimeout(() => setIgniting(false), 650);
@@ -129,11 +138,11 @@ function HabitFlameButton({ habit }: { habit: HabitCardVM }) {
     <button
       type="button"
       onClick={handleComplete}
-      disabled={habit.isDoneThisPeriod}
-      title={habit.isDoneThisPeriod ? "Done for this period" : "Mark done"}
-      aria-label={habit.isDoneThisPeriod ? "Habit completed" : "Mark habit done"}
+      disabled={habit.isDoneToday}
+      title={habit.isDoneToday ? "Done today" : "Mark done today"}
+      aria-label={habit.isDoneToday ? "Habit completed today" : "Mark habit done today"}
       className={`flex flex-none items-center justify-center rounded-full p-1 transition-transform ${
-        habit.isDoneThisPeriod ? "cursor-default" : "cursor-pointer hover:scale-110"
+        habit.isDoneToday ? "cursor-default" : "cursor-pointer hover:scale-110"
       }`}
     >
       <span

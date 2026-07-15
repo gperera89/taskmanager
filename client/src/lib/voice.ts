@@ -1,10 +1,10 @@
 import "server-only";
-import type { HabitIntervalUnit, RoutineFrequency, RoutineMonthlyMode } from "@prisma/client";
+import type { HabitScheduleType, RoutineFrequency, RoutineMonthlyMode } from "@prisma/client";
 
 const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const ROUTINE_FREQUENCIES: RoutineFrequency[] = ["DAILY", "WEEKLY", "MONTHLY"];
 const ROUTINE_MONTHLY_MODES: RoutineMonthlyMode[] = ["DATE", "WEEKDAY"];
-const HABIT_INTERVAL_UNITS: HabitIntervalUnit[] = ["DAY", "WEEK", "MONTH"];
+const HABIT_SCHEDULE_TYPES: HabitScheduleType[] = ["WEEKLY_DAYS", "WEEKLY_COUNT", "MONTHLY_COUNT"];
 
 export type ParsedCapture =
   | {
@@ -35,7 +35,7 @@ export type ParsedCapture =
         monthlyWeekday: number | null;
       };
     }
-  | { kind: "HABIT"; parseError: false; habit: { title: string; intervalValue: number; intervalUnit: HabitIntervalUnit } };
+  | { kind: "HABIT"; parseError: false; habit: { title: string; scheduleType: HabitScheduleType; targetCount: number; daysOfWeek: number[] } };
 
 function requireApiKey(): string {
   const key = process.env.OPENAI_API_KEY;
@@ -152,8 +152,9 @@ Reply with ONLY a JSON object with these fields (use null for any field not rele
 - dayOfMonth: number or null, 1-31, or -1 to mean "the last day of the month" (routine, only when frequency is MONTHLY and monthlyMode is DATE)
 - monthlyOrdinal: number or null, 1-5 for First..Fifth, or -1 for "Last" (routine, only when frequency is MONTHLY and monthlyMode is WEEKDAY)
 - monthlyWeekday: number or null, 0=Sunday..6=Saturday (routine, only when frequency is MONTHLY and monthlyMode is WEEKDAY)
-- habitIntervalValue: number or null, "every N ___" (habit only), e.g. 3 for "every 3 days"
-- habitIntervalUnit: "DAY" | "WEEK" | "MONTH" | null (habit only)`;
+- habitScheduleType: "WEEKLY_DAYS" | "WEEKLY_COUNT" | "MONTHLY_COUNT" | null (habit only). WEEKLY_DAYS = specific days of the week (e.g. "weekdays", "every Monday and Thursday"). WEEKLY_COUNT = a number of times per week (e.g. "twice a week"). MONTHLY_COUNT = a number of times per month (e.g. "ten times a month"). Default to WEEKLY_DAYS with every day if the wording is a plain "daily".
+- habitDaysOfWeek: number[] or null, 0=Sunday..6=Saturday (habit, only when habitScheduleType is WEEKLY_DAYS)
+- habitTargetCount: number or null, the "N times" count (habit, only when habitScheduleType is WEEKLY_COUNT or MONTHLY_COUNT)`;
 
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -216,12 +217,19 @@ Reply with ONLY a JSON object with these fields (use null for any field not rele
     }
 
     if (parsed.kind === "habit") {
-      const intervalUnit = HABIT_INTERVAL_UNITS.includes(parsed.habitIntervalUnit) ? (parsed.habitIntervalUnit as HabitIntervalUnit) : "DAY";
-      const intervalValue = Number.isInteger(parsed.habitIntervalValue) && parsed.habitIntervalValue > 0 ? parsed.habitIntervalValue : 1;
+      const scheduleType = HABIT_SCHEDULE_TYPES.includes(parsed.habitScheduleType)
+        ? (parsed.habitScheduleType as HabitScheduleType)
+        : "WEEKLY_DAYS";
+      const daysOfWeek = Array.isArray(parsed.habitDaysOfWeek)
+        ? parsed.habitDaysOfWeek.filter((n: unknown) => Number.isInteger(n) && (n as number) >= 0 && (n as number) <= 6)
+        : [];
+      const targetCount = Number.isInteger(parsed.habitTargetCount) && parsed.habitTargetCount > 0 ? parsed.habitTargetCount : 1;
+      // Fall back to "every day" if the model chose days-of-week but named none.
+      const resolvedDays = scheduleType === "WEEKLY_DAYS" && daysOfWeek.length === 0 ? [0, 1, 2, 3, 4, 5, 6] : daysOfWeek;
       return {
         kind: "HABIT",
         parseError: false,
-        habit: { title: fallbackTitle(parsed.title, transcript), intervalValue, intervalUnit },
+        habit: { title: fallbackTitle(parsed.title, transcript), scheduleType, targetCount, daysOfWeek: resolvedDays },
       };
     }
 

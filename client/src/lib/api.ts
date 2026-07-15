@@ -5,18 +5,17 @@ import { nextOccurrence, resolveTaskRepeat, type TaskRepeatRule } from "@/lib/ta
 import { DEFAULT_TIME_ZONE, SUPPORTED_TIME_ZONES } from "@/lib/taskbookDates";
 import {
   combineDueDateTime,
-  computeHabitCompletion,
-  habitPeriodStatus,
+  habitDateKey,
   MS_PER_DAY,
   NO_REPEAT,
 } from "@/lib/shared";
 
-export type { Task, Project, Habit, Routine, Category, CategoryScope, CompletionLog, HabitIntervalUnit, RoutineFrequency, RoutineMonthlyMode, CapturedKind, CaptureSource } from "@prisma/client";
+export type { Task, Project, Habit, HabitCompletion, Routine, Category, CategoryScope, CompletionLog, HabitScheduleType, RoutineFrequency, RoutineMonthlyMode, CapturedKind, CaptureSource } from "@prisma/client";
 export { ROUTINE_TICK_EXPIRY_MS } from "@/lib/shared";
 import { ROUTINE_TICK_EXPIRY_MS } from "@/lib/shared";
-import type { CapturedKind, CaptureSource, CategoryScope, Habit, HabitIntervalUnit, Routine, RoutineFrequency, RoutineMonthlyMode } from "@prisma/client";
+import type { CapturedKind, CaptureSource, CategoryScope, Habit, HabitScheduleType, Routine, RoutineFrequency, RoutineMonthlyMode } from "@prisma/client";
 
-const HABIT_INTERVAL_UNITS: HabitIntervalUnit[] = ["DAY", "WEEK", "MONTH"];
+const HABIT_SCHEDULE_TYPES: HabitScheduleType[] = ["WEEKLY_DAYS", "WEEKLY_COUNT", "MONTHLY_COUNT"];
 const ROUTINE_FREQUENCIES: RoutineFrequency[] = ["DAILY", "WEEKLY", "MONTHLY"];
 const CATEGORY_SCOPES: CategoryScope[] = ["WORK", "HOME", "NONE"];
 
@@ -327,84 +326,102 @@ export function deleteProject(id: string) {
 
 export const getHabits = () => prisma.habit.findMany();
 
-export function createHabit(input: { title: string; intervalValue: number; intervalUnit: HabitIntervalUnit; durationMinutes?: number | null }) {
+// All habit completions within the last `days` (a year by default). Single-user app, so this is
+// a small set — loaded into the client store and used for status, progress, and the heatmap.
+export function getHabitCompletions(days = 366) {
+  const since = new Date(Date.now() - days * MS_PER_DAY);
+  return prisma.habitCompletion.findMany({ where: { date: { gte: since } }, orderBy: { date: "asc" } });
+}
+
+type HabitScheduleInput = {
+  scheduleType: HabitScheduleType;
+  targetCount: number;
+  daysOfWeek: number[];
+};
+
+// Resolves the schedule fields that actually apply to `scheduleType`, nulling out whichever ones
+// don't (a count-based habit has no daysOfWeek; a days-based habit ignores targetCount) so stale
+// values from a previous edit never linger. Throws on invalid input.
+function resolveHabitSchedule(input: HabitScheduleInput): { scheduleType: HabitScheduleType; targetCount: number; daysOfWeek: number[] } {
+  if (!HABIT_SCHEDULE_TYPES.includes(input.scheduleType)) {
+    throw new Error(`scheduleType must be one of: ${HABIT_SCHEDULE_TYPES.join(", ")}`);
+  }
+  if (input.scheduleType === "WEEKLY_DAYS") {
+    const daysOfWeek = [...new Set(input.daysOfWeek)].filter((d) => Number.isInteger(d) && d >= 0 && d <= 6).sort();
+    if (daysOfWeek.length === 0) throw new Error("Pick at least one day of the week");
+    return { scheduleType: input.scheduleType, targetCount: 1, daysOfWeek };
+  }
+  if (!Number.isInteger(input.targetCount) || input.targetCount < 1) {
+    throw new Error("targetCount must be a positive whole number");
+  }
+  return { scheduleType: input.scheduleType, targetCount: input.targetCount, daysOfWeek: [] };
+}
+
+export function createHabit(input: HabitScheduleInput & { title: string; durationMinutes?: number | null }) {
   const title = input.title.trim();
   if (!title) throw new Error("Title is required");
-  if (!HABIT_INTERVAL_UNITS.includes(input.intervalUnit)) {
-    throw new Error(`intervalUnit must be one of: ${HABIT_INTERVAL_UNITS.join(", ")}`);
-  }
-  if (!Number.isInteger(input.intervalValue) || input.intervalValue < 1) {
-    throw new Error("intervalValue must be a positive whole number");
-  }
+  const schedule = resolveHabitSchedule(input);
 
   return prisma.habit.create({
-    data: { title, intervalValue: input.intervalValue, intervalUnit: input.intervalUnit, durationMinutes: input.durationMinutes ?? null },
+    data: { title, ...schedule, durationMinutes: input.durationMinutes ?? null },
   });
 }
 
-// Marks a habit done "now" and recomputes its streak based on its frequency window (period
-// boundaries are local-midnight-aligned in the configured timezone — see lib/shared.ts).
+// UTC-midnight Date for a `YYYY-MM-DD` day-key (the HabitCompletion.date encoding).
+function completionDate(dateKey: string): Date {
+  return new Date(`${dateKey}T00:00:00.000Z`);
+}
+
+// Marks a habit done for today (idempotent — a second call the same day is a no-op) and logs the
+// completion to the Logbook. Today's calendar date is resolved in the configured timezone.
 export async function completeHabit(id: string): Promise<Habit> {
   const habit = await prisma.habit.findUnique({ where: { id } });
   if (!habit) throw new Error("Habit not found");
 
   const { timeZone } = await getAppSettings();
-  const result = computeHabitCompletion(habit, new Date(), timeZone);
-  if (!result) return habit; // Already marked done for the current period.
+  const date = completionDate(habitDateKey(new Date(), timeZone));
+  const existing = await prisma.habitCompletion.findUnique({ where: { habitId_date: { habitId: id, date } } });
+  if (!existing) {
+    await prisma.habitCompletion.create({ data: { habitId: id, date } });
+    await logCompletion("HABIT", habit.id, habit.title);
+  }
+  return habit;
+}
 
-  await logCompletion("HABIT", habit.id, habit.title);
-  return prisma.habit.update({ where: { id }, data: result });
+// Heatmap edit: toggles a completion for an arbitrary calendar date (add if missing, remove if
+// present). Retroactive edits don't touch the Logbook.
+export async function toggleHabitCompletion(id: string, dateKey: string): Promise<void> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) throw new Error("Invalid date");
+  const date = completionDate(dateKey);
+  const existing = await prisma.habitCompletion.findUnique({ where: { habitId_date: { habitId: id, date } } });
+  if (existing) {
+    await prisma.habitCompletion.delete({ where: { id: existing.id } });
+  } else {
+    await prisma.habitCompletion.create({ data: { habitId: id, date } });
+  }
 }
 
 export function updateHabit(
   id: string,
-  input: Partial<{ title: string; intervalValue: number; intervalUnit: HabitIntervalUnit; durationMinutes: number | null }>
+  input: { title?: string } & Partial<HabitScheduleInput> & { durationMinutes?: number | null }
 ) {
-  if (input.intervalUnit !== undefined && !HABIT_INTERVAL_UNITS.includes(input.intervalUnit)) {
-    throw new Error(`intervalUnit must be one of: ${HABIT_INTERVAL_UNITS.join(", ")}`);
-  }
-  if (input.intervalValue !== undefined && (!Number.isInteger(input.intervalValue) || input.intervalValue < 1)) {
-    throw new Error("intervalValue must be a positive whole number");
+  const data: Prisma.HabitUpdateInput = { title: input.title, durationMinutes: input.durationMinutes };
+  if (input.scheduleType !== undefined) {
+    Object.assign(
+      data,
+      resolveHabitSchedule({
+        scheduleType: input.scheduleType,
+        targetCount: input.targetCount ?? 1,
+        daysOfWeek: input.daysOfWeek ?? [],
+      })
+    );
   }
 
-  return notFoundAsError("Habit not found", () =>
-    prisma.habit.update({
-      where: { id },
-      data: { title: input.title, intervalValue: input.intervalValue, intervalUnit: input.intervalUnit, durationMinutes: input.durationMinutes },
-    })
-  );
+  return notFoundAsError("Habit not found", () => prisma.habit.update({ where: { id }, data }));
 }
 
 export function deleteHabit(id: string) {
   return notFoundAsError("Habit not found", () => prisma.habit.delete({ where: { id } }));
-}
-
-export type HabitStatus = {
-  habit: Habit;
-  periodEndsAt: Date;
-  daysRemaining: number;
-  isDoneThisPeriod: boolean;
-  atRisk: boolean;
-};
-
-// Ranks habits by urgency: whichever is closest to breaking its streak comes first. When
-// nothing is at risk, the front of this same list is the best "what should I do" suggestion.
-export async function getHabitsWithStatus(): Promise<HabitStatus[]> {
-  const [habits, { timeZone }] = await Promise.all([prisma.habit.findMany(), getAppSettings()]);
-  const now = new Date();
-
-  return habits
-    .map((habit) => {
-      const status = habitPeriodStatus(habit, now, timeZone);
-      return {
-        habit,
-        periodEndsAt: new Date(status.periodEndsAtMs),
-        daysRemaining: status.daysRemaining,
-        isDoneThisPeriod: status.isDoneThisPeriod,
-        atRisk: status.atRisk,
-      };
-    })
-    .sort((a, b) => a.daysRemaining - b.daysRemaining);
 }
 
 // Top-level routines only: sub-routines are fetched nested so a cluster (e.g. "Wake Up

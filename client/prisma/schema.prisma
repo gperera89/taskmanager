@@ -171,24 +171,43 @@ model VoiceCapture {
   createdAt   DateTime      @default(now())
 }
 
-enum HabitIntervalUnit {
-  DAY
-  WEEK
-  MONTH
+// How a habit is scheduled. Replaces the old "every N days/weeks/months" interval model.
+enum HabitScheduleType {
+  // On specific days of the week (Habit.daysOfWeek), e.g. weekdays + Saturday.
+  WEEKLY_DAYS
+  // A target number of times per calendar week, any days (Habit.targetCount).
+  WEEKLY_COUNT
+  // A target number of times per calendar month, any days (Habit.targetCount).
+  MONTHLY_COUNT
 }
 
 model Habit {
   id                String            @id @default(uuid())
   title             String
-  // The habit repeats every `intervalValue` `intervalUnit`s, e.g. 1 DAY, 3 DAYS, 2 WEEKS,
-  // 1 MONTH — a single number+unit pair covers what used to be five fixed frequency options.
-  intervalValue     Int               @default(1)
-  intervalUnit      HabitIntervalUnit @default(DAY)
-  currentStreak     Int               @default(0)
-  longestStreak     Int               @default(0)
-  lastCompletedDate DateTime?
+  scheduleType      HabitScheduleType @default(WEEKLY_DAYS)
+  // WEEKLY_COUNT / MONTHLY_COUNT: how many completions make up a full period.
+  targetCount       Int               @default(1)
+  // WEEKLY_DAYS: which days the habit is scheduled on; 0=Sunday..6=Saturday.
+  daysOfWeek        Int[]             @default([])
   // How long each occurrence is expected to take, in minutes (null = unset).
   durationMinutes   Int?
+  completions       HabitCompletion[]
+}
+
+// One row per completed calendar date (at most one per habit per day, enforced by the unique
+// index). `date` uses the same UTC-midnight-of-the-calendar-date encoding as due dates (see
+// combineDueDateTime in lib/shared.ts). Streaks and per-period progress are computed from these
+// rows, so no cached streak counters live on Habit. This is the heatmap's data source and is
+// editable by date (see toggleHabitCompletion).
+model HabitCompletion {
+  id        String   @id @default(uuid())
+  habitId   String
+  habit     Habit    @relation(fields: [habitId], references: [id], onDelete: Cascade)
+  date      DateTime
+  createdAt DateTime @default(now())
+
+  @@unique([habitId, date])
+  @@index([habitId, date])
 }
 
 enum RoutineFrequency {

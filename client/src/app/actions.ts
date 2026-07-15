@@ -19,13 +19,14 @@ import {
   dismissCalendarEvent as dismissCalendarEventApi,
   dismissVoiceCapture,
   duplicateProject as duplicateProjectApi,
-  type HabitIntervalUnit,
+  type HabitScheduleType,
   reorderTasks as reorderTasksApi,
   restoreCalendarEvent as restoreCalendarEventApi,
   type RoutineFrequency,
   type RoutineMonthlyMode,
   snoozeTask as snoozeTaskApi,
   type TaskRepeatInput,
+  toggleHabitCompletion as toggleHabitCompletionApi,
   toggleTaskCompletion,
   untickRoutineCluster,
   updateCategory,
@@ -45,8 +46,28 @@ import { parseDurationInput } from "@/lib/shared";
 // was the ~8s "click to update" lag. Create actions return the new row's id so the client can
 // swap its temporary optimistic id for the real one.
 
-const HABIT_INTERVAL_UNITS: HabitIntervalUnit[] = ["DAY", "WEEK", "MONTH"];
+const HABIT_SCHEDULE_TYPES: HabitScheduleType[] = ["WEEKLY_DAYS", "WEEKLY_COUNT", "MONTHLY_COUNT"];
 const ROUTINE_FREQUENCIES: RoutineFrequency[] = ["DAILY", "WEEKLY", "MONTHLY"];
+
+// Parses the habit schedule fields shared by add/edit. `daysOfWeek` arrives as a comma-separated
+// hidden input (e.g. "1,2,3,4,5,6"); `targetCount` as a number. Returns null on invalid input.
+function parseHabitSchedule(
+  formData: FormData
+): { scheduleType: HabitScheduleType; targetCount: number; daysOfWeek: number[] } | null {
+  const scheduleType = String(formData.get("scheduleType") ?? "") as HabitScheduleType;
+  if (!HABIT_SCHEDULE_TYPES.includes(scheduleType)) return null;
+  const daysOfWeek = String(formData.get("daysOfWeek") ?? "")
+    .split(",")
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isInteger(n) && n >= 0 && n <= 6);
+  const targetCount = Number(formData.get("targetCount") ?? "");
+  if (scheduleType === "WEEKLY_DAYS") {
+    if (daysOfWeek.length === 0) return null;
+  } else if (!Number.isInteger(targetCount) || targetCount < 1) {
+    return null;
+  }
+  return { scheduleType, targetCount: targetCount || 1, daysOfWeek };
+}
 
 // Shared by the Add-task form and the inline repeat popover. Empty/missing repeatFrequency
 // means "does not repeat" — null clears any existing repeat rule on the task.
@@ -268,11 +289,10 @@ export async function addHabit(formData: FormData): Promise<string | undefined> 
   await requireSession();
 
   const title = String(formData.get("title") ?? "").trim();
-  const intervalValue = Number(formData.get("intervalValue") ?? "");
-  const intervalUnit = String(formData.get("intervalUnit") ?? "") as HabitIntervalUnit;
-  if (!title || !intervalValue || !HABIT_INTERVAL_UNITS.includes(intervalUnit)) return;
+  const schedule = parseHabitSchedule(formData);
+  if (!title || !schedule) return;
 
-  const habit = await createHabit({ title, intervalValue, intervalUnit, durationMinutes: parseDurationInput(String(formData.get("duration") ?? "")) });
+  const habit = await createHabit({ title, ...schedule, durationMinutes: parseDurationInput(String(formData.get("duration") ?? "")) });
   return habit.id;
 }
 
@@ -280,16 +300,20 @@ export async function editHabit(id: string, formData: FormData) {
   await requireSession();
 
   const title = String(formData.get("title") ?? "").trim();
-  const intervalValue = Number(formData.get("intervalValue") ?? "");
-  const intervalUnit = String(formData.get("intervalUnit") ?? "") as HabitIntervalUnit;
-  if (!title || !intervalValue || !HABIT_INTERVAL_UNITS.includes(intervalUnit)) return;
+  const schedule = parseHabitSchedule(formData);
+  if (!title || !schedule) return;
 
-  await updateHabit(id, { title, intervalValue, intervalUnit, durationMinutes: parseDurationInput(String(formData.get("duration") ?? "")) });
+  await updateHabit(id, { title, ...schedule, durationMinutes: parseDurationInput(String(formData.get("duration") ?? "")) });
 }
 
 export async function markHabitDone(id: string) {
   await requireSession();
   await completeHabit(id);
+}
+
+export async function toggleHabitCompletion(id: string, dateKey: string) {
+  await requireSession();
+  await toggleHabitCompletionApi(id, dateKey);
 }
 
 export async function removeHabit(id: string) {

@@ -3,14 +3,10 @@
 // "keep in sync" comment; this is now the single copy.
 
 import type { Habit } from "@prisma/client";
-import { getTimeZoneOffsetMs } from "@/lib/taskbookDates";
+import { zonedNow } from "@/lib/taskbookDates";
 
 export const MS_PER_DAY = 24 * 60 * 60 * 1000;
 export const ROUTINE_TICK_EXPIRY_MS = 60 * 60 * 1000;
-
-// Approximate window length used to judge whether a completion keeps the streak alive. Months
-// aren't calendar-aware — a 30-day window is close enough for streak bucketing purposes.
-export const INTERVAL_UNIT_DAYS: Record<string, number> = { DAY: 1, WEEK: 7, MONTH: 30 };
 
 // Due dates are stored as UTC midnight of the chosen calendar date, with a clock time layered
 // on top at face value — not a real timezone conversion, just the literal HH:MM the user
@@ -31,81 +27,186 @@ export const NO_REPEAT = {
   repeatMonthlyWeekday: null,
 };
 
-export function habitWindowDays(habit: Pick<Habit, "intervalValue" | "intervalUnit">): number {
-  return habit.intervalValue * (INTERVAL_UNIT_DAYS[habit.intervalUnit] ?? 1);
+// --- Habit scheduling / completion math -------------------------------------------------------
+//
+// A habit's completions are stored one row per completed calendar date (HabitCompletion.date, a
+// UTC-midnight-of-the-date value). Everything below works off a Set of `YYYY-MM-DD` day-keys in
+// the configured timezone, so the same math runs on the server write and the client's optimistic
+// patch without drifting. Weeks are Monday-start; months are calendar months.
+
+type HabitSchedule = Pick<Habit, "scheduleType" | "targetCount" | "daysOfWeek">;
+
+function pad2(n: number): string {
+  return n < 10 ? `0${n}` : String(n);
 }
 
-// Periods are windowDays-long buckets of *calendar days in the configured timezone* since the
-// epoch. The old version bucketed raw epoch time, so a daily habit's boundary sat at UTC
-// midnight (8am in a UTC+8 zone) — completing at 7:50am and 8:10am local counted as two
-// different days. Shifting by the zone offset first makes the boundary local midnight.
-export function habitPeriodIndex(date: Date, windowDays: number, timeZone: string): number {
-  const ms = date.getTime() + getTimeZoneOffsetMs(date, timeZone);
-  return Math.floor(ms / (MS_PER_DAY * windowDays));
+// The tz-local calendar fields for an instant. `zonedNow` returns a Date whose UTC getters read
+// as the wall clock in the zone, so a UTC-midnight completion date keeps its calendar day here.
+function zonedFields(date: Date, timeZone: string): { y: number; m0: number; d: number; weekday: number } {
+  const z = zonedNow(date.getTime(), timeZone);
+  return { y: z.getUTCFullYear(), m0: z.getUTCMonth(), d: z.getUTCDate(), weekday: z.getUTCDay() };
 }
 
-// The real instant the current habit period rolls over (local-midnight-aligned, see above).
-export function habitPeriodEndMs(nowPeriod: number, windowDays: number, now: Date, timeZone: string): number {
-  return (nowPeriod + 1) * windowDays * MS_PER_DAY - getTimeZoneOffsetMs(now, timeZone);
+// `YYYY-MM-DD` day-key for an instant, in the configured timezone. String keys compare and sort
+// like the dates they represent, so range checks are plain `>=` / `<=` on keys.
+export function habitDateKey(date: Date, timeZone: string): string {
+  const { y, m0, d } = zonedFields(date, timeZone);
+  return `${y}-${pad2(m0 + 1)}-${pad2(d)}`;
 }
 
-export type HabitCompletionResult = {
-  currentStreak: number;
-  longestStreak: number;
-  lastCompletedDate: Date;
-} | null; // null = already done this period, nothing to write
+// Day-key for a UTC-midnight calendar anchor (used while walking day-by-day in UTC).
+function anchorKey(anchorMs: number): string {
+  const a = new Date(anchorMs);
+  return `${a.getUTCFullYear()}-${pad2(a.getUTCMonth() + 1)}-${pad2(a.getUTCDate())}`;
+}
 
-// One shared implementation of "mark done now" streak math, used by the server write
-// (api.completeHabit) and the optimistic patch (store.markHabitDone) so they can never drift.
-export function computeHabitCompletion(
-  habit: Pick<Habit, "intervalValue" | "intervalUnit" | "currentStreak" | "longestStreak" | "lastCompletedDate">,
-  now: Date,
-  timeZone: string
-): HabitCompletionResult {
-  const windowDays = habitWindowDays(habit);
-  const nowPeriod = habitPeriodIndex(now, windowDays, timeZone);
+// The current Monday-start week as a [startKey, endKey] inclusive range, given today's tz-local
+// fields. anchor = UTC-midnight of today's calendar date; week math is exact integer-day UTC.
+function weekRange(now: Date, timeZone: string): { startKey: string; endKey: string; daysLeft: number } {
+  const { y, m0, d, weekday } = zonedFields(now, timeZone);
+  const anchor = Date.UTC(y, m0, d);
+  const fromMonday = (weekday + 6) % 7; // Sun(0)->6, Mon(1)->0, ... Sat(6)->5
+  const start = anchor - fromMonday * MS_PER_DAY;
+  const end = anchor + (6 - fromMonday) * MS_PER_DAY;
+  return { startKey: anchorKey(start), endKey: anchorKey(end), daysLeft: 6 - fromMonday };
+}
 
-  let currentStreak: number;
-  if (!habit.lastCompletedDate) {
-    currentStreak = 1;
-  } else {
-    const lastPeriod = habitPeriodIndex(new Date(habit.lastCompletedDate), windowDays, timeZone);
-    if (nowPeriod === lastPeriod) return null;
-    currentStreak = nowPeriod === lastPeriod + 1 ? habit.currentStreak + 1 : 1;
+function monthPrefix(y: number, m0: number): string {
+  return `${y}-${pad2(m0 + 1)}-`;
+}
+
+function daysInMonth(y: number, m0: number): number {
+  return new Date(Date.UTC(y, m0 + 1, 0)).getUTCDate();
+}
+
+function countInWeek(keys: Set<string>, startKey: string, endKey: string): number {
+  let n = 0;
+  for (const k of keys) if (k >= startKey && k <= endKey) n++;
+  return n;
+}
+
+function countInMonth(keys: Set<string>, prefix: string): number {
+  let n = 0;
+  for (const k of keys) if (k.startsWith(prefix)) n++;
+  return n;
+}
+
+export type HabitStatus = {
+  // Progress within the current period: how many completions vs the target.
+  progressDone: number;
+  progressTarget: number;
+  // "this week" / "this month" — what the target counts against.
+  periodLabel: string;
+  streak: number;
+  isDoneToday: boolean;
+  // Current period already at/over target.
+  isPeriodMet: boolean;
+  // Behind pace with little time left in the period (flame flickers).
+  atRisk: boolean;
+  // Fallen off entirely — nothing this period and no live streak (flame out).
+  lapsed: boolean;
+};
+
+// The one place habit status is computed, from a Set of tz-local day-keys. Used by both derive
+// (client view-models) and any server-side status need.
+export function habitStatus(habit: HabitSchedule, completionKeys: Set<string>, now: Date, timeZone: string): HabitStatus {
+  const todayKey = habitDateKey(now, timeZone);
+  const isDoneToday = completionKeys.has(todayKey);
+  const { y, m0, d, weekday } = zonedFields(now, timeZone);
+
+  if (habit.scheduleType === "MONTHLY_COUNT") {
+    const target = Math.max(1, habit.targetCount);
+    const done = countInMonth(completionKeys, monthPrefix(y, m0));
+    const daysLeft = daysInMonth(y, m0) - d;
+    const isPeriodMet = done >= target;
+    // Walk back over prior months.
+    let streak = isPeriodMet ? 1 : 0;
+    let py = y;
+    let pm = m0;
+    for (let i = 0; i < 240; i++) {
+      pm -= 1;
+      if (pm < 0) { pm = 11; py -= 1; }
+      if (countInMonth(completionKeys, monthPrefix(py, pm)) >= target) streak++;
+      else break;
+    }
+    return {
+      progressDone: done,
+      progressTarget: target,
+      periodLabel: "this month",
+      streak,
+      isDoneToday,
+      isPeriodMet,
+      atRisk: !isPeriodMet && target - done > daysLeft,
+      lapsed: !isPeriodMet && done === 0,
+    };
+  }
+
+  // Weekly modes (WEEKLY_DAYS / WEEKLY_COUNT) both key off the Monday-start week.
+  const { startKey, endKey, daysLeft } = weekRange(now, timeZone);
+  const doneThisWeek = countInWeek(completionKeys, startKey, endKey);
+
+  if (habit.scheduleType === "WEEKLY_DAYS") {
+    const scheduled = habit.daysOfWeek;
+    const target = Math.max(1, scheduled.length);
+    const todayScheduled = scheduled.includes(weekday);
+    // Streak: walk scheduled days backward from today. A missed *past* scheduled day breaks it;
+    // today missed is just "in progress" (grace).
+    const anchor = Date.UTC(y, m0, d);
+    let streak = 0;
+    for (let i = 0; i < 800; i++) {
+      const cursorMs = anchor - i * MS_PER_DAY;
+      const wd = new Date(cursorMs).getUTCDay();
+      if (!scheduled.includes(wd)) continue;
+      const key = anchorKey(cursorMs);
+      if (completionKeys.has(key)) streak++;
+      else if (key === todayKey) continue; // today not done yet — don't break the streak
+      else break;
+    }
+    const isPeriodMet = doneThisWeek >= target;
+    return {
+      progressDone: doneThisWeek,
+      progressTarget: target,
+      periodLabel: "this week",
+      streak,
+      isDoneToday,
+      isPeriodMet,
+      atRisk: todayScheduled && !isDoneToday,
+      lapsed: streak === 0 && !isDoneToday,
+    };
+  }
+
+  // WEEKLY_COUNT
+  const target = Math.max(1, habit.targetCount);
+  const isPeriodMet = doneThisWeek >= target;
+  let streak = isPeriodMet ? 1 : 0;
+  // Walk back over prior weeks.
+  const anchor = Date.UTC(y, m0, d);
+  const fromMonday = (weekday + 6) % 7;
+  let weekStartMs = anchor - fromMonday * MS_PER_DAY;
+  for (let i = 0; i < 400; i++) {
+    weekStartMs -= 7 * MS_PER_DAY;
+    const sKey = anchorKey(weekStartMs);
+    const eKey = anchorKey(weekStartMs + 6 * MS_PER_DAY);
+    if (countInWeek(completionKeys, sKey, eKey) >= target) streak++;
+    else break;
   }
   return {
-    currentStreak,
-    longestStreak: Math.max(habit.longestStreak, currentStreak),
-    lastCompletedDate: now,
+    progressDone: doneThisWeek,
+    progressTarget: target,
+    periodLabel: "this week",
+    streak,
+    isDoneToday,
+    isPeriodMet,
+    atRisk: !isPeriodMet && target - doneThisWeek > daysLeft + 1,
+    lapsed: !isPeriodMet && doneThisWeek === 0 && streak === 0,
   };
 }
 
-export type HabitPeriodStatus = {
-  windowDays: number;
-  isDoneThisPeriod: boolean;
-  daysRemaining: number;
-  periodEndsAtMs: number;
-  // True when the streak is already broken (a gap of more than one period), so the next
-  // completion resets to 1 rather than extending.
-  lapsed: boolean;
-  atRisk: boolean;
-};
-
-export function habitPeriodStatus(
-  habit: Pick<Habit, "intervalValue" | "intervalUnit" | "lastCompletedDate">,
-  now: Date,
-  timeZone: string
-): HabitPeriodStatus {
-  const windowDays = habitWindowDays(habit);
-  const nowPeriod = habitPeriodIndex(now, windowDays, timeZone);
-  const lastPeriod = habit.lastCompletedDate
-    ? habitPeriodIndex(new Date(habit.lastCompletedDate), windowDays, timeZone)
-    : null;
-  const periodEndsAtMs = habitPeriodEndMs(nowPeriod, windowDays, now, timeZone);
-  const isDoneThisPeriod = lastPeriod === nowPeriod;
-  const daysRemaining = (periodEndsAtMs - now.getTime()) / MS_PER_DAY;
-  const lapsed = !isDoneThisPeriod && (lastPeriod == null || nowPeriod - lastPeriod > 1);
-  return { windowDays, isDoneThisPeriod, daysRemaining, periodEndsAtMs, lapsed, atRisk: !isDoneThisPeriod && daysRemaining <= 1 };
+// The flame's visual state, mirroring the old lit/flicker/out semantics.
+export function habitFlameState(status: HabitStatus): "lit" | "flicker" | "out" {
+  if (status.lapsed) return "out";
+  if (status.atRisk) return "flicker";
+  return "lit";
 }
 
 // Sort key for manual ordering: manually-positioned tasks first (by their fractional index),

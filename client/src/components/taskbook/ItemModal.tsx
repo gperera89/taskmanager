@@ -17,7 +17,7 @@ import CategoryManager from "./CategoryManager";
 import { DateTimePickerPanel, formatPickerLabel } from "./DateTimePicker";
 import RepeatFields from "./RepeatFields";
 import { AutoGrowTextarea, DurationField } from "./shared";
-import type { CategoryOption, HabitCardVM, ModalState, ProjectCardVM, ProjectOption, RoutineItemVM } from "./types";
+import type { CategoryOption, HabitCardVM, HabitScheduleType, ModalState, ProjectCardVM, ProjectOption, RoutineItemVM } from "./types";
 
 const inputClass =
   "w-full rounded-lg border border-(--border-strong) bg-(--card) px-3 py-2 text-sm text-(--ink) outline-none focus:border-(--accent-text)";
@@ -609,10 +609,21 @@ function RoutineForm({
   );
 }
 
-const HABIT_UNIT_OPTIONS: { unit: "DAY" | "WEEK" | "MONTH"; singular: string; plural: string }[] = [
-  { unit: "DAY", singular: "Day", plural: "Days" },
-  { unit: "WEEK", singular: "Week", plural: "Weeks" },
-  { unit: "MONTH", singular: "Month", plural: "Months" },
+const HABIT_SCHEDULE_OPTIONS: { type: HabitScheduleType; label: string }[] = [
+  { type: "WEEKLY_DAYS", label: "Days of week" },
+  { type: "WEEKLY_COUNT", label: "Times / week" },
+  { type: "MONTHLY_COUNT", label: "Times / month" },
+];
+
+// 0=Sunday..6=Saturday, ordered Mon-first to match the schedule label / heatmap presentation.
+const DOW_TOGGLES: { value: number; label: string }[] = [
+  { value: 1, label: "M" },
+  { value: 2, label: "T" },
+  { value: 3, label: "W" },
+  { value: 4, label: "T" },
+  { value: 5, label: "F" },
+  { value: 6, label: "S" },
+  { value: 0, label: "S" },
 ];
 
 function HabitForm({
@@ -625,9 +636,13 @@ function HabitForm({
   shared?: SharedTitleProps;
 }) {
   const { actions } = useTaskbook();
-  const [intervalValue, setIntervalValue] = useState(String(item?.intervalValue ?? 1));
-  const [intervalUnit, setIntervalUnit] = useState<"DAY" | "WEEK" | "MONTH">(item?.intervalUnit ?? "DAY");
-  const isSingular = intervalValue === "1";
+  const [scheduleType, setScheduleType] = useState<HabitScheduleType>(item?.scheduleType ?? "WEEKLY_DAYS");
+  const [daysOfWeek, setDaysOfWeek] = useState<number[]>(item?.daysOfWeek ?? [1, 2, 3, 4, 5]);
+  const [targetCount, setTargetCount] = useState(String(item?.targetCount ?? 3));
+
+  function toggleDay(d: number) {
+    setDaysOfWeek((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d]));
+  }
 
   return (
     <form
@@ -658,36 +673,70 @@ function HabitForm({
         )}
       </div>
       <div>
-        <label className={labelTextClass}>Repeat every</label>
-        <div className="flex gap-2">
-          <input
-            name="intervalValue"
-            required
-            inputMode="numeric"
-            pattern="[0-9]*"
-            value={intervalValue}
-            onChange={(e) => setIntervalValue(e.target.value.replace(/\D/g, ""))}
-            className={`${inputClass} w-16! shrink-0 text-center`}
-          />
-          <div className="flex flex-1 gap-1 rounded-lg border border-(--border-strong) p-1">
-            {HABIT_UNIT_OPTIONS.map((u) => (
-              <button
-                key={u.unit}
-                type="button"
-                onClick={() => setIntervalUnit(u.unit)}
-                className="flex-1 cursor-pointer rounded-md py-1.5 text-xs"
-                style={{
-                  background: intervalUnit === u.unit ? "var(--accent)" : "transparent",
-                  color: intervalUnit === u.unit ? "var(--on-accent)" : "var(--ink-muted)",
-                }}
-              >
-                {isSingular ? u.singular : u.plural}
-              </button>
-            ))}
-          </div>
-          <input type="hidden" name="intervalUnit" value={intervalUnit} />
+        <label className={labelTextClass}>Schedule</label>
+        <div className="flex gap-1 rounded-lg border border-(--border-strong) p-1">
+          {HABIT_SCHEDULE_OPTIONS.map((o) => (
+            <button
+              key={o.type}
+              type="button"
+              onClick={() => setScheduleType(o.type)}
+              className="flex-1 cursor-pointer rounded-md py-1.5 text-xs"
+              style={{
+                background: scheduleType === o.type ? "var(--accent)" : "transparent",
+                color: scheduleType === o.type ? "var(--on-accent)" : "var(--ink-muted)",
+              }}
+            >
+              {o.label}
+            </button>
+          ))}
         </div>
+        <input type="hidden" name="scheduleType" value={scheduleType} />
       </div>
+
+      {scheduleType === "WEEKLY_DAYS" ? (
+        <div>
+          <label className={labelTextClass}>On these days</label>
+          <div className="flex gap-1.5">
+            {DOW_TOGGLES.map((d) => {
+              const on = daysOfWeek.includes(d.value);
+              return (
+                <button
+                  key={d.value}
+                  type="button"
+                  onClick={() => toggleDay(d.value)}
+                  className="flex h-9 w-9 flex-1 cursor-pointer items-center justify-center rounded-full text-sm"
+                  style={{
+                    background: on ? "var(--accent)" : "transparent",
+                    color: on ? "var(--on-accent)" : "var(--ink-muted)",
+                    border: on ? "1px solid var(--accent)" : "1px solid var(--border-strong)",
+                  }}
+                >
+                  {d.label}
+                </button>
+              );
+            })}
+          </div>
+          <input type="hidden" name="daysOfWeek" value={daysOfWeek.slice().sort((a, b) => a - b).join(",")} />
+        </div>
+      ) : (
+        <div>
+          <label className={labelTextClass}>Target</label>
+          <div className="flex items-center gap-2">
+            <input
+              name="targetCount"
+              required
+              inputMode="numeric"
+              pattern="[0-9]*"
+              value={targetCount}
+              onChange={(e) => setTargetCount(e.target.value.replace(/\D/g, ""))}
+              className={`${inputClass} w-16! shrink-0 text-center`}
+            />
+            <span className="text-sm text-(--ink-muted)">
+              {scheduleType === "MONTHLY_COUNT" ? "times per month" : "times per week"}
+            </span>
+          </div>
+        </div>
+      )}
       <div>
         <label className={labelTextClass}>Duration</label>
         <DurationField className={inputClass} id="habit-duration" defaultValue={item?.durationLabel ?? ""} />

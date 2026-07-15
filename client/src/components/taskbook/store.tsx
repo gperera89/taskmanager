@@ -17,12 +17,12 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { HabitIntervalUnit, Routine, RoutineFrequency, RoutineMonthlyMode } from "@prisma/client";
+import type { HabitCompletion, HabitScheduleType, Routine, RoutineFrequency, RoutineMonthlyMode } from "@prisma/client";
 import * as serverActions from "@/app/actions";
 import { deriveEntities, type RawState, type RawTask } from "@/lib/derive";
 import {
   combineDueDateTime,
-  computeHabitCompletion,
+  habitDateKey,
   MS_PER_DAY,
   NO_REPEAT,
 } from "@/lib/shared";
@@ -73,8 +73,7 @@ export type ServerCalendarData = Omit<
   | "activeProjectCount"
   | "routineList"
   | "routineTotalCount"
-  | "habitSuggested"
-  | "habitOnTrack"
+  | "habits"
   | "habitAtRiskCount"
   | "projectOptions"
   | "categoryOptions"
@@ -106,7 +105,7 @@ export type TaskCreateInput = {
 };
 
 export type ProjectInput = { name: string; description?: string | null; dueDate?: string | null; reminderLeadMinutes?: number | null; durationMinutes?: number | null };
-export type HabitInput = { title: string; intervalValue: number; intervalUnit: HabitIntervalUnit; durationMinutes?: number | null };
+export type HabitInput = { title: string; scheduleType: HabitScheduleType; targetCount: number; daysOfWeek: number[]; durationMinutes?: number | null };
 export type RoutineInput = {
   title: string;
   reminderTime: string;
@@ -156,6 +155,7 @@ export type TaskbookActions = {
   addHabit: (input: HabitInput) => void;
   editHabit: (id: string, input: HabitInput) => void;
   markHabitDone: (id: string) => void;
+  toggleHabitCompletion: (habitId: string, dateKey: string) => void;
   removeHabit: (id: string) => void;
   // Routines
   addRoutine: (input: RoutineInput) => void;
@@ -208,6 +208,31 @@ let tempSeq = 0;
 function tempId(): string {
   tempSeq += 1;
   return `tmp-${Date.now()}-${tempSeq}`;
+}
+
+// --- Habit helpers (mirror the FormData contract in app/actions.ts) ---
+
+function habitFormData(input: HabitInput): FormData {
+  const fd = new FormData();
+  fd.set("title", input.title);
+  fd.set("scheduleType", input.scheduleType);
+  fd.set("targetCount", String(input.targetCount));
+  fd.set("daysOfWeek", input.daysOfWeek.join(","));
+  if (input.durationMinutes) fd.set("duration", String(input.durationMinutes));
+  return fd;
+}
+
+// The tz-agnostic YYYY-MM-DD key of a completion row (its date is stored at UTC midnight).
+function completionKey(c: HabitCompletion): string {
+  return new Date(c.date).toISOString().slice(0, 10);
+}
+
+function hasCompletion(r: RawState, habitId: string, dateKey: string): boolean {
+  return r.habitCompletions.some((c) => c.habitId === habitId && completionKey(c) === dateKey);
+}
+
+function newCompletion(habitId: string, dateKey: string): HabitCompletion {
+  return { id: tempId(), habitId, date: new Date(`${dateKey}T00:00:00.000Z`), createdAt: new Date() };
 }
 
 function repeatRuleOf(t: RawTask): TaskRepeatRule | null {
@@ -325,10 +350,15 @@ const REGISTRY: Record<string, RegistryEntry> = {
   removeProject: { fn: serverActions.removeProject },
   addHabit: {
     fn: serverActions.addHabit,
-    swap: (r, temp, real) => ({ ...r, habits: r.habits.map((h) => (h.id === temp ? { ...h, id: real } : h)) }),
+    swap: (r, temp, real) => ({
+      ...r,
+      habits: r.habits.map((h) => (h.id === temp ? { ...h, id: real } : h)),
+      habitCompletions: r.habitCompletions.map((c) => (c.habitId === temp ? { ...c, habitId: real } : c)),
+    }),
   },
   editHabit: { fn: serverActions.editHabit },
   markHabitDone: { fn: serverActions.markHabitDone },
+  toggleHabitCompletion: { fn: serverActions.toggleHabitCompletion },
   removeHabit: { fn: serverActions.removeHabit },
   addRoutine: {
     fn: serverActions.addRoutine,
@@ -991,11 +1021,7 @@ export function StoreProvider({
       // --- Habits ---
       addHabit: (input) => {
         const id = tempId();
-        const fd = new FormData();
-        fd.set("title", input.title);
-        fd.set("intervalValue", String(input.intervalValue));
-        fd.set("intervalUnit", input.intervalUnit);
-        if (input.durationMinutes) fd.set("duration", String(input.durationMinutes));
+        const fd = habitFormData(input);
         create(
           (r) => ({
             ...r,
@@ -1004,11 +1030,9 @@ export function StoreProvider({
               {
                 id,
                 title: input.title.trim(),
-                intervalValue: input.intervalValue,
-                intervalUnit: input.intervalUnit,
-                currentStreak: 0,
-                longestStreak: 0,
-                lastCompletedDate: null,
+                scheduleType: input.scheduleType,
+                targetCount: input.targetCount,
+                daysOfWeek: input.daysOfWeek,
                 durationMinutes: input.durationMinutes ?? null,
               },
             ],
@@ -1019,43 +1043,58 @@ export function StoreProvider({
         );
       },
       editHabit: (id, input) => {
-        const fd = new FormData();
-        fd.set("title", input.title);
-        fd.set("intervalValue", String(input.intervalValue));
-        fd.set("intervalUnit", input.intervalUnit);
-        if (input.durationMinutes) fd.set("duration", String(input.durationMinutes));
+        const fd = habitFormData(input);
         mutate(
           (r) => ({
             ...r,
             habits: r.habits.map((h) =>
-              h.id === id ? { ...h, title: input.title.trim(), intervalValue: input.intervalValue, intervalUnit: input.intervalUnit, durationMinutes: input.durationMinutes ?? null } : h
+              h.id === id
+                ? {
+                    ...h,
+                    title: input.title.trim(),
+                    scheduleType: input.scheduleType,
+                    targetCount: input.targetCount,
+                    daysOfWeek: input.daysOfWeek,
+                    durationMinutes: input.durationMinutes ?? null,
+                  }
+                : h
             ),
           }),
           "editHabit",
           [id, fd]
         );
       },
+      // Mark done today — adds today's completion row (idempotent). Streak/progress re-derive.
       markHabitDone: (id) =>
         mutate(
-          (r) => ({
-            ...r,
-            habits: r.habits.map((h) => {
-              if (h.id !== id) return h;
-              // Same streak math as the server (lib/shared.ts) — zoned period boundaries.
-              const result = computeHabitCompletion(h, new Date(), r.timeZone);
-              return result ? { ...h, ...result } : h;
-            }),
-          }),
+          (r) => {
+            const dateKey = habitDateKey(new Date(), r.timeZone);
+            if (hasCompletion(r, id, dateKey)) return r;
+            return { ...r, habitCompletions: [...r.habitCompletions, newCompletion(id, dateKey)] };
+          },
           "markHabitDone",
           [id]
+        ),
+      // Heatmap edit — add the completion if the day is empty, remove it if already there.
+      toggleHabitCompletion: (habitId, dateKey) =>
+        mutate(
+          (r) =>
+            hasCompletion(r, habitId, dateKey)
+              ? { ...r, habitCompletions: r.habitCompletions.filter((c) => !(c.habitId === habitId && completionKey(c) === dateKey)) }
+              : { ...r, habitCompletions: [...r.habitCompletions, newCompletion(habitId, dateKey)] },
+          "toggleHabitCompletion",
+          [habitId, dateKey]
         ),
       removeHabit: (id) => {
         const captured = rawRef.current.habits.find((h) => h.id === id);
         if (!captured) return;
+        // Deleting the habit cascades its completions server-side; mirror that locally (and
+        // restore them on undo) so the heatmap/status stay consistent.
+        const capturedCompletions = rawRef.current.habitCompletions.filter((c) => c.habitId === id);
         deleteWithUndo(
           "Habit",
-          (r) => ({ ...r, habits: r.habits.filter((h) => h.id !== id) }),
-          (r) => ({ ...r, habits: [...r.habits, captured] }),
+          (r) => ({ ...r, habits: r.habits.filter((h) => h.id !== id), habitCompletions: r.habitCompletions.filter((c) => c.habitId !== id) }),
+          (r) => ({ ...r, habits: [...r.habits, captured], habitCompletions: [...r.habitCompletions, ...capturedCompletions] }),
           () => enqueue("removeHabit", [id])
         );
       },
