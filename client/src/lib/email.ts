@@ -68,41 +68,72 @@ function coerceTask(raw: unknown, categories: string[], fallback: string): Email
 // token budget, and the actionable content is nearly always near the top.
 const MAX_BODY_CHARS = 8000;
 
+// Subject-line prefixes are the user's explicit lever over the task/project split, so the outcome
+// is never left to the model's judgement when they care:
+//   "Project: ..."             -> always a project broken into subtasks
+//   "Task:/Tasks:/Todo: ..."   -> always one or more loose tasks
+//   (no prefix)                -> loose tasks (we never auto-create a project without the keyword)
+const PROJECT_PREFIX = /^\s*project\s*:\s*/i;
+const TASKS_PREFIX = /^\s*(?:tasks?|todos?)\s*:\s*/i;
+
+// Decide the shape from the subject prefix and return the subject with the prefix stripped (so the
+// prefix doesn't bleed into the title/project name).
+function detectMode(subject: string): { mode: "project" | "tasks"; cleanSubject: string } {
+  if (PROJECT_PREFIX.test(subject)) return { mode: "project", cleanSubject: subject.replace(PROJECT_PREFIX, "").trim() };
+  if (TASKS_PREFIX.test(subject)) return { mode: "tasks", cleanSubject: subject.replace(TASKS_PREFIX, "").trim() };
+  return { mode: "tasks", cleanSubject: subject.trim() };
+}
+
+// The email's context, derived by the caller from the sender address (work vs personal), used to
+// bias category selection toward the matching scope.
+export type EmailContext = "work" | "home";
+
 // Asks gpt-4o-mini to turn an email into either loose tasks or a project-with-subtasks, extracting
-// due dates/categories per task, constrained to the caller's existing categories so it can't
-// invent ones that don't exist.
+// due dates/categories per task. The task/project split is decided deterministically by the
+// subject prefix (see detectMode) rather than left to the model. Categories are constrained to the
+// caller's existing ones, biased toward those appropriate for the sender's context.
 export async function parseEmailToItems(
   subject: string,
   body: string,
-  categories: string[]
+  categories: { name: string; scope: string }[],
+  context: EmailContext
 ): Promise<ParsedEmail> {
   const apiKey = requireApiKey();
   const now = new Date();
   const today = localDateString(now);
   const trimmedBody = body.slice(0, MAX_BODY_CHARS);
-  const fallbackTitle = strOrNull(subject) ?? "Untitled";
+  const { mode, cleanSubject } = detectMode(subject);
+  const fallbackTitle = strOrNull(cleanSubject) ?? "Untitled";
+
+  const categoryNames = categories.map((c) => c.name);
+  const contextLabel = context === "work" ? "work" : "personal";
+  // Categories suited to this context: matching scope, plus NONE ("both") categories.
+  const wantScope = context === "work" ? "WORK" : "HOME";
+  const preferred = categories.filter((c) => c.scope === wantScope || c.scope === "NONE").map((c) => c.name);
+
+  const shapeInstruction =
+    mode === "project"
+      ? "The user has explicitly marked this email as a PROJECT. Produce a project and break the work into smaller subtasks."
+      : "Produce one or more independent tasks. Do NOT create a project.";
 
   const systemPrompt = `You turn an email into structured work for a personal task manager.
 Today is ${today} (${WEEKDAY_NAMES[now.getDay()]}).
-Existing categories: ${categories.join(", ") || "(none)"}.
+This email arrived at the user's ${contextLabel} address, so treat it as ${contextLabel} context.
+Existing categories: ${categoryNames.join(", ") || "(none)"}.
+Prefer one of these ${contextLabel}-appropriate categories: ${preferred.join(", ") || "(none)"}.
 
 Extract only the genuinely actionable content. Ignore greetings, signatures, disclaimers, quoted
 prior replies, and marketing boilerplate. If the email contains nothing actionable, return an
 empty task list.
 
-First decide the shape:
-- "tasks": the email implies one or a few independent to-dos. Default to this.
-- "project": the email describes a larger initiative or multi-step effort that is best tracked as a
-  project broken into smaller subtasks. Only choose this when there are clearly several related
-  steps toward one goal.
+${shapeInstruction}
 
 Reply with ONLY a JSON object:
-- kind: "tasks" | "project"
-- project: object or null. When kind is "project": { name: string, description: string|null, dueDate: "YYYY-MM-DD"|null }. Null when kind is "tasks".
-- tasks: array of task objects (the subtasks when kind is "project"; the standalone tasks otherwise). Each task:
+- project: object or null. ${mode === "project" ? 'Required: { name: string, description: string|null, dueDate: "YYYY-MM-DD"|null }.' : "Always null for this email."}
+- tasks: array of task objects (${mode === "project" ? "the subtasks of the project" : "the standalone tasks"}). Each task:
     - title: string (required, short and imperative)
     - description: string|null (extra detail; keep concise)
-    - category: string|null — must EXACTLY match one of the existing categories above, else null
+    - category: string|null — must EXACTLY match one of the existing categories above, else null. Prefer a ${contextLabel}-appropriate one.
     - dueDate: string|null — "YYYY-MM-DD", resolved from relative dates like "tomorrow"/"next Friday" or explicit dates in the email
     - dueTime: string|null — "HH:MM" 24h, only if a specific time is stated`;
 
@@ -117,7 +148,7 @@ Reply with ONLY a JSON object:
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: `Subject: ${subject}\n\n${trimmedBody}` },
+        { role: "user", content: `Subject: ${cleanSubject}\n\n${trimmedBody}` },
       ],
     }),
   });
@@ -131,10 +162,11 @@ Reply with ONLY a JSON object:
   try {
     const parsed = JSON.parse(rawContent);
     const rawTasks: unknown[] = Array.isArray(parsed.tasks) ? parsed.tasks : [];
-    const tasks = rawTasks.map((t, i) => coerceTask(t, categories, `${fallbackTitle} (${i + 1})`));
+    const tasks = rawTasks.map((t, i) => coerceTask(t, categoryNames, `${fallbackTitle} (${i + 1})`));
 
-    if (parsed.kind === "project" && parsed.project && typeof parsed.project === "object") {
-      const p = parsed.project as Record<string, unknown>;
+    // The subject prefix — not the model — decides the shape.
+    if (mode === "project") {
+      const p = (parsed.project && typeof parsed.project === "object" ? parsed.project : {}) as Record<string, unknown>;
       return {
         kind: "PROJECT",
         parseError: false,

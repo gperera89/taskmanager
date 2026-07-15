@@ -63,11 +63,20 @@ async function handle(request: Request, ctx: { params: Promise<{ secret: string 
 
   try {
     const categories = await getCategories();
-    const categoryNames = categories.map((c) => c.name);
-    const parsed = await parseEmailToItems(subject, text, categoryNames);
+    // Sender decides the context: mail from the work (YCIS) domain is work, everything else
+    // (personal Gmail, etc.) is home. This biases both the AI's category choice and the fallback.
+    const context: "work" | "home" = from.endsWith("@ycis.com") ? "work" : "home";
+    const parsed = await parseEmailToItems(subject, text, categories, context);
 
-    // Task requires a non-empty category; fall back the same way the voice pipeline does.
-    const resolveCategory = (t: EmailTask) => t.category || categoryNames[0] || "Home";
+    // Task requires a non-empty category; when the AI didn't assign one, default to a category
+    // matching the sender's context — first by scope, then by the literal "Work"/"Home" name.
+    const wantScope = context === "work" ? "WORK" : "HOME";
+    const wantName = context === "work" ? "work" : "home";
+    const defaultCategory =
+      categories.find((c) => c.scope === wantScope)?.name ??
+      categories.find((c) => c.name.toLowerCase() === wantName)?.name ??
+      (context === "work" ? "Work" : "Home");
+    const resolveCategory = (t: EmailTask) => t.category || defaultCategory;
     // The transcript field on the notice holds the source text for both voice and email; use the
     // subject so the notification panel shows something recognizable.
     const noticeTranscript = subject.trim() || text.slice(0, 120);
