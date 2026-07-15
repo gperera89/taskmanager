@@ -81,7 +81,7 @@ function RoutineRow({ routine }: { routine: RoutineItemVM }) {
       <div className="flex items-start gap-3">
         <CheckSquare action={handleToggle} checked={routine.isTicked} completing={completing} />
         <div className="min-w-0 flex-1 cursor-pointer" onClick={() => openEdit({ mode: "edit", kind: "routine", item: routine })}>
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex items-start justify-between gap-2">
             <span
               className="relative text-base leading-5.5"
               style={{
@@ -92,15 +92,11 @@ function RoutineRow({ routine }: { routine: RoutineItemVM }) {
               {routine.title}
               {completing && <StrikeSweep />}
             </span>
-            {routine.scheduleLabel && (
-              <span className="hidden lg:inline">
-                <Chip>{routine.scheduleLabel}</Chip>
-              </span>
-            )}
-            {routine.durationLabel && (
-              <span className="hidden lg:inline">
-                <Chip>◷ {routine.durationLabel}</Chip>
-              </span>
+            {(routine.scheduleLabel || routine.durationLabel) && (
+              <div className="hidden flex-col items-end gap-1 lg:flex">
+                {routine.scheduleLabel && <Chip>{routine.scheduleLabel}</Chip>}
+                {routine.durationLabel && <Chip>◷ {routine.durationLabel}</Chip>}
+              </div>
             )}
           </div>
           {routine.isTicked && !routine.scheduleLabel && (

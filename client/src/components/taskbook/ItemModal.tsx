@@ -277,7 +277,7 @@ function TaskForm({
         </div>
         <div className="min-w-35 flex-1">
           <label className={labelTextClass}>Duration</label>
-          <DurationField className={inputClass} id="task-duration" />
+          <DurationField className={inputClass} />
         </div>
       </div>
       {dueDate && (
@@ -400,7 +400,7 @@ function ProjectForm({
       </div>
       <div>
         <label className={labelTextClass}>Duration</label>
-        <DurationField className={inputClass} id="project-duration" defaultValue={item?.durationLabel ?? ""} />
+        <DurationField className={inputClass} defaultValue={item?.durationLabel ?? ""} />
       </div>
       <Actions submitLabel={item ? "Save" : "Add project"} />
     </form>
@@ -460,7 +460,7 @@ function RoutineForm({
       </div>
       <div>
         <label className={labelTextClass}>Duration</label>
-        <DurationField className={inputClass} id="routine-duration" defaultValue={item?.durationLabel ?? ""} />
+        <DurationField className={inputClass} defaultValue={item?.durationLabel ?? ""} />
       </div>
       <div>
         <label className={labelTextClass}>Repeat every</label>
@@ -739,7 +739,7 @@ function HabitForm({
       )}
       <div>
         <label className={labelTextClass}>Duration</label>
-        <DurationField className={inputClass} id="habit-duration" defaultValue={item?.durationLabel ?? ""} />
+        <DurationField className={inputClass} defaultValue={item?.durationLabel ?? ""} />
       </div>
       <Actions submitLabel={item ? "Save" : "Add habit"} />
     </form>

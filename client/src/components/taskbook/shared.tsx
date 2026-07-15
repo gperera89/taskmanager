@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { DURATION_OPTIONS } from "@/lib/shared";
 import { ICON_PATH } from "./ModeToggle";
 
@@ -46,35 +46,61 @@ export function AutoGrowTextarea({
   );
 }
 
-// A free-text duration box backed by a datalist of preset suggestions (5 min … 1.5 hours). The
-// raw text is submitted under name="duration" and parsed into whole minutes by
-// parseDurationInput (server + client), so custom values like "20 min" work too.
+// A free-text duration box with a styled dropdown of preset suggestions (5 min … 1.5 hours) —
+// a native <datalist> can't be themed, so this is a custom dropdown that matches the app's
+// look. The raw text is submitted under name="duration" and parsed into whole minutes by
+// parseDurationInput (server + client), so custom values like "20 min" work too. The options
+// list renders in normal flow (not absolutely positioned) so the modal's scroll container
+// never clips it.
 export function DurationField({
   className,
   defaultValue,
-  id,
 }: {
   className?: string;
   defaultValue?: string;
-  id?: string;
 }) {
-  const listId = `${id ?? "duration"}-presets`;
+  const [value, setValue] = useState(defaultValue ?? "");
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(e: PointerEvent) {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [open]);
+
   return (
-    <>
+    <div ref={wrapRef} className="relative">
       <input
         name="duration"
-        list={listId}
-        defaultValue={defaultValue}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onFocus={() => setOpen(true)}
         placeholder="e.g. 30 min, 1.5 hours"
         autoComplete="off"
         className={className}
       />
-      <datalist id={listId}>
-        {DURATION_OPTIONS.map((o) => (
-          <option key={o} value={o} />
-        ))}
-      </datalist>
-    </>
+      {open && (
+        <div className="mt-1 flex flex-col overflow-hidden rounded-lg border border-(--border-strong) bg-(--card) shadow-[0_8px_24px_rgba(70,55,30,.14)]">
+          {DURATION_OPTIONS.map((o) => (
+            <button
+              key={o}
+              type="button"
+              onClick={() => {
+                setValue(o);
+                setOpen(false);
+              }}
+              className="cursor-pointer px-3 py-1.5 text-left text-sm text-(--ink) hover:bg-[rgba(85,118,148,.08)]"
+            >
+              {o}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

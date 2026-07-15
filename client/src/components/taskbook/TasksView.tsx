@@ -452,11 +452,10 @@ export function TaskRow({
             {durationOpen && (
               <div
                 ref={durationPanelRef}
-                className="absolute left-0 top-7 z-20 w-44 rounded-lg border border-(--accent-text) bg-(--card) p-2.5 shadow-[0_8px_24px_rgba(70,55,30,.18)]"
+                className="absolute left-0 top-7 z-20 w-52 rounded-lg border border-(--accent-text) bg-(--card) p-2.5 shadow-[0_8px_24px_rgba(70,55,30,.18)]"
               >
                 <input
                   autoFocus
-                  list={`dur-${task.id}`}
                   value={durationDraft}
                   onChange={(e) => setDurationDraft(e.target.value)}
                   onKeyDown={(e) => {
@@ -472,13 +471,25 @@ export function TaskRow({
                   }}
                   placeholder="e.g. 30 min, 1.5 hours"
                   autoComplete="off"
-                  className="w-full rounded-md border border-(--border-strong) bg-(--card) px-2 py-1 text-xs text-(--ink) outline-none"
+                  className="w-full rounded-md border border-(--border-strong) bg-(--card) px-2 py-1 text-xs text-(--ink) outline-none focus:border-(--accent-text)"
                 />
-                <datalist id={`dur-${task.id}`}>
+                <div className="mt-1.5 flex flex-wrap gap-1">
                   {DURATION_OPTIONS.map((o) => (
-                    <option key={o} value={o} />
+                    <button
+                      key={o}
+                      type="button"
+                      onClick={() => {
+                        const minutes = parseDurationInput(o);
+                        setDurationDraft(o);
+                        if (minutes !== task.durationMinutes) actions.setTaskDuration(task.id, minutes);
+                        setDurationOpen(false);
+                      }}
+                      className="cursor-pointer rounded-full border border-(--border-strong) px-2 py-0.5 text-[11px] text-(--ink-muted) hover:bg-[rgba(85,118,148,.08)]"
+                    >
+                      {o}
+                    </button>
                   ))}
-                </datalist>
+                </div>
                 {task.durationLabel && (
                   <button
                     type="button"
