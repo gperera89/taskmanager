@@ -1,6 +1,9 @@
 import {
+  getActiveSuggestions,
+  getAiNotes,
   getAppSettings,
   getCategories,
+  getDayPlanBlocks,
   getDismissedCalendarEventIds,
   getHabitCompletions,
   getHabits,
@@ -37,6 +40,18 @@ export default async function Home() {
     console.error("[page] failed to load dismissed events:", err);
     return [] as string[];
   });
+  const dayPlanPromise = getDayPlanBlocks().catch((err) => {
+    console.error("[page] failed to load day plan blocks:", err);
+    return [] as Awaited<ReturnType<typeof getDayPlanBlocks>>;
+  });
+  const suggestionsPromise = getActiveSuggestions().catch((err) => {
+    console.error("[page] failed to load AI suggestions:", err);
+    return [] as Awaited<ReturnType<typeof getActiveSuggestions>>;
+  });
+  const aiNotesPromise = getAiNotes().catch((err) => {
+    console.error("[page] failed to load AI notes:", err);
+    return [] as Awaited<ReturnType<typeof getAiNotes>>;
+  });
 
   let tasks: Awaited<ReturnType<typeof getTasks>>;
   let projects: Awaited<ReturnType<typeof getProjects>>;
@@ -49,7 +64,7 @@ export default async function Home() {
   } catch (err) {
     console.error("[page] failed to load tasks/projects/habits/routines/categories:", err);
     // Settle the other in-flight promises so their rejections (if any) don't go unhandled.
-    await Promise.allSettled([calendarPromise, capturesPromise, settingsPromise, dismissedPromise]);
+    await Promise.allSettled([calendarPromise, capturesPromise, settingsPromise, dismissedPromise, dayPlanPromise, suggestionsPromise, aiNotesPromise]);
     return (
       <div className="flex flex-1 items-center justify-center bg-(--surface)">
         <p className="font-serif text-(--ink-muted)">Could not reach the database. Check DATABASE_URL in .env.local.</p>
@@ -61,6 +76,9 @@ export default async function Home() {
   const captures = await capturesPromise;
   const { timeZone, lastCronAt } = await settingsPromise;
   const dismissedEventIds = await dismissedPromise;
+  const dayPlanBlocks = await dayPlanPromise;
+  const suggestions = await suggestionsPromise;
+  const aiNotes = await aiNotesPromise;
 
   const now = new Date();
   const nowMs = now.getTime();
@@ -79,6 +97,9 @@ export default async function Home() {
     captures,
     timeZone,
     dismissedEventIds,
+    dayPlanBlocks,
+    suggestions,
+    aiNotes,
   };
 
   const serverData: ServerCalendarData = {

@@ -2,8 +2,16 @@
 
 import { auth } from "@/auth";
 import {
+  acceptSuggestion as acceptSuggestionApi,
+  type CapturedKind,
   type CategoryScope,
   completeHabit,
+  createAiNote,
+  createDayPlanBlock,
+  deleteAiNote,
+  deleteDayPlanBlock,
+  respondToSuggestion,
+  updateDayPlanBlock as updateDayPlanBlockApi,
   completeRoutineCluster,
   createCategory,
   createHabit,
@@ -207,6 +215,53 @@ export async function reorderTaskGroup(formData: FormData) {
 export async function snoozeTask(id: string, days: number) {
   await requireSession();
   await snoozeTaskApi(id, Math.min(Math.max(Math.round(days) || 1, 1), 30));
+}
+
+// --- My Day plan blocks ---
+
+const CAPTURED_KINDS: CapturedKind[] = ["TASK", "PROJECT", "ROUTINE", "HABIT"];
+
+function parseTimeValue(raw: string): string | null {
+  return /^\d{2}:\d{2}$/.test(raw) ? raw : null;
+}
+
+export async function addDayPlanBlock(formData: FormData): Promise<string | undefined> {
+  await requireSession();
+
+  const date = String(formData.get("date") ?? "").trim();
+  const entityType = String(formData.get("entityType") ?? "") as CapturedKind;
+  const entityId = String(formData.get("entityId") ?? "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !CAPTURED_KINDS.includes(entityType) || !entityId) return;
+
+  const sortOrder = Number(formData.get("sortOrder") ?? "");
+  const block = await createDayPlanBlock({
+    date,
+    entityType,
+    entityId,
+    startTime: parseTimeValue(String(formData.get("startTime") ?? "").trim()),
+    durationMinutes: parseDurationInput(String(formData.get("duration") ?? "")),
+    sortOrder: Number.isFinite(sortOrder) && sortOrder !== 0 ? sortOrder : null,
+  });
+  return block.id;
+}
+
+// Whole-record update: covers move-to-time (pin), unpin, edit-duration and push-to-another-day.
+export async function editDayPlanBlock(id: string, formData: FormData) {
+  await requireSession();
+
+  const date = String(formData.get("date") ?? "").trim();
+  const sortOrder = Number(formData.get("sortOrder") ?? "");
+  await updateDayPlanBlockApi(id, {
+    date: /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : undefined,
+    startTime: parseTimeValue(String(formData.get("startTime") ?? "").trim()),
+    durationMinutes: parseDurationInput(String(formData.get("duration") ?? "")),
+    sortOrder: Number.isFinite(sortOrder) && sortOrder !== 0 ? sortOrder : null,
+  });
+}
+
+export async function removeDayPlanBlock(id: string) {
+  await requireSession();
+  await deleteDayPlanBlock(id);
 }
 
 export async function addProject(formData: FormData): Promise<string | undefined> {
@@ -445,6 +500,50 @@ export async function dismissCapture(id: string) {
 export async function updateTimeZone(timeZone: string) {
   await requireSession();
   await updateTimeZoneApi(timeZone);
+}
+
+// --- AI planner suggestions + notes (My Day) ---
+
+// Regenerate suggestions on demand (the ↻ button). Called directly (not via the outbox) — it
+// needs a connection anyway, and the caller refreshes with the result.
+export async function refreshSuggestions(): Promise<{ created: number; skipped: number }> {
+  await requireSession();
+  const { generateSuggestions } = await import("@/lib/suggestions");
+  return generateSuggestions();
+}
+
+export async function acceptSuggestion(id: string, formData: FormData): Promise<string | undefined> {
+  await requireSession();
+  const category = String(formData.get("category") ?? "").trim();
+  const dueDate = String(formData.get("dueDate") ?? "").trim();
+  if (!category) return;
+  const task = await acceptSuggestionApi(id, { category, dueDate: dueDate || null });
+  return task.id;
+}
+
+export async function snoozeSuggestion(id: string, formData: FormData) {
+  await requireSession();
+  const until = String(formData.get("snoozedUntil") ?? "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(until)) return;
+  await respondToSuggestion(id, "SNOOZED", until);
+}
+
+export async function dismissSuggestion(id: string) {
+  await requireSession();
+  await respondToSuggestion(id, "DISMISSED");
+}
+
+export async function addAiNote(formData: FormData): Promise<string | undefined> {
+  await requireSession();
+  const content = String(formData.get("content") ?? "").trim();
+  if (!content) return;
+  const note = await createAiNote(content);
+  return note.id;
+}
+
+export async function removeAiNote(id: string) {
+  await requireSession();
+  await deleteAiNote(id);
 }
 
 export async function dismissCalendarEvent(eventId: string) {

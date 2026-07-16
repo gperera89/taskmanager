@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AreaKey, CapturedKind, ItemKind, ModalState } from "./types";
-import { deriveCalendarView } from "@/lib/derive";
+import { deriveCalendarView, deriveMyDay } from "@/lib/derive";
+import { zonedYMD } from "@/lib/taskbookDates";
 import { useTaskbook } from "./store";
 import { ModalContext } from "./ModalContext";
 import Header from "./Header";
@@ -216,6 +217,23 @@ export default function TaskbookApp() {
   }
 
   const dayDetail = selectedDay != null ? calendarView.dayDetails[selectedDay] : undefined;
+  // The My Day timeline for the selected day — re-derived on every optimistic edit / clock tick,
+  // which is what makes completions/drags/pushes reflow the schedule instantly.
+  const myDay = useMemo(
+    () => (selectedDay != null ? deriveMyDay(raw, calendarEvents, nowMs, viewYear, viewMonth0, selectedDay, mode) : undefined),
+    [raw, calendarEvents, nowMs, viewYear, viewMonth0, selectedDay, mode]
+  );
+
+  // "My Day" header shortcut: jump straight to today's full day view from anywhere (including
+  // a different viewed month).
+  function openMyDay() {
+    const t = zonedYMD(new Date(nowMs), raw.timeZone);
+    setViewYear(t.year);
+    setViewMonth0(t.month0);
+    setSelectedDay(t.day);
+    setDayOpen(true);
+    setArea("day");
+  }
   // Look the heatmap habit up live so optimistic completion toggles re-render its grid.
   const heatmapHabit = heatmapHabitId != null ? data.habits.find((h) => h.id === heatmapHabitId) : undefined;
 
@@ -291,6 +309,7 @@ export default function TaskbookApp() {
           onQueryChange={setQuery}
           pendingCaptures={data.pendingCaptures}
           onEditCapture={openEditForCapture}
+          onOpenMyDay={openMyDay}
           onOpenSettings={() => setSettingsOpen(true)}
           onOpenLogbook={() => setLogbookOpen(true)}
           onOpenReview={() => setReviewOpen(true)}
@@ -314,9 +333,9 @@ export default function TaskbookApp() {
                 </section>
               ))}
             </div>
-            {area === "day" && dayDetail && (
+            {area === "day" && dayDetail && myDay && (
               <div className="absolute inset-0 z-10 overflow-y-auto bg-(--surface) px-5 py-6 pb-10">
-                <DayView detail={dayDetail} />
+                <DayView detail={dayDetail} myDay={myDay} />
               </div>
             )}
           </div>
@@ -324,8 +343,8 @@ export default function TaskbookApp() {
           <div className="flex min-h-0 flex-1">
             <div className="flex-1 overflow-y-auto px-11 py-8 pb-10">
               {viewFor(area)}
-              {area === "day" && dayDetail && (
-                <DayView detail={dayDetail} />
+              {area === "day" && dayDetail && myDay && (
+                <DayView detail={dayDetail} myDay={myDay} />
               )}
             </div>
 

@@ -210,6 +210,71 @@ model HabitCompletion {
   @@index([habitId, date])
 }
 
+// A per-day placement of an existing entity on the My Day timeline. Loose reference — entityId
+// spans four tables depending on entityType (no FK), so the deriver skips blocks whose entity no
+// longer exists and each entity's delete path clears its blocks. `date` uses the same
+// UTC-midnight-of-the-calendar-date encoding as due dates. startTime is a face-value "HH:MM"
+// (same convention as Routine.reminderTime): set = pinned at that time, null = floats (auto-
+// scheduled by the client-side packer, or sits in the "needs a time" tray).
+model DayPlanBlock {
+  id              String       @id @default(uuid())
+  date            DateTime
+  entityType      CapturedKind
+  entityId        String
+  startTime       String?
+  // Overrides the entity's own durationMinutes for this day only (null = inherit).
+  durationMinutes Int?
+  // Manual priority among floating blocks (fractional indexing, like Task.sortOrder).
+  sortOrder       Float?
+  createdAt       DateTime     @default(now())
+
+  // One block per entity per day — "do today" and offline replays stay idempotent (upsert).
+  @@unique([date, entityType, entityId])
+  @@index([date])
+}
+
+// AI planner suggestions (My Day). Rows are never deleted — a responded row IS the feedback-log
+// entry (kind/title/eventTitle denormalized like CompletionLog), and its dedupeKey permanently
+// suppresses regeneration of the same idea (the DismissedCalendarEvent pattern).
+enum SuggestionStatus {
+  PENDING
+  ACCEPTED
+  SNOOZED
+  DISMISSED
+}
+
+model AiSuggestion {
+  id            String           @id @default(uuid())
+  // "<kind>:<CalendarEvent.id>" for event-derived ideas, "<kind>:<date>:<slug>" for novel ones.
+  dedupeKey     String           @unique
+  // lesson-prep | interview-review | report | birthday | meeting-notes | novel | ...
+  kind          String
+  title         String
+  description   String?
+  // The calendar event that prompted this (CalendarEvent.id + denormalized title), if any.
+  eventId       String?
+  eventTitle    String?
+  // Proposed due date for the created task — UTC-midnight calendar date encoding.
+  suggestedDate DateTime?
+  status        SuggestionStatus @default(PENDING)
+  // SNOOZED rows flip back to PENDING when this date arrives (checked during generation).
+  snoozedUntil  DateTime?
+  // Loose ref to the Task created on accept (display only).
+  createdTaskId String?
+  createdAt     DateTime         @default(now())
+  respondedAt   DateTime?
+
+  @@index([status, createdAt])
+}
+
+// Free-text standing instructions for the AI planner ("notes for future consideration") —
+// included verbatim in every generation prompt. Seeded with the user's workflow rules.
+model AiNote {
+  id        String   @id @default(uuid())
+  content   String
+  createdAt DateTime @default(now())
+}
+
 enum RoutineFrequency {
   DAILY
   WEEKLY

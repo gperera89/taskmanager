@@ -134,6 +134,80 @@ export type DayDetailVM = {
   dismissedEvents: { id: string; title: string }[];
 };
 
+// --- My Day (the timeline day planner rendered by DayView) ---
+
+export type MyDayKind = "task" | "project" | "routine" | "habit" | "event" | "template";
+
+// One positioned block on the timeline. `startMinutes` is wall-clock minutes since midnight in
+// the configured timezone. `pinned` = the user fixed its time (or it's inherent: events, routine
+// reminder times, a task's own due time); unpinned blocks were placed by the auto-scheduler and
+// reflow as the day progresses.
+export type MyDayBlockVM = {
+  key: string; // "plan-<id>" | "task-<id>" | "routine-<id>" | "event-<id>" | "template-<slug>"
+  kind: MyDayKind;
+  entityId: string;
+  planBlockId: string | null; // set when a DayPlanBlock row backs this block
+  title: string;
+  description: string | null;
+  startMinutes: number;
+  durationMinutes: number; // layout duration — falls back to 30 when unset
+  hasExplicitDuration: boolean;
+  isCompleted: boolean;
+  pinned: boolean;
+  source: string | null; // ICS source label for events, null otherwise
+  timeLabel: string; // e.g. "9:30 – 10:00 AM"
+  category: string | null; // tasks only — drives the work/home tint
+  projectName: string | null;
+  // Overlap layout: this block renders in lane `col` of `cols` parallel lanes.
+  col: number;
+  cols: number;
+};
+
+// An item due/scheduled for the day but not yet placeable on the timeline (no duration set),
+// plus scheduler overflow ("won't fit today").
+export type MyDayTrayItemVM = {
+  key: string;
+  kind: MyDayKind;
+  entityId: string;
+  planBlockId: string | null;
+  title: string;
+  durationMinutes: number | null;
+  isCompleted: boolean;
+  category: string | null;
+  projectName: string | null;
+  reason: "needs-duration" | "no-fit" | "unscheduled";
+};
+
+// A future-dated task that could be pulled forward and done on the viewed day.
+export type MyDayLookaheadVM = {
+  taskId: string;
+  title: string;
+  dueLabel: string;
+  daysAway: number;
+  projectName: string | null;
+  durationMinutes: number | null;
+};
+
+// A day-template zone band rendered behind the timeline (e.g. Work 7:30–16:30).
+export type MyDayZoneVM = {
+  key: string;
+  label: string;
+  startMinutes: number;
+  endMinutes: number;
+};
+
+export type MyDayVM = {
+  dateKey: string; // "YYYY-MM-DD" of the viewed day
+  isToday: boolean;
+  startHour: number; // base 5, stretched down to fit earlier outliers
+  endHour: number; // base 21, stretched up to fit later outliers
+  zones: MyDayZoneVM[]; // wellbeing template bands (empty on off-days)
+  allDayEvents: { id: string; title: string; source: string }[];
+  timeline: MyDayBlockVM[];
+  tray: MyDayTrayItemVM[];
+  lookahead: MyDayLookaheadVM[];
+};
+
 export type UpcomingItemVM = {
   key: string;
   a: string;

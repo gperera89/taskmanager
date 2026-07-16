@@ -17,7 +17,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { HabitCompletion, HabitScheduleType, Routine, RoutineFrequency, RoutineMonthlyMode } from "@prisma/client";
+import type { AiNote, CapturedKind, DayPlanBlock, HabitCompletion, HabitScheduleType, Routine, RoutineFrequency, RoutineMonthlyMode } from "@prisma/client";
 import * as serverActions from "@/app/actions";
 import { deriveEntities, type RawState, type RawTask } from "@/lib/derive";
 import {
@@ -119,6 +119,14 @@ export type RoutineInput = {
   monthlyWeekday: number | null;
 };
 
+export type DayPlanBlockInput = {
+  date: string; // "YYYY-MM-DD"
+  entityType: CapturedKind;
+  entityId: string;
+  startTime?: string | null; // "HH:MM" — set = pinned at that time
+  durationMinutes?: number | null;
+};
+
 export type Toast = {
   id: number;
   message: string;
@@ -170,6 +178,16 @@ export type TaskbookActions = {
   renameCategory: (id: string, name: string) => void;
   setCategoryScope: (id: string, scope: CategoryScopeOption) => void;
   removeCategory: (id: string) => void;
+  // My Day plan blocks
+  addDayPlanBlock: (input: DayPlanBlockInput) => void;
+  updateDayPlanBlock: (id: string, input: Partial<Omit<DayPlanBlockInput, "entityType" | "entityId">>) => void;
+  removeDayPlanBlock: (id: string) => void;
+  // AI planner suggestions + notes
+  acceptSuggestion: (id: string, category: string, dueDate: string | null) => void;
+  snoozeSuggestion: (id: string, untilDate: string) => void;
+  dismissSuggestion: (id: string) => void;
+  addAiNote: (content: string) => void;
+  removeAiNote: (id: string) => void;
   // Voice captures
   dismissCapture: (id: string) => void;
   // Settings / calendar
@@ -387,6 +405,20 @@ const REGISTRY: Record<string, RegistryEntry> = {
   renameCategory: { fn: serverActions.renameCategory },
   setCategoryScope: { fn: serverActions.setCategoryScope },
   removeCategory: { fn: serverActions.removeCategory },
+  addDayPlanBlock: {
+    fn: serverActions.addDayPlanBlock,
+    swap: (r, temp, real) => ({ ...r, dayPlanBlocks: r.dayPlanBlocks.map((b) => (b.id === temp ? { ...b, id: real } : b)) }),
+  },
+  updateDayPlanBlock: { fn: serverActions.editDayPlanBlock },
+  removeDayPlanBlock: { fn: serverActions.removeDayPlanBlock },
+  acceptSuggestion: { fn: serverActions.acceptSuggestion, swap: swapTaskId },
+  snoozeSuggestion: { fn: serverActions.snoozeSuggestion },
+  dismissSuggestion: { fn: serverActions.dismissSuggestion },
+  addAiNote: {
+    fn: serverActions.addAiNote,
+    swap: (r, temp, real) => ({ ...r, aiNotes: r.aiNotes.map((n) => (n.id === temp ? { ...n, id: real } : n)) }),
+  },
+  removeAiNote: { fn: serverActions.removeAiNote },
   dismissCapture: { fn: serverActions.dismissCapture },
   setTimeZone: { fn: serverActions.updateTimeZone },
   dismissEvent: { fn: serverActions.dismissCalendarEvent },
@@ -626,7 +658,14 @@ export function StoreProvider({
         setPendingOps(queued);
         const offlineNow = typeof navigator !== "undefined" && !navigator.onLine;
         if (snapshot && (snapshot.savedAt > nowMs || queued > 0 || offlineNow)) {
-          setRaw(snapshot.raw);
+          // Backfill fields added after the snapshot was written (schema drift across deploys) —
+          // a stale snapshot without them would crash the derivers on `.filter`/`.map`.
+          setRaw({
+            ...snapshot.raw,
+            dayPlanBlocks: snapshot.raw.dayPlanBlocks ?? [],
+            suggestions: snapshot.raw.suggestions ?? [],
+            aiNotes: snapshot.raw.aiNotes ?? [],
+          });
           if (snapshot.calendarEvents?.length) setEvents(snapshot.calendarEvents);
         }
         if (offlineNow) setOffline(true);
@@ -1300,6 +1339,132 @@ export function StoreProvider({
         );
       },
       removeCategory: (id) => mutate((r) => ({ ...r, categories: r.categories.filter((c) => c.id !== id) }), "removeCategory", [id]),
+
+      // --- My Day plan blocks ---
+      addDayPlanBlock: (input) => {
+        const id = tempId();
+        const row: DayPlanBlock = {
+          id,
+          date: combineDueDateTime(input.date),
+          entityType: input.entityType,
+          entityId: input.entityId,
+          startTime: input.startTime ?? null,
+          durationMinutes: input.durationMinutes ?? null,
+          sortOrder: null,
+          createdAt: new Date(),
+        };
+        const fd = new FormData();
+        fd.set("date", input.date);
+        fd.set("entityType", input.entityType);
+        fd.set("entityId", input.entityId);
+        if (row.startTime) fd.set("startTime", row.startTime);
+        if (row.durationMinutes) fd.set("duration", String(row.durationMinutes));
+        create(
+          // The server upserts on (date, entityType, entityId) — mirror that locally so a
+          // repeated "do today"/re-place updates the existing row instead of duplicating it.
+          (r) => {
+            const existing = r.dayPlanBlocks.find(
+              (b) =>
+                b.entityType === row.entityType &&
+                b.entityId === row.entityId &&
+                new Date(b.date).getTime() === row.date.getTime()
+            );
+            if (existing) {
+              return {
+                ...r,
+                dayPlanBlocks: r.dayPlanBlocks.map((b) =>
+                  b.id === existing.id
+                    ? { ...b, startTime: row.startTime, durationMinutes: row.durationMinutes ?? b.durationMinutes }
+                    : b
+                ),
+              };
+            }
+            return { ...r, dayPlanBlocks: [...r.dayPlanBlocks, row] };
+          },
+          "addDayPlanBlock",
+          [fd],
+          id
+        );
+      },
+      updateDayPlanBlock: (id, input) => {
+        // The server action is whole-record, so merge the patch over the current row and send
+        // every field — an omitted startTime/duration would otherwise be cleared server-side.
+        const current = rawRef.current.dayPlanBlocks.find((b) => b.id === id);
+        if (!current) return;
+        const next: DayPlanBlock = {
+          ...current,
+          date: input.date !== undefined ? combineDueDateTime(input.date) : new Date(current.date),
+          startTime: input.startTime !== undefined ? input.startTime : current.startTime,
+          durationMinutes: input.durationMinutes !== undefined ? input.durationMinutes : current.durationMinutes,
+        };
+        const fd = new FormData();
+        fd.set("date", new Date(next.date).toISOString().slice(0, 10));
+        if (next.startTime) fd.set("startTime", next.startTime);
+        if (next.durationMinutes) fd.set("duration", String(next.durationMinutes));
+        if (next.sortOrder != null) fd.set("sortOrder", String(next.sortOrder));
+        mutate(
+          (r) => ({ ...r, dayPlanBlocks: r.dayPlanBlocks.map((b) => (b.id === id ? next : b)) }),
+          "updateDayPlanBlock",
+          [id, fd]
+        );
+      },
+      removeDayPlanBlock: (id) =>
+        mutate((r) => ({ ...r, dayPlanBlocks: r.dayPlanBlocks.filter((b) => b.id !== id) }), "removeDayPlanBlock", [id]),
+
+      // --- AI planner suggestions + notes ---
+      acceptSuggestion: (id, category, dueDate) => {
+        const suggestion = rawRef.current.suggestions.find((s) => s.id === id);
+        if (!suggestion) return;
+        const taskId = tempId();
+        const row: RawTask = {
+          id: taskId,
+          title: suggestion.title,
+          description: suggestion.description,
+          category,
+          dueDate: dueDate ? combineDueDateTime(dueDate) : suggestion.suggestedDate ? new Date(suggestion.suggestedDate) : null,
+          isCompleted: false,
+          completedAt: null,
+          createdAt: new Date(),
+          notifiedAt: null,
+          projectId: null,
+          parentId: null,
+          section: null,
+          sortOrder: null,
+          reminderLeadMinutes: null,
+          durationMinutes: null,
+          subtasks: [],
+          ...NO_REPEAT,
+        };
+        const fd = new FormData();
+        fd.set("category", category);
+        if (dueDate) fd.set("dueDate", dueDate);
+        create(
+          (r) => ({
+            ...r,
+            suggestions: r.suggestions.filter((s) => s.id !== id),
+            tasks: [...r.tasks, row],
+          }),
+          "acceptSuggestion",
+          [id, fd],
+          taskId
+        );
+      },
+      snoozeSuggestion: (id, untilDate) => {
+        const fd = new FormData();
+        fd.set("snoozedUntil", untilDate);
+        mutate((r) => ({ ...r, suggestions: r.suggestions.filter((s) => s.id !== id) }), "snoozeSuggestion", [id, fd]);
+      },
+      dismissSuggestion: (id) =>
+        mutate((r) => ({ ...r, suggestions: r.suggestions.filter((s) => s.id !== id) }), "dismissSuggestion", [id]),
+      addAiNote: (content) => {
+        const id = tempId();
+        const row: AiNote = { id, content: content.trim(), createdAt: new Date() };
+        const fd = new FormData();
+        fd.set("content", row.content);
+        create((r) => ({ ...r, aiNotes: [...r.aiNotes, row] }), "addAiNote", [fd], id);
+      },
+      removeAiNote: (id) =>
+        mutate((r) => ({ ...r, aiNotes: r.aiNotes.filter((n) => n.id !== id) }), "removeAiNote", [id]),
 
       // --- Voice captures ---
       dismissCapture: (id) => mutate((r) => ({ ...r, captures: r.captures.filter((c) => c.id !== id) }), "dismissCapture", [id]),

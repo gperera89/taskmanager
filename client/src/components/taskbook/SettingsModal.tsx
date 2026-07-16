@@ -92,7 +92,58 @@ export default function SettingsModal({
           <NotificationHealth />
           <NotificationSetup />
         </div>
+
+        <div className="mt-4 flex flex-col gap-1.5">
+          <label className="mb-1 block text-[11px] uppercase tracking-[0.14em] text-(--ink-muted)">AI planner notes</label>
+          <p className="mb-1 text-xs text-(--ink-muted)">
+            Standing instructions the AI reads when suggesting tasks from your calendar.
+          </p>
+          <AiNotesManager />
+        </div>
       </div>
+    </div>
+  );
+}
+
+function AiNotesManager() {
+  const { raw, actions } = useTaskbook();
+  const [draft, setDraft] = useState("");
+
+  return (
+    <div className="flex max-h-52 flex-col gap-1.5 overflow-y-auto">
+      {raw.aiNotes.map((n) => (
+        <div key={n.id} className="group flex items-start gap-2 rounded-lg border border-(--border-faint) p-2 text-[12.5px] text-(--ink)">
+          <span className="min-w-0 flex-1">{n.content}</span>
+          <button
+            type="button"
+            onClick={() => actions.removeAiNote(n.id)}
+            aria-label="Delete note"
+            className="cursor-pointer text-[12px] text-(--ink-faint) opacity-0 transition-opacity hover:text-(--danger) group-hover:opacity-100"
+          >
+            Delete
+          </button>
+        </div>
+      ))}
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (draft.trim()) {
+            actions.addAiNote(draft);
+            setDraft("");
+          }
+        }}
+        className="flex items-center gap-2"
+      >
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="Add an instruction…"
+          className="flex-1 rounded-md border border-(--border-strong) bg-transparent px-2.5 py-1.5 text-[12.5px] text-(--ink) outline-none placeholder:text-(--ink-ghost)"
+        />
+        <button type="submit" className="cursor-pointer rounded-md bg-(--accent) px-2.5 py-1 text-xs text-(--on-accent)">
+          Add
+        </button>
+      </form>
     </div>
   );
 }

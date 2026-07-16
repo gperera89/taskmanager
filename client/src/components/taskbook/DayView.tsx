@@ -1,12 +1,23 @@
 "use client";
 
 import { useTaskbook } from "./store";
-import { CalendarEventMarker, CalendarTaskItem, FitText, labelClass } from "./shared";
-import type { DayDetailVM } from "./types";
+import { FitText } from "./shared";
+import MyDayPlanner from "./MyDayPlanner";
+import type { DayDetailVM, MyDayVM } from "./types";
 
-export default function DayView({ detail }: { detail: DayDetailVM }) {
+// The full-day view ("My Day"): heading + the timeline planner. The old flat lists of
+// tasks/projects/events were replaced by MyDayPlanner, which merges everything due or
+// scheduled that day into one editable 5am–9pm timeline plus tray and look-ahead sections.
+export default function DayView({ detail, myDay }: { detail: DayDetailVM; myDay: MyDayVM }) {
   const { actions } = useTaskbook();
-  const isEmpty = detail.tasks.length === 0 && detail.projects.length === 0 && detail.events.length === 0;
+  // Today always renders the full planner (the suggestions section and template anchors live
+  // there); other days collapse to the empty note when truly blank.
+  const isEmpty =
+    !myDay.isToday &&
+    myDay.timeline.length === 0 &&
+    myDay.tray.length === 0 &&
+    myDay.allDayEvents.length === 0 &&
+    myDay.lookahead.length === 0;
 
   return (
     <div>
@@ -26,59 +37,11 @@ export default function DayView({ detail }: { detail: DayDetailVM }) {
       </div>
       <div className="my-5 mb-1 h-px max-w-[680px] bg-(--rule)" />
 
-      <div className="max-w-[680px]">
-        {detail.tasks.length > 0 && (
-          <>
-            <div className={labelClass} style={{ margin: "22px 0 4px" }}>
-              Tasks due
-            </div>
-            {detail.tasks.map((t) => (
-              <div key={t.id} className="flex gap-3.5 border-b border-(--border-soft) py-3.5">
-                <CalendarTaskItem
-                  title={t.title}
-                  isCompleted={t.isCompleted}
-                  onToggle={() => actions.toggleTask(t.id, t.isCompleted)}
-                  size={22}
-                  textClassName="text-[17px]"
-                />
-              </div>
-            ))}
-          </>
-        )}
-
-        {detail.projects.length > 0 && (
-          <>
-            <div className={labelClass} style={{ margin: "24px 0 4px" }}>
-              Due from projects
-            </div>
-            {detail.projects.map((p) => (
-              <div key={p.id} className="flex gap-3.5 border-b border-(--border-soft) py-3.5">
-                <span className="mt-0.5 h-[22px] w-[22px] flex-none rounded border border-(--ink-faint)" />
-                <div className="flex-1">
-                  <div className="text-[17px] text-(--ink)">{p.name}</div>
-                </div>
-              </div>
-            ))}
-          </>
-        )}
-
-        {detail.events.length > 0 && (
-          <>
-            <div className={labelClass} style={{ margin: "24px 0 4px" }}>
-              From your calendars
-            </div>
-            {detail.events.map((e) => (
-              <div key={e.id} className="flex items-center gap-3.5 border-b border-(--border-soft) py-3">
-                <CalendarEventMarker source={e.source} title={e.title} onDismiss={() => actions.dismissEvent(e.id)} size={22} />
-                <div className="flex-1 text-[17px] text-(--ink)">{e.title}</div>
-                <span className="text-[12.5px] italic text-(--ink-soft)">{e.metaLabel}</span>
-              </div>
-            ))}
-          </>
-        )}
-
-        {isEmpty && <div className="py-8 text-[15px] italic text-(--ink-soft)">No events or tasks for this day.</div>}
-      </div>
+      {isEmpty ? (
+        <div className="max-w-[680px] py-8 text-[15px] italic text-(--ink-soft)">No events or tasks for this day.</div>
+      ) : (
+        <MyDayPlanner myDay={myDay} />
+      )}
     </div>
   );
 }

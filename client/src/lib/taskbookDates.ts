@@ -198,6 +198,13 @@ export function zonedDaysUntil(d: Date, now: Date, timeZone: string): number {
   return Math.round((a - b) / 86_400_000);
 }
 
+// A real instant's wall-clock position within its calendar day in `timeZone`, as minutes since
+// midnight — the My Day timeline's vertical coordinate for calendar events and the "now" line.
+export function zonedMinutesOfDay(at: Date, timeZone: string): number {
+  const z = zonedNow(at.getTime(), timeZone);
+  return z.getUTCHours() * 60 + z.getUTCMinutes();
+}
+
 const EVENT_TIME_FORMAT_CACHE = new Map<string, Intl.DateTimeFormat>();
 function eventTimeFormatter(timeZone: string): Intl.DateTimeFormat {
   let fmt = EVENT_TIME_FORMAT_CACHE.get(timeZone);

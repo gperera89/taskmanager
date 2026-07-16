@@ -188,9 +188,11 @@ export async function snoozeTask(id: string, days: number) {
   });
 }
 
-export function deleteTask(id: string) {
+export async function deleteTask(id: string) {
   // Subtasks cascade-delete with their parent (see schema: parent relation onDelete: Cascade).
-  return notFoundAsError("Task not found", () => prisma.task.delete({ where: { id } }));
+  const task = await notFoundAsError("Task not found", () => prisma.task.delete({ where: { id } }));
+  await deleteDayPlanBlocksFor("TASK", id);
+  return task;
 }
 
 // Completing a repeating task rolls its due date forward to the next occurrence in place
@@ -320,8 +322,10 @@ export async function duplicateProject(id: string, name?: string | null) {
   });
 }
 
-export function deleteProject(id: string) {
-  return notFoundAsError("Project not found", () => prisma.project.delete({ where: { id } }));
+export async function deleteProject(id: string) {
+  const project = await notFoundAsError("Project not found", () => prisma.project.delete({ where: { id } }));
+  await deleteDayPlanBlocksFor("PROJECT", id);
+  return project;
 }
 
 export const getHabits = () => prisma.habit.findMany();
@@ -420,8 +424,10 @@ export function updateHabit(
   return notFoundAsError("Habit not found", () => prisma.habit.update({ where: { id }, data }));
 }
 
-export function deleteHabit(id: string) {
-  return notFoundAsError("Habit not found", () => prisma.habit.delete({ where: { id } }));
+export async function deleteHabit(id: string) {
+  const habit = await notFoundAsError("Habit not found", () => prisma.habit.delete({ where: { id } }));
+  await deleteDayPlanBlocksFor("HABIT", id);
+  return habit;
 }
 
 // Top-level routines only: sub-routines are fetched nested so a cluster (e.g. "Wake Up
@@ -564,8 +570,10 @@ export function isRoutineTickedNow(routine: Pick<Routine, "lastCompletedAt">): b
 
 // Deleting a parent cascades to its sub-routines (see schema's onDelete: Cascade); deleting a
 // child just removes that one row.
-export function deleteRoutine(id: string) {
-  return notFoundAsError("Routine not found", () => prisma.routine.delete({ where: { id } }));
+export async function deleteRoutine(id: string) {
+  const routine = await notFoundAsError("Routine not found", () => prisma.routine.delete({ where: { id } }));
+  await deleteDayPlanBlocksFor("ROUTINE", id);
+  return routine;
 }
 
 const DEFAULT_CATEGORIES = ["Work", "Home"];
@@ -683,6 +691,226 @@ export function dismissCalendarEvent(eventId: string) {
 // harmless no-op instead of throwing on a missing row.
 export function restoreCalendarEvent(eventId: string) {
   return prisma.dismissedCalendarEvent.deleteMany({ where: { eventId } });
+}
+
+// --- My Day plan blocks ---
+
+// Blocks reference their entity loosely (entityId spans four tables), so a block can outlive
+// its entity — the deriver skips unresolved ones, delete paths below clear their own, and the
+// cron sweep bounds the rest.
+
+const DAY_PLAN_LOOKBACK_MS = 7 * MS_PER_DAY;
+
+// Recent past (so yesterday's plan is still inspectable) plus everything scheduled ahead.
+export function getDayPlanBlocks() {
+  return prisma.dayPlanBlock.findMany({
+    where: { date: { gte: new Date(Date.now() - DAY_PLAN_LOOKBACK_MS) } },
+    orderBy: { createdAt: "asc" },
+  });
+}
+
+// Upsert on the (date, entityType, entityId) unique triple: "do today" clicks and replayed
+// offline creates stay idempotent — a re-place updates the time/duration instead of throwing.
+export function createDayPlanBlock(input: {
+  date: string; // "YYYY-MM-DD"
+  entityType: CapturedKind;
+  entityId: string;
+  startTime?: string | null;
+  durationMinutes?: number | null;
+  sortOrder?: number | null;
+}) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) throw new Error("Invalid date");
+  const date = combineDueDateTime(input.date);
+  return prisma.dayPlanBlock.upsert({
+    where: { date_entityType_entityId: { date, entityType: input.entityType, entityId: input.entityId } },
+    update: {
+      startTime: input.startTime ?? null,
+      durationMinutes: input.durationMinutes ?? undefined,
+      sortOrder: input.sortOrder ?? undefined,
+    },
+    create: {
+      date,
+      entityType: input.entityType,
+      entityId: input.entityId,
+      startTime: input.startTime ?? null,
+      durationMinutes: input.durationMinutes ?? null,
+      sortOrder: input.sortOrder ?? null,
+    },
+  });
+}
+
+export function updateDayPlanBlock(
+  id: string,
+  input: Partial<{ date: string; startTime: string | null; durationMinutes: number | null; sortOrder: number | null }>
+) {
+  if (input.date !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(input.date)) throw new Error("Invalid date");
+  return notFoundAsError("Plan block not found", () =>
+    prisma.dayPlanBlock.update({
+      where: { id },
+      data: {
+        date: input.date === undefined ? undefined : combineDueDateTime(input.date),
+        startTime: input.startTime,
+        durationMinutes: input.durationMinutes,
+        sortOrder: input.sortOrder,
+      },
+    })
+  );
+}
+
+export function deleteDayPlanBlock(id: string) {
+  // deleteMany so a double-delete (optimistic retry) is a no-op rather than a thrown P2025.
+  return prisma.dayPlanBlock.deleteMany({ where: { id } });
+}
+
+// Clears every placement of an entity — called from the entity delete paths.
+function deleteDayPlanBlocksFor(entityType: CapturedKind, entityId: string) {
+  return prisma.dayPlanBlock.deleteMany({ where: { entityType, entityId } });
+}
+
+// Retention sweep for stale blocks (older than the fetch window), called from the cron
+// alongside sweepDismissedCalendarEvents — keeps the table bounded without a read-path cost.
+export function sweepDayPlanBlocks() {
+  return prisma.dayPlanBlock.deleteMany({
+    where: { date: { lt: new Date(Date.now() - DAY_PLAN_LOOKBACK_MS) } },
+  });
+}
+
+// --- AI planner suggestions + notes (My Day) ---
+
+// PENDING suggestions surface in My Day; responded rows are kept forever as the feedback log
+// (their dedupeKey also permanently suppresses regeneration — see schema comment).
+export function getActiveSuggestions() {
+  return prisma.aiSuggestion.findMany({
+    where: { status: "PENDING" },
+    orderBy: [{ suggestedDate: "asc" }, { createdAt: "asc" }],
+  });
+}
+
+export async function getAllSuggestionDedupeKeys(): Promise<Set<string>> {
+  const rows = await prisma.aiSuggestion.findMany({ select: { dedupeKey: true } });
+  return new Set(rows.map((r) => r.dedupeKey));
+}
+
+export function createSuggestions(
+  rows: {
+    dedupeKey: string;
+    kind: string;
+    title: string;
+    description?: string | null;
+    eventId?: string | null;
+    eventTitle?: string | null;
+    suggestedDate?: string | null; // "YYYY-MM-DD"
+  }[]
+) {
+  return prisma.aiSuggestion.createMany({
+    data: rows.map((r) => ({
+      dedupeKey: r.dedupeKey,
+      kind: r.kind,
+      title: r.title,
+      description: r.description ?? null,
+      eventId: r.eventId ?? null,
+      eventTitle: r.eventTitle ?? null,
+      suggestedDate: r.suggestedDate ? combineDueDateTime(r.suggestedDate) : null,
+    })),
+    skipDuplicates: true,
+  });
+}
+
+// Snoozed suggestions come back when their date arrives — run at the start of generation.
+export function wakeDueSnoozedSuggestions(now: Date) {
+  return prisma.aiSuggestion.updateMany({
+    where: { status: "SNOOZED", snoozedUntil: { lte: now } },
+    data: { status: "PENDING", snoozedUntil: null },
+  });
+}
+
+// Feedback context for the generation prompt: how each suggestion kind has fared recently
+// (accept/snooze/dismiss counts) plus a handful of concrete recent examples.
+export async function getSuggestionFeedback(sinceDays = 90) {
+  const since = new Date(Date.now() - sinceDays * MS_PER_DAY);
+  const [stats, recent] = await Promise.all([
+    prisma.aiSuggestion.groupBy({
+      by: ["kind", "status"],
+      where: { respondedAt: { gte: since } },
+      _count: { _all: true },
+    }),
+    prisma.aiSuggestion.findMany({
+      where: { respondedAt: { not: null } },
+      orderBy: { respondedAt: "desc" },
+      take: 10,
+      select: { kind: true, title: true, eventTitle: true, status: true },
+    }),
+  ]);
+  return {
+    stats: stats.map((s) => ({ kind: s.kind, status: s.status, count: s._count._all })),
+    recent,
+  };
+}
+
+// Accept: create the real task and mark the suggestion in one transaction.
+export async function acceptSuggestion(id: string, input: { category: string; dueDate?: string | null }) {
+  return notFoundAsError("Suggestion not found", async () => {
+    const suggestion = await prisma.aiSuggestion.findUniqueOrThrow({ where: { id } });
+    const task = await createTask({
+      title: suggestion.title,
+      category: input.category,
+      description: suggestion.description,
+      dueDate:
+        input.dueDate !== undefined
+          ? input.dueDate
+          : suggestion.suggestedDate
+            ? new Date(suggestion.suggestedDate).toISOString().slice(0, 10)
+            : null,
+    });
+    await prisma.aiSuggestion.update({
+      where: { id },
+      data: { status: "ACCEPTED", createdTaskId: task.id, respondedAt: new Date() },
+    });
+    return task;
+  });
+}
+
+export function respondToSuggestion(id: string, status: "SNOOZED" | "DISMISSED", snoozedUntil?: string | null) {
+  return notFoundAsError("Suggestion not found", () =>
+    prisma.aiSuggestion.update({
+      where: { id },
+      data: {
+        status,
+        snoozedUntil: status === "SNOOZED" && snoozedUntil ? combineDueDateTime(snoozedUntil) : null,
+        respondedAt: new Date(),
+      },
+    })
+  );
+}
+
+export const getAiNotes = () => prisma.aiNote.findMany({ orderBy: { createdAt: "asc" } });
+
+export function createAiNote(content: string) {
+  const trimmed = content.trim();
+  if (!trimmed) throw new Error("Note is required");
+  return prisma.aiNote.create({ data: { content: trimmed } });
+}
+
+export function deleteAiNote(id: string) {
+  return prisma.aiNote.deleteMany({ where: { id } });
+}
+
+// First-run seeding: the user's stated workflow rules become the initial editable notes.
+export async function seedAiNotesIfEmpty(defaults: string[]) {
+  const count = await prisma.aiNote.count();
+  if (count > 0) return;
+  await prisma.aiNote.createMany({ data: defaults.map((content) => ({ content })) });
+}
+
+// Open task titles for the generation prompt's duplicate-avoidance list.
+export async function getOpenTaskTitles(limit = 200): Promise<string[]> {
+  const rows = await prisma.task.findMany({
+    where: { isCompleted: false },
+    select: { title: true },
+    orderBy: { createdAt: "desc" },
+    take: limit,
+  });
+  return rows.map((r) => r.title);
 }
 
 // Every row is an unread notice pointing at a Task/Project/Routine/Habit that voice capture

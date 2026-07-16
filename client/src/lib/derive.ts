@@ -6,7 +6,7 @@
 // would have (this used to exclude the calendar rail; see git history if that distinction ever
 // needs resurrecting).
 
-import type { Task, Project, Habit, HabitCompletion, Routine, Category, VoiceCapture } from "@prisma/client";
+import type { Task, Project, Habit, HabitCompletion, Routine, Category, VoiceCapture, DayPlanBlock, AiSuggestion, AiNote } from "@prisma/client";
 import { formatDuration, habitDateKey, habitStatus, taskOrderCompare, MS_PER_DAY, ROUTINE_TICK_EXPIRY_MS } from "@/lib/shared";
 export { combineDueDateTime, ROUTINE_TICK_EXPIRY_MS } from "@/lib/shared";
 import {
@@ -21,18 +21,26 @@ import {
   pad2,
   zonedCalendarDate,
   zonedDaysUntil,
+  zonedMinutesOfDay,
   zonedNow,
   zonedYMD,
   type DueBucket,
   type MonthCell,
 } from "@/lib/taskbookDates";
-import { describeTaskRepeat, nextRoutineOccurrence, type TaskRepeatRule } from "@/lib/taskRecurrence";
+import { describeTaskRepeat, isRoutineDueToday, nextRoutineOccurrence, type TaskRepeatRule } from "@/lib/taskRecurrence";
+import { DEFAULT_DAY_TEMPLATE, zonesForWeekday } from "@/lib/dayTemplate";
+import { packFlexible, placeLunch, type FlexItem, type Obstacle } from "@/lib/scheduler";
 import type {
   CalendarEvent,
   CategoryOption,
   DayDetailVM,
   HabitCardVM,
   Mode,
+  MyDayBlockVM,
+  MyDayLookaheadVM,
+  MyDayTrayItemVM,
+  MyDayVM,
+  MyDayZoneVM,
   ProjectCardVM,
   ProjectOption,
   RoutineItemVM,
@@ -57,6 +65,9 @@ export type RawState = {
   captures: VoiceCapture[];
   timeZone: string; // AppSettings.timeZone — governs due/reminder math and calendar display
   dismissedEventIds: string[]; // DismissedCalendarEvent ids, filtered out of the calendar view
+  dayPlanBlocks: DayPlanBlock[]; // My Day placements, recent past + future (mirrors getDayPlanBlocks)
+  suggestions: AiSuggestion[]; // PENDING AI planner suggestions (mirrors getActiveSuggestions)
+  aiNotes: AiNote[]; // standing instructions for the AI planner (mirrors getAiNotes)
 };
 
 // The entity slice of TaskbookData — everything except the calendar view (see
@@ -581,4 +592,552 @@ export function deriveCalendarView(
   const upcoming = upcomingSources.slice(0, 3).map((s) => s.item);
 
   return { monthCells, monthLabel, year: viewYear, dayDetails, upcoming };
+}
+
+// --- My Day (timeline day planner — see DayView and its MyDay* components) ---
+
+// Base visible window; stretched (whole hours) when something falls outside it.
+const MY_DAY_START_HOUR = 5;
+const MY_DAY_END_HOUR = 21;
+const DEFAULT_BLOCK_MINUTES = 30;
+const MIN_EVENT_LAYOUT_MINUTES = 15;
+
+function parseHHMM(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const m = /^(\d{1,2}):(\d{2})$/.exec(value.trim());
+  if (!m) return null;
+  const minutes = Number(m[1]) * 60 + Number(m[2]);
+  return minutes >= 0 && minutes < 24 * 60 ? minutes : null;
+}
+
+function formatClock(minutes: number): string {
+  const h24 = Math.floor(minutes / 60) % 24;
+  const mm = minutes % 60;
+  const h12 = h24 % 12 || 12;
+  const suffix = h24 < 12 ? "AM" : "PM";
+  return mm === 0 ? `${h12} ${suffix}` : `${h12}:${pad2(mm)} ${suffix}`;
+}
+
+function formatClockRange(startMinutes: number, durationMinutes: number): string {
+  return `${formatClock(startMinutes)} – ${formatClock(startMinutes + durationMinutes)}`;
+}
+
+// Classic day-calendar overlap layout: transitively-overlapping blocks form a cluster; within a
+// cluster each block takes the first lane whose previous occupant has ended. Mutates col/cols.
+function assignOverlapLanes(blocks: MyDayBlockVM[]): void {
+  const sorted = [...blocks].sort(
+    (a, b) => a.startMinutes - b.startMinutes || b.durationMinutes - a.durationMinutes
+  );
+  let cluster: MyDayBlockVM[] = [];
+  let clusterEnd = -1;
+  const flush = () => {
+    if (!cluster.length) return;
+    const laneEnds: number[] = [];
+    for (const b of cluster) {
+      let lane = laneEnds.findIndex((end) => end <= b.startMinutes);
+      if (lane === -1) {
+        lane = laneEnds.length;
+        laneEnds.push(0);
+      }
+      laneEnds[lane] = b.startMinutes + b.durationMinutes;
+      b.col = lane;
+    }
+    for (const b of cluster) b.cols = laneEnds.length;
+    cluster = [];
+    clusterEnd = -1;
+  };
+  for (const b of sorted) {
+    if (cluster.length && b.startMinutes >= clusterEnd) flush();
+    cluster.push(b);
+    clusterEnd = Math.max(clusterEnd, b.startMinutes + b.durationMinutes);
+  }
+  flush();
+}
+
+// Builds the My Day view for the selected calendar day: everything due/scheduled that day merged
+// into one timeline (pinned times) + tray (placeable but untimed) + look-ahead (future tasks that
+// could be done early). Pure and client-safe like the other derivers — runs on every optimistic
+// edit, so completing/moving/pushing an item re-derives the whole day instantly.
+export function deriveMyDay(
+  raw: RawState,
+  calendarEvents: CalendarEvent[],
+  nowMs: number,
+  viewYear: number,
+  viewMonth0: number,
+  day: number,
+  mode: Mode
+): MyDayVM {
+  const dateKey = `${viewYear}-${pad2(viewMonth0 + 1)}-${pad2(day)}`;
+  const now = new Date(nowMs);
+  const todayYMD = zonedYMD(now, raw.timeZone);
+  const isToday = todayYMD.year === viewYear && todayYMD.month0 === viewMonth0 && todayYMD.day === day;
+  // Face-value UTC midnight of the viewed day — comparable to stored due dates / block dates.
+  const viewedUtcMidnight = Date.UTC(viewYear, viewMonth0, day);
+  const weekday = new Date(viewedUtcMidnight).getUTCDay();
+
+  const scopeByName = categoryScopeMap(raw.categories);
+  const projectNameById = new Map(raw.projects.map((p) => [p.id, p.name]));
+  const dismissed = new Set(raw.dismissedEventIds);
+
+  const timeline: MyDayBlockVM[] = [];
+  const tray: MyDayTrayItemVM[] = [];
+  const allDayEvents: MyDayVM["allDayEvents"] = [];
+
+  // Items without a pinned time gather here first; after the fixed timeline is known, the
+  // auto-scheduler packs the schedulable ones (has duration, not done) into free zone gaps and
+  // the rest fall through to the tray. See lib/scheduler.ts.
+  type FloatingCandidate = {
+    tray: MyDayTrayItemVM;
+    description: string | null;
+    scope: "work" | "home" | "both";
+    kindRank: number;
+    orderKey: { sortOrder: number | null; dueMs: number | null; createdMs: number };
+  };
+  const floating: FloatingCandidate[] = [];
+
+  const scopeOf = (category: string | null): "work" | "home" | "both" => {
+    if (!category) return "both";
+    const s = scopeByName.get(category.toLowerCase());
+    if (s === "work" || s === "home") return s;
+    if (s === "both") return "both";
+    const lc = category.toLowerCase();
+    return lc === "work" ? "work" : lc === "home" ? "home" : "both";
+  };
+
+  const makeBlock = (
+    partial: Omit<MyDayBlockVM, "timeLabel" | "col" | "cols" | "durationMinutes"> & { durationMinutes: number }
+  ): MyDayBlockVM => ({
+    ...partial,
+    timeLabel: formatClockRange(partial.startMinutes, partial.durationMinutes),
+    col: 0,
+    cols: 1,
+  });
+
+  // A block row covers its entity for the day: the entity's own due-time placement (or tray
+  // entry) is suppressed so the two never render twice.
+  const covered = new Set<string>();
+  const blocksForDay = raw.dayPlanBlocks.filter((b) => new Date(b.date).getTime() === viewedUtcMidnight);
+  for (const b of blocksForDay) covered.add(`${b.entityType}:${b.entityId}`);
+
+  // Subtasks can be placed too ("do this piece today"), so task lookup spans both levels.
+  const taskById = new Map<string, { task: Task; parent: RawTask | null }>();
+  for (const t of raw.tasks) {
+    taskById.set(t.id, { task: t, parent: null });
+    for (const s of t.subtasks) taskById.set(s.id, { task: s, parent: t });
+  }
+  const habitById = new Map(raw.habits.map((h) => [h.id, h]));
+  const routineById = new Map(raw.routines.map((r) => [r.id, r]));
+
+  const completionKeysByHabit = new Map<string, Set<string>>();
+  for (const c of raw.habitCompletions) {
+    const key = habitDateKey(new Date(c.date), raw.timeZone);
+    let set = completionKeysByHabit.get(c.habitId);
+    if (!set) {
+      set = new Set();
+      completionKeysByHabit.set(c.habitId, set);
+    }
+    set.add(key);
+  }
+
+  // --- DayPlan blocks (explicit placements — they win over the entity's own schedule) ---
+  for (const b of blocksForDay) {
+    let title: string | null = null;
+    let description: string | null = null;
+    let isCompleted = false;
+    let entityDuration: number | null = null;
+    let category: string | null = null;
+    let projectName: string | null = null;
+    let kind: MyDayBlockVM["kind"];
+
+    if (b.entityType === "TASK") {
+      const hit = taskById.get(b.entityId);
+      if (!hit) continue; // entity deleted out from under the block — skip (cron sweeps it)
+      title = hit.task.title;
+      description = hit.task.description;
+      isCompleted = hit.task.isCompleted;
+      entityDuration = hit.task.durationMinutes;
+      category = hit.task.category;
+      projectName = hit.task.projectId ? projectNameById.get(hit.task.projectId) ?? null : null;
+      if (!taskMatchesMode(hit.task.category, mode, scopeByName)) continue;
+      kind = "task";
+    } else if (b.entityType === "PROJECT") {
+      const p = raw.projects.find((x) => x.id === b.entityId);
+      if (!p) continue;
+      title = p.name;
+      description = p.description;
+      isCompleted = p.isCompleted;
+      entityDuration = p.durationMinutes;
+      kind = "project";
+    } else if (b.entityType === "ROUTINE") {
+      const r = routineById.get(b.entityId);
+      if (!r) continue;
+      title = r.title;
+      isCompleted = isToday && isRoutineTickedNow(r, nowMs);
+      entityDuration = r.durationMinutes;
+      kind = "routine";
+    } else {
+      const h = habitById.get(b.entityId);
+      if (!h) continue;
+      title = h.title;
+      isCompleted = completionKeysByHabit.get(h.id)?.has(dateKey) ?? false;
+      entityDuration = h.durationMinutes;
+      kind = "habit";
+    }
+
+    const duration = b.durationMinutes ?? entityDuration;
+    const startMinutes = parseHHMM(b.startTime);
+    if (startMinutes != null) {
+      timeline.push(
+        makeBlock({
+          key: `plan-${b.id}`,
+          kind,
+          entityId: b.entityId,
+          planBlockId: b.id,
+          title,
+          description,
+          startMinutes,
+          durationMinutes: duration ?? DEFAULT_BLOCK_MINUTES,
+          hasExplicitDuration: duration != null,
+          isCompleted,
+          pinned: true,
+          source: null,
+          category,
+          projectName,
+        })
+      );
+    } else {
+      floating.push({
+        tray: {
+          key: `plan-${b.id}`,
+          kind,
+          entityId: b.entityId,
+          planBlockId: b.id,
+          title,
+          durationMinutes: duration,
+          isCompleted,
+          category,
+          projectName,
+          reason: duration == null ? "needs-duration" : "unscheduled",
+        },
+        description,
+        scope: scopeOf(category),
+        kindRank: kind === "task" ? 0 : kind === "project" ? 1 : kind === "routine" ? 2 : 3,
+        orderKey: { sortOrder: b.sortOrder, dueMs: null, createdMs: new Date(b.createdAt).getTime() },
+      });
+    }
+  }
+
+  // --- Tasks due on the viewed day (top-level only — subtasks surface via their parent) ---
+  for (const t of raw.tasks) {
+    if (!t.dueDate || !taskMatchesMode(t.category, mode, scopeByName)) continue;
+    if (covered.has(`TASK:${t.id}`)) continue;
+    const due = new Date(t.dueDate);
+    if (Date.UTC(due.getUTCFullYear(), due.getUTCMonth(), due.getUTCDate()) !== viewedUtcMidnight) continue;
+    const projectName = t.projectId ? projectNameById.get(t.projectId) ?? null : null;
+    const dueMinutes = due.getUTCHours() * 60 + due.getUTCMinutes(); // face-value clock time
+    if (dueMinutes > 0) {
+      timeline.push(
+        makeBlock({
+          key: `task-${t.id}`,
+          kind: "task",
+          entityId: t.id,
+          planBlockId: null,
+          title: t.title,
+          description: t.description,
+          startMinutes: dueMinutes,
+          durationMinutes: t.durationMinutes ?? DEFAULT_BLOCK_MINUTES,
+          hasExplicitDuration: t.durationMinutes != null,
+          isCompleted: t.isCompleted,
+          pinned: true,
+          source: null,
+          category: t.category,
+          projectName,
+        })
+      );
+    } else {
+      floating.push({
+        tray: {
+          key: `task-${t.id}`,
+          kind: "task",
+          entityId: t.id,
+          planBlockId: null,
+          title: t.title,
+          durationMinutes: t.durationMinutes,
+          isCompleted: t.isCompleted,
+          category: t.category,
+          projectName,
+          reason: t.durationMinutes == null ? "needs-duration" : "unscheduled",
+        },
+        description: t.description,
+        scope: scopeOf(t.category),
+        kindRank: 0,
+        orderKey: { sortOrder: t.sortOrder, dueMs: new Date(t.dueDate).getTime(), createdMs: new Date(t.createdAt).getTime() },
+      });
+    }
+  }
+
+  // --- Projects due on the viewed day ---
+  for (const p of raw.projects) {
+    if (p.isCompleted || !p.dueDate || covered.has(`PROJECT:${p.id}`)) continue;
+    const due = new Date(p.dueDate);
+    if (Date.UTC(due.getUTCFullYear(), due.getUTCMonth(), due.getUTCDate()) !== viewedUtcMidnight) continue;
+    floating.push({
+      tray: {
+        key: `project-${p.id}`,
+        kind: "project",
+        entityId: p.id,
+        planBlockId: null,
+        title: p.name,
+        durationMinutes: p.durationMinutes,
+        isCompleted: p.isCompleted,
+        category: null,
+        projectName: null,
+        reason: p.durationMinutes == null ? "needs-duration" : "unscheduled",
+      },
+      description: p.description,
+      scope: "both",
+      kindRank: 1,
+      orderKey: { sortOrder: null, dueMs: new Date(p.dueDate).getTime(), createdMs: 0 },
+    });
+  }
+
+  // --- Routines due on the viewed day, at their reminder time ---
+  // The due-today check reads the passed Date's UTC getters as wall-clock fields, so a
+  // face-value UTC date for the viewed day matches the zonedNow convention.
+  const viewedFaceValue = new Date(viewedUtcMidnight);
+  for (const r of raw.routines) {
+    if (!r.isActive || covered.has(`ROUTINE:${r.id}`)) continue;
+    if (r.pausedUntil && viewedUtcMidnight < new Date(r.pausedUntil).getTime()) continue;
+    const rule: TaskRepeatRule = {
+      frequency: r.frequency,
+      interval: r.interval,
+      daysOfWeek: r.daysOfWeek,
+      monthlyMode: r.monthlyMode,
+      dayOfMonth: r.dayOfMonth,
+      monthlyOrdinal: r.monthlyOrdinal,
+      monthlyWeekday: r.monthlyWeekday,
+    };
+    if (!isRoutineDueToday(rule, viewedFaceValue)) continue;
+    const startMinutes = parseHHMM(r.reminderTime);
+    if (startMinutes == null) continue;
+    timeline.push(
+      makeBlock({
+        key: `routine-${r.id}`,
+        kind: "routine",
+        entityId: r.id,
+        planBlockId: null,
+        title: r.title,
+        description: r.subroutines.length ? r.subroutines.map((s) => s.title).join(" · ") : null,
+        startMinutes,
+        durationMinutes: r.durationMinutes ?? DEFAULT_BLOCK_MINUTES,
+        hasExplicitDuration: r.durationMinutes != null,
+        isCompleted: isToday && isRoutineTickedNow(r, nowMs),
+        pinned: true,
+        source: null,
+        category: null,
+        projectName: null,
+      })
+    );
+  }
+
+  // --- Habits scheduled on the viewed day ---
+  for (const h of raw.habits) {
+    if (covered.has(`HABIT:${h.id}`)) continue;
+    const doneThatDay = completionKeysByHabit.get(h.id)?.has(dateKey) ?? false;
+    if (h.scheduleType === "WEEKLY_DAYS") {
+      if (!h.daysOfWeek.includes(weekday)) continue;
+    } else {
+      // Count-based habits have no fixed days — surface one only on today, while its current
+      // period's target is still unmet (done-today ones stay visible as ticked).
+      if (!isToday) continue;
+      const status = habitStatus(h, completionKeysByHabit.get(h.id) ?? new Set(), now, raw.timeZone);
+      if (!status.isDoneToday && status.progressDone >= status.progressTarget) continue;
+    }
+    floating.push({
+      tray: {
+        key: `habit-${h.id}`,
+        kind: "habit",
+        entityId: h.id,
+        planBlockId: null,
+        title: h.title,
+        durationMinutes: h.durationMinutes,
+        isCompleted: doneThatDay,
+        category: null,
+        projectName: null,
+        reason: h.durationMinutes == null ? "needs-duration" : "unscheduled",
+      },
+      description: null,
+      scope: "both",
+      kindRank: 3,
+      orderKey: { sortOrder: null, dueMs: null, createdMs: 0 },
+    });
+  }
+
+  // --- Calendar (ICS) events on the viewed day ---
+  for (const e of calendarEvents) {
+    if (dismissed.has(e.id) || !eventMatchesMode(e.source, mode)) continue;
+    const start = new Date(e.start);
+    const ymd = zonedYMD(start, raw.timeZone);
+    if (ymd.year !== viewYear || ymd.month0 !== viewMonth0 || ymd.day !== day) continue;
+    if (e.allDay) {
+      allDayEvents.push({ id: e.id, title: e.title, source: e.source });
+      continue;
+    }
+    const startMinutes = zonedMinutesOfDay(start, raw.timeZone);
+    const realDuration = Math.round((new Date(e.end).getTime() - start.getTime()) / 60000);
+    timeline.push(
+      makeBlock({
+        key: `event-${e.id}`,
+        kind: "event",
+        entityId: e.id,
+        planBlockId: null,
+        title: e.title,
+        description: e.location,
+        startMinutes,
+        durationMinutes: Math.max(realDuration, MIN_EVENT_LAYOUT_MINUTES),
+        hasExplicitDuration: true,
+        isCompleted: false,
+        pinned: true,
+        source: e.source,
+        category: null,
+        projectName: null,
+      })
+    );
+  }
+
+  // --- Wellbeing day template: zone bands + snack/lunch anchors (workdays only) ---
+  const template = DEFAULT_DAY_TEMPLATE;
+  const isWorkday = template.workdays.includes(weekday);
+  const templateZones = zonesForWeekday(template, weekday);
+  const zones: MyDayZoneVM[] = templateZones
+    .filter((z) => z.label)
+    .map((z) => ({ key: z.key, label: z.label, startMinutes: z.startMinutes, endMinutes: z.endMinutes }));
+
+  const todayUtcMidnight = Date.UTC(todayYMD.year, todayYMD.month0, todayYMD.day);
+  const isPast = viewedUtcMidnight < todayUtcMidnight;
+  const nowMinutes = zonedMinutesOfDay(now, raw.timeZone);
+
+  const fixedObstacles: Obstacle[] = timeline.map((b) => ({
+    startMinutes: b.startMinutes,
+    endMinutes: b.startMinutes + b.durationMinutes,
+  }));
+
+  if (isWorkday) {
+    const templateBlock = (slug: string, title: string, startMinutes: number, durationMinutes: number) =>
+      makeBlock({
+        key: `template-${slug}`,
+        kind: "template",
+        entityId: slug,
+        planBlockId: null,
+        title,
+        description: null,
+        startMinutes,
+        durationMinutes,
+        hasExplicitDuration: true,
+        isCompleted: false,
+        pinned: true,
+        source: null,
+        category: null,
+        projectName: null,
+      });
+
+    // Lunch floats inside its window to dodge meetings; ordering it happens 40 minutes ahead.
+    const lunchStart = placeLunch(template.lunch, fixedObstacles, 0);
+    const orderStart = lunchStart - template.lunch.orderLeadMinutes;
+    const snack = templateBlock("snack", template.snack.label, template.snack.startMinutes, template.snack.durationMinutes);
+    const lunch = templateBlock("lunch", "Lunch", lunchStart, template.lunch.durationMinutes);
+    const order = templateBlock("order-lunch", "Order lunch", orderStart, template.lunch.orderDurationMinutes);
+    timeline.push(snack, lunch, order);
+    for (const b of [snack, lunch, order]) {
+      fixedObstacles.push({ startMinutes: b.startMinutes, endMinutes: b.startMinutes + b.durationMinutes });
+    }
+  }
+
+  // --- Auto-schedule the floating pool ---
+  // Schedulable = has a duration and isn't done. Past days never pack (they're a record, not a
+  // plan); today packs from "now" so unfinished items keep sliding forward as time passes.
+  const schedulable = new Map<string, FloatingCandidate>();
+  for (const f of floating) {
+    if (isPast || f.tray.isCompleted || f.tray.durationMinutes == null) {
+      tray.push(f.tray);
+    } else {
+      schedulable.set(f.tray.key, f);
+    }
+  }
+
+  const pool = [...schedulable.values()].sort(
+    (a, b) => a.kindRank - b.kindRank || taskOrderCompare(a.orderKey, b.orderKey)
+  );
+  const flexItems: FlexItem[] = pool.map((f) => ({
+    key: f.tray.key,
+    durationMinutes: f.tray.durationMinutes!,
+    scope: f.scope,
+  }));
+  const { placed, overflow } = packFlexible(flexItems, templateZones, fixedObstacles, isToday ? nowMinutes : 0);
+
+  for (const f of pool) {
+    const start = placed.get(f.tray.key);
+    if (start != null) {
+      timeline.push(
+        makeBlock({
+          key: f.tray.key,
+          kind: f.tray.kind,
+          entityId: f.tray.entityId,
+          planBlockId: f.tray.planBlockId,
+          title: f.tray.title,
+          description: f.description,
+          startMinutes: start,
+          durationMinutes: f.tray.durationMinutes!,
+          hasExplicitDuration: true,
+          isCompleted: false,
+          pinned: false,
+          source: null,
+          category: f.tray.category,
+          projectName: f.tray.projectName,
+        })
+      );
+    } else if (overflow.has(f.tray.key)) {
+      tray.push({ ...f.tray, reason: "no-fit" });
+    }
+  }
+
+  // --- Look-ahead: future tasks that could be pulled forward ---
+  const lookahead: MyDayLookaheadVM[] = [];
+  for (const t of raw.tasks) {
+    if (t.isCompleted || !t.dueDate || !taskMatchesMode(t.category, mode, scopeByName)) continue;
+    if (covered.has(`TASK:${t.id}`)) continue;
+    const due = new Date(t.dueDate);
+    const dueUtcMidnight = Date.UTC(due.getUTCFullYear(), due.getUTCMonth(), due.getUTCDate());
+    const daysAway = Math.round((dueUtcMidnight - viewedUtcMidnight) / MS_PER_DAY);
+    if (daysAway < 1 || daysAway > 7) continue;
+    lookahead.push({
+      taskId: t.id,
+      title: t.title,
+      dueLabel: formatShortDate(calendarDateFromDue(due)),
+      daysAway,
+      projectName: t.projectId ? projectNameById.get(t.projectId) ?? null : null,
+      durationMinutes: t.durationMinutes,
+    });
+  }
+  lookahead.sort((a, b) => a.daysAway - b.daysAway || a.title.localeCompare(b.title));
+  const cappedLookahead = lookahead.slice(0, 10);
+
+  // Tray ordering: actionable-first (incomplete before done), then by kind for stable grouping.
+  const trayKindRank: Record<MyDayTrayItemVM["kind"], number> = { task: 0, project: 1, routine: 2, habit: 3, event: 4, template: 5 };
+  tray.sort((a, b) => Number(a.isCompleted) - Number(b.isCompleted) || trayKindRank[a.kind] - trayKindRank[b.kind] || a.title.localeCompare(b.title));
+
+  assignOverlapLanes(timeline);
+  timeline.sort((a, b) => a.startMinutes - b.startMinutes || a.col - b.col);
+
+  // Stretch the visible window (whole hours) to fit outliers.
+  let startHour = MY_DAY_START_HOUR;
+  let endHour = MY_DAY_END_HOUR;
+  for (const b of timeline) {
+    startHour = Math.min(startHour, Math.floor(b.startMinutes / 60));
+    endHour = Math.max(endHour, Math.ceil((b.startMinutes + b.durationMinutes) / 60));
+  }
+  startHour = Math.max(0, startHour);
+  endHour = Math.min(24, endHour);
+
+  return { dateKey, isToday, startHour, endHour, zones, allDayEvents, timeline, tray, lookahead: cappedLookahead };
 }
