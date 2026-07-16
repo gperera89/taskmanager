@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { AreaKey, CapturedKind, ItemKind, ModalState } from "./types";
+import type { AreaKey, CapturedKind, ItemKind, ModalState, Mode } from "./types";
 import { deriveCalendarView, deriveMyDay } from "@/lib/derive";
 import { zonedYMD } from "@/lib/taskbookDates";
 import { useTaskbook } from "./store";
@@ -37,8 +37,20 @@ const AREA_TO_KIND: Record<AreaKey, ItemKind> = {
   day: "task",
 };
 
+// Digit keys → main views, for the Stream Deck profile (each key just sends a plain keypress).
+const AREA_SHORTCUTS: Record<string, AreaKey> = {
+  "1": "tasks",
+  "2": "projects",
+  "3": "routines",
+  "4": "habits",
+  "5": "calendar",
+};
+
+// Letter keys → home/all/work mode, matching ModeToggle's order.
+const MODE_SHORTCUTS: Record<string, Mode> = { h: "home", a: "all", w: "work" };
+
 export default function TaskbookApp() {
-  const { data, actions, raw, calendarEvents, nowMs, mode } = useTaskbook();
+  const { data, actions, raw, calendarEvents, nowMs, mode, setMode } = useTaskbook();
   const [area, setArea] = useState<AreaKey>("tasks");
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
   const [dayOpen, setDayOpen] = useState(false);
@@ -108,8 +120,22 @@ export default function TaskbookApp() {
     areaRef.current = area;
   }, [area]);
 
-  // Desktop keyboard shortcuts: n = new item, / = focus search, Escape = close whatever's
-  // open. Skipped while typing in any field so the letters still type normally.
+  // Same trick for the callbacks that close over per-render state (selectTab reads
+  // isMobile, openMyDay reads nowMs/timeZone): the once-registered handler always goes
+  // through this ref so it acts on the current render's values.
+  const shortcutRef = useRef<{
+    selectTab: (next: AreaKey) => void;
+    openMyDay: () => void;
+    isMobile: boolean;
+  }>({ selectTab: () => {}, openMyDay: () => {}, isMobile: false });
+  useEffect(() => {
+    shortcutRef.current = { selectTab, openMyDay, isMobile };
+  });
+
+  // Keyboard shortcuts (also driven by a Stream Deck profile sending plain keypresses):
+  // n = new item, / = focus search, 1–5 = switch view, d = My Day, s/l/r = settings/
+  // logbook/review, h/a/w = mode, Escape = close whatever's open. Skipped while typing
+  // in any field so the letters still type normally.
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") {
@@ -123,16 +149,41 @@ export default function TaskbookApp() {
       const target = e.target as HTMLElement | null;
       const tag = target?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target?.isContentEditable) return;
+      const api = shortcutRef.current;
       if (e.key === "n") {
         e.preventDefault();
         setModal({ mode: "add", initialKind: AREA_TO_KIND[areaRef.current] });
       } else if (e.key === "/") {
         e.preventDefault();
         document.getElementById("taskbook-search")?.focus();
+      } else if (AREA_SHORTCUTS[e.key]) {
+        // Calendar is the side rail on desktop, not a main view — "5" is mobile-only
+        // (selecting it on desktop would just get render-corrected back to Tasks).
+        const next = AREA_SHORTCUTS[e.key];
+        if (next === "calendar" && !api.isMobile) return;
+        e.preventDefault();
+        api.selectTab(next);
+      } else if (e.key === "d") {
+        e.preventDefault();
+        api.openMyDay();
+      } else if (e.key === "s") {
+        e.preventDefault();
+        setSettingsOpen(true);
+      } else if (e.key === "l") {
+        e.preventDefault();
+        setLogbookOpen(true);
+      } else if (e.key === "r") {
+        e.preventDefault();
+        setReviewOpen(true);
+      } else if (MODE_SHORTCUTS[e.key]) {
+        e.preventDefault();
+        setMode(MODE_SHORTCUTS[e.key]);
       }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
+    // setMode and the modal-open setters are stable useState setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function scrollToArea(key: AreaKey, behavior: ScrollBehavior = "smooth") {
