@@ -148,6 +148,7 @@ export type TaskbookActions = {
   setTaskSection: (id: string, section: string) => void;
   setTaskReminderLead: (id: string, minutes: number | null) => void;
   setTaskDuration: (id: string, minutes: number | null) => void;
+  setTaskBlock: (id: string, reason: string, untilDate: string) => void; // empty reason clears
   snoozeTask: (id: string, days: number) => void;
   reorderGroup: (orderedIds: string[]) => void;
   // Projects
@@ -354,6 +355,7 @@ const REGISTRY: Record<string, RegistryEntry> = {
   setTaskSection: { fn: serverActions.updateTaskSection },
   setTaskReminderLead: { fn: serverActions.updateTaskReminderLead },
   setTaskDuration: { fn: serverActions.updateTaskDuration },
+  setTaskBlock: { fn: serverActions.updateTaskBlock },
   snoozeTask: { fn: serverActions.snoozeTask },
   reorderGroup: { fn: serverActions.reorderTaskGroup },
   addProject: {
@@ -778,6 +780,8 @@ export function StoreProvider({
           sortOrder: null,
           reminderLeadMinutes: input.reminderLeadMinutes ?? null,
           durationMinutes: input.durationMinutes ?? null,
+          blockedReason: null,
+          blockedUntil: null,
           subtasks: [],
           ...repeatFields(input.repeat ?? null),
         };
@@ -912,6 +916,24 @@ export function StoreProvider({
         mutate(
           (r) => ({ ...r, tasks: mapTask(r.tasks, id, (t) => ({ ...t, durationMinutes: minutes })) }),
           "setTaskDuration",
+          [id, fd]
+        );
+      },
+      setTaskBlock: (id, reason, untilDate) => {
+        const fd = new FormData();
+        fd.set("blockedReason", reason);
+        fd.set("blockedUntil", untilDate);
+        const cleared = !reason.trim();
+        mutate(
+          (r) => ({
+            ...r,
+            tasks: mapTask(r.tasks, id, (t) => ({
+              ...t,
+              blockedReason: cleared ? null : reason.trim(),
+              blockedUntil: cleared || !/^\d{4}-\d{2}-\d{2}$/.test(untilDate) ? null : combineDueDateTime(untilDate),
+            })),
+          }),
+          "setTaskBlock",
           [id, fd]
         );
       },
@@ -1432,6 +1454,8 @@ export function StoreProvider({
           sortOrder: null,
           reminderLeadMinutes: null,
           durationMinutes: null,
+          blockedReason: null,
+          blockedUntil: null,
           subtasks: [],
           ...NO_REPEAT,
         };

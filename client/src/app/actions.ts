@@ -199,6 +199,17 @@ export async function updateTaskReminderLead(id: string, formData: FormData) {
   await updateTask(id, { reminderLeadMinutes: lead > 0 ? lead : null });
 }
 
+// Set/clear the on-hold marker: an empty reason clears the block entirely.
+export async function updateTaskBlock(id: string, formData: FormData) {
+  await requireSession();
+  const reason = String(formData.get("blockedReason") ?? "").trim();
+  const until = String(formData.get("blockedUntil") ?? "").trim();
+  await updateTask(id, {
+    blockedReason: reason || null,
+    blockedUntil: reason && /^\d{4}-\d{2}-\d{2}$/.test(until) ? until : null,
+  });
+}
+
 export async function updateTaskDuration(id: string, formData: FormData) {
   await requireSession();
   await updateTask(id, { durationMinutes: parseDurationInput(String(formData.get("duration") ?? "")) });

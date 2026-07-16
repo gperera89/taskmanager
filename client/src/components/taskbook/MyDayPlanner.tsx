@@ -392,15 +392,20 @@ function TrayRow({ item, helpers }: { item: MyDayTrayItemVM; helpers: PlannerHel
         >
           {item.title}
         </div>
-        <div className="text-[11.5px]" style={{ color: item.reason === "no-fit" ? "var(--danger)" : "var(--ink-soft)" }}>
-          {[
-            item.projectName,
-            item.kind !== "task" ? item.kind : null,
-            item.durationMinutes == null ? "add a duration to schedule it" : formatDuration(item.durationMinutes),
-            item.reason === "no-fit" ? "won't fit today — push it?" : null,
-          ]
-            .filter(Boolean)
-            .join(" · ")}
+        <div
+          className="text-[11.5px]"
+          style={{ color: item.reason === "no-fit" || item.reason === "blocked" ? "var(--danger)" : "var(--ink-soft)" }}
+        >
+          {item.reason === "blocked"
+            ? `blocked — waiting: ${item.blockedReason}`
+            : [
+                item.projectName,
+                item.kind !== "task" ? item.kind : null,
+                item.durationMinutes == null ? "add a duration to schedule it" : formatDuration(item.durationMinutes),
+                item.reason === "no-fit" ? "won't fit today — push it?" : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
         </div>
       </div>
 

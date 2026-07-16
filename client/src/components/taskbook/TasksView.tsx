@@ -170,6 +170,9 @@ export function TaskRow({
   const [subtasksOpen, setSubtasksOpen] = useState(false);
   const [addingSubtask, setAddingSubtask] = useState(false);
   const [snoozeOpen, setSnoozeOpen] = useState(false);
+  const [blockOpen, setBlockOpen] = useState(false);
+  const [blockReasonDraft, setBlockReasonDraft] = useState(task.blockedReason ?? "");
+  const [blockUntilDraft, setBlockUntilDraft] = useState(task.blockedUntilValue);
   const [dragOver, setDragOver] = useState(false);
 
   // Drop the dragged row in front of this one and persist the group's new order.
@@ -382,6 +385,12 @@ export function TaskRow({
           </div>
         )}
 
+        {task.blockedLabel && !task.isCompleted && (
+          <div className="mt-0.5 text-[12.5px] italic" style={{ color: "var(--danger)" }}>
+            {task.blockedLabel}
+          </div>
+        )}
+
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           <select
             value={task.category}
@@ -538,6 +547,81 @@ export function TaskRow({
                       {o.label}
                     </button>
                   ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {!task.isCompleted && (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => {
+                  setBlockReasonDraft(task.blockedReason ?? "");
+                  setBlockUntilDraft(task.blockedUntilValue);
+                  setBlockOpen((v) => !v);
+                }}
+                aria-label={task.blockedReason ? "Edit block" : "Mark as blocked"}
+                title={task.blockedLabel ?? "On hold until something resolves"}
+                className={chipSelectClass}
+                style={{
+                  color: task.blockedReason ? "var(--danger)" : "var(--ink-faint)",
+                  background: task.blockedReason ? "var(--danger-surface)" : "transparent",
+                  border: task.blockedReason ? "1px solid var(--danger)" : "1px dashed var(--border-strong)",
+                }}
+              >
+                {/* Material Symbols "block" — same glyph as public/block_24dp_*.svg, inlined so it themes */}
+                <svg width="13" height="13" viewBox="0 -960 960 960" aria-hidden>
+                  <path
+                    d="M324-111.5Q251-143 197-197t-85.5-127Q80-397 80-480t31.5-156Q143-709 197-763t127-85.5Q397-880 480-880t156 31.5Q709-817 763-763t85.5 127Q880-563 880-480t-31.5 156Q817-251 763-197t-127 85.5Q563-80 480-80t-156-31.5ZM480-160q54 0 104-17.5t92-50.5L228-676q-33 42-50.5 92T160-480q0 134 93 227t227 93Zm252-124q33-42 50.5-92T800-480q0-134-93-227t-227-93q-54 0-104 17.5T284-732l448 448ZM480-480Z"
+                    style={{ fill: "currentColor" }}
+                  />
+                </svg>
+              </button>
+              {blockOpen && (
+                <div className="absolute left-0 top-7 z-20 w-60 rounded-lg border border-(--border-strong) bg-(--card) p-2.5 shadow-[0_8px_24px_rgba(70,55,30,.18)]">
+                  <div className="mb-1 text-[11px] uppercase tracking-[0.14em] text-(--ink-muted)">Waiting on</div>
+                  <textarea
+                    value={blockReasonDraft}
+                    onChange={(e) => setBlockReasonDraft(e.target.value)}
+                    placeholder="e.g. reply from parents, budget approval…"
+                    rows={2}
+                    className="w-full resize-none rounded-md border border-(--border-strong) bg-(--card) px-2 py-1 text-xs text-(--ink) outline-none focus:border-(--accent-text)"
+                  />
+                  <div className="mt-1.5 flex items-center gap-2">
+                    <span className="text-[11px] text-(--ink-muted)">Expected to clear</span>
+                    <input
+                      type="date"
+                      value={blockUntilDraft}
+                      onChange={(e) => setBlockUntilDraft(e.target.value)}
+                      className="rounded-md border border-(--border-strong) bg-transparent px-1.5 py-0.5 text-xs text-(--ink)"
+                    />
+                  </div>
+                  <div className="mt-2 flex items-center justify-between">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        actions.setTaskBlock(task.id, blockReasonDraft, blockUntilDraft);
+                        setBlockOpen(false);
+                      }}
+                      disabled={!blockReasonDraft.trim()}
+                      className="cursor-pointer rounded-md bg-(--accent) px-2.5 py-1 text-xs text-(--on-accent) disabled:opacity-50"
+                    >
+                      Save
+                    </button>
+                    {task.blockedReason && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          actions.setTaskBlock(task.id, "", "");
+                          setBlockOpen(false);
+                        }}
+                        className="cursor-pointer text-xs text-(--ink-faint) hover:text-(--danger)"
+                      >
+                        Unblock
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
             </div>

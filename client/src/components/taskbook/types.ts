@@ -36,6 +36,9 @@ export type TaskItemVM = {
   reminderLeadMinutes: number | null; // notify this long before the due time (null = at it)
   durationMinutes: number | null; // expected time to complete, in minutes (null = unset)
   durationLabel: string | null; // e.g. "30 min" or "1.5 hours", null when unset
+  blockedReason: string | null; // what the task is waiting on (null = not blocked)
+  blockedUntilValue: string; // yyyy-mm-dd for the edit form, "" if no clear-date set
+  blockedLabel: string | null; // e.g. "Waiting: printer fixed · until Fri 18 Jul"
   subtasks: SubtaskVM[];
 };
 
@@ -175,7 +178,8 @@ export type MyDayTrayItemVM = {
   isCompleted: boolean;
   category: string | null;
   projectName: string | null;
-  reason: "needs-duration" | "no-fit" | "unscheduled";
+  reason: "needs-duration" | "no-fit" | "unscheduled" | "blocked";
+  blockedReason: string | null; // set when reason === "blocked"
 };
 
 // A future-dated task that could be pulled forward and done on the viewed day.

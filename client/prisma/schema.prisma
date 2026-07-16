@@ -84,6 +84,12 @@ model Task {
   // How long this task is expected to take, in minutes (null = unset). Lets a dated task occupy
   // a block of time on the schedule rather than a single instant.
   durationMinutes Int?
+  // On-hold marker: what this task is waiting on before it can proceed (null = not blocked),
+  // and the date the block is expected to clear (UTC-midnight calendar-date encoding). While
+  // blocked, the task is excluded from My Day auto-scheduling/look-ahead; the AI planner is
+  // told about blocks so it can nudge when one expires or a deadline looms behind it.
+  blockedReason String?
+  blockedUntil  DateTime?
   // Optional grouping heading within a project's card (Things-style sections). Free text,
   // meaningful only for tasks with a projectId.
   section     String?

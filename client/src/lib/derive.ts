@@ -28,7 +28,7 @@ import {
   type MonthCell,
 } from "@/lib/taskbookDates";
 import { describeTaskRepeat, isRoutineDueToday, nextRoutineOccurrence, type TaskRepeatRule } from "@/lib/taskRecurrence";
-import { DEFAULT_DAY_TEMPLATE, zonesForWeekday } from "@/lib/dayTemplate";
+import { DEFAULT_DAY_TEMPLATE } from "@/lib/dayTemplate";
 import { packFlexible, placeLunch, type FlexItem, type Obstacle } from "@/lib/scheduler";
 import type {
   CalendarEvent,
@@ -204,6 +204,11 @@ function toTaskVM(t: RawTask, projectNameById: Map<string, string>): TaskItemVM 
     reminderLeadMinutes: t.reminderLeadMinutes,
     durationMinutes: t.durationMinutes,
     durationLabel: t.durationMinutes != null ? formatDuration(t.durationMinutes) : null,
+    blockedReason: t.blockedReason,
+    blockedUntilValue: toDateInputValue(t.blockedUntil),
+    blockedLabel: t.blockedReason
+      ? `Waiting: ${t.blockedReason}${t.blockedUntil ? ` · until ${formatShortDate(calendarDateFromDue(new Date(t.blockedUntil)))}` : ""}`
+      : null,
     subtasks: t.subtasks.map((s) => ({ id: s.id, title: s.title, isCompleted: s.isCompleted })),
   };
 }
@@ -695,6 +700,25 @@ export function deriveMyDay(
   };
   const floating: FloatingCandidate[] = [];
 
+  // A task is actively blocked while its reason is set and the expected-clear date hasn't
+  // arrived (no date = blocked indefinitely). On/after the clear date it schedules normally.
+  const isBlockedOn = (t: Pick<Task, "blockedReason" | "blockedUntil">): boolean => {
+    if (!t.blockedReason) return false;
+    if (!t.blockedUntil) return true;
+    const u = new Date(t.blockedUntil);
+    return viewedUtcMidnight < Date.UTC(u.getUTCFullYear(), u.getUTCMonth(), u.getUTCDate());
+  };
+
+  // Does a calendar event cover the viewed day? All-day events span [start, end) in exclusive
+  // ICS fashion (a multi-day "Summer Holiday" covers every day up to but not including end).
+  const coversViewedDay = (e: CalendarEvent): boolean => {
+    const s = zonedYMD(new Date(e.start), raw.timeZone);
+    const en = zonedYMD(new Date(e.end), raw.timeZone);
+    const startMid = Date.UTC(s.year, s.month0, s.day);
+    const endMid = Date.UTC(en.year, en.month0, en.day);
+    return viewedUtcMidnight >= startMid && (e.allDay ? viewedUtcMidnight < Math.max(endMid, startMid + MS_PER_DAY) : viewedUtcMidnight <= endMid);
+  };
+
   const scopeOf = (category: string | null): "work" | "home" | "both" => {
     if (!category) return "both";
     const s = scopeByName.get(category.toLowerCase());
@@ -818,6 +842,7 @@ export function deriveMyDay(
           category,
           projectName,
           reason: duration == null ? "needs-duration" : "unscheduled",
+          blockedReason: kind === "task" && taskById.get(b.entityId) && isBlockedOn(taskById.get(b.entityId)!.task) ? taskById.get(b.entityId)!.task.blockedReason : null,
         },
         description,
         scope: scopeOf(category),
@@ -867,6 +892,7 @@ export function deriveMyDay(
           category: t.category,
           projectName,
           reason: t.durationMinutes == null ? "needs-duration" : "unscheduled",
+          blockedReason: isBlockedOn(t) ? t.blockedReason : null,
         },
         description: t.description,
         scope: scopeOf(t.category),
@@ -893,6 +919,7 @@ export function deriveMyDay(
         category: null,
         projectName: null,
         reason: p.durationMinutes == null ? "needs-duration" : "unscheduled",
+        blockedReason: null,
       },
       description: p.description,
       scope: "both",
@@ -965,6 +992,7 @@ export function deriveMyDay(
         category: null,
         projectName: null,
         reason: h.durationMinutes == null ? "needs-duration" : "unscheduled",
+        blockedReason: null,
       },
       description: null,
       scope: "both",
@@ -976,13 +1004,15 @@ export function deriveMyDay(
   // --- Calendar (ICS) events on the viewed day ---
   for (const e of calendarEvents) {
     if (dismissed.has(e.id) || !eventMatchesMode(e.source, mode)) continue;
+    // All-day events use a coverage check so multi-day ones (e.g. "Summer Holiday") appear on
+    // every day they span, not just their first.
+    if (e.allDay) {
+      if (coversViewedDay(e)) allDayEvents.push({ id: e.id, title: e.title, source: e.source });
+      continue;
+    }
     const start = new Date(e.start);
     const ymd = zonedYMD(start, raw.timeZone);
     if (ymd.year !== viewYear || ymd.month0 !== viewMonth0 || ymd.day !== day) continue;
-    if (e.allDay) {
-      allDayEvents.push({ id: e.id, title: e.title, source: e.source });
-      continue;
-    }
     const startMinutes = zonedMinutesOfDay(start, raw.timeZone);
     const realDuration = Math.round((new Date(e.end).getTime() - start.getTime()) / 60000);
     timeline.push(
@@ -1006,9 +1036,14 @@ export function deriveMyDay(
   }
 
   // --- Wellbeing day template: zone bands + snack/lunch anchors (workdays only) ---
+  // Holiday awareness: an (undismissed) calendar event whose title reads like a holiday and
+  // covers the viewed day — e.g. the multi-day "Summer Holiday" on the work calendar — turns a
+  // weekday into an off-day: no work zones, no snack/lunch anchors.
+  const HOLIDAY_TITLE = /holiday|vacation|half\s*term|no school|school closed|public holiday|day off|annual leave/i;
+  const isHoliday = calendarEvents.some((e) => !dismissed.has(e.id) && HOLIDAY_TITLE.test(e.title) && coversViewedDay(e));
   const template = DEFAULT_DAY_TEMPLATE;
-  const isWorkday = template.workdays.includes(weekday);
-  const templateZones = zonesForWeekday(template, weekday);
+  const isWorkday = template.workdays.includes(weekday) && !isHoliday;
+  const templateZones = isWorkday ? template.workdayZones : template.offdayZones;
   const zones: MyDayZoneVM[] = templateZones
     .filter((z) => z.label)
     .map((z) => ({ key: z.key, label: z.label, startMinutes: z.startMinutes, endMinutes: z.endMinutes }));
@@ -1054,11 +1089,16 @@ export function deriveMyDay(
   }
 
   // --- Auto-schedule the floating pool ---
-  // Schedulable = has a duration and isn't done. Past days never pack (they're a record, not a
-  // plan); today packs from "now" so unfinished items keep sliding forward as time passes.
+  // Schedulable = not done, not blocked, and has a duration. Completed items never resurface in
+  // the tray (they only remain visible as pinned timeline blocks). Blocked items sit in the tray
+  // with their waiting-on note. Past days never pack (they're a record, not a plan); today packs
+  // from "now" so unfinished items keep sliding forward as time passes.
   const schedulable = new Map<string, FloatingCandidate>();
   for (const f of floating) {
-    if (isPast || f.tray.isCompleted || f.tray.durationMinutes == null) {
+    if (f.tray.isCompleted) continue;
+    if (f.tray.blockedReason) {
+      tray.push({ ...f.tray, reason: "blocked" });
+    } else if (isPast || f.tray.durationMinutes == null) {
       tray.push(f.tray);
     } else {
       schedulable.set(f.tray.key, f);
@@ -1105,7 +1145,7 @@ export function deriveMyDay(
   const lookahead: MyDayLookaheadVM[] = [];
   for (const t of raw.tasks) {
     if (t.isCompleted || !t.dueDate || !taskMatchesMode(t.category, mode, scopeByName)) continue;
-    if (covered.has(`TASK:${t.id}`)) continue;
+    if (covered.has(`TASK:${t.id}`) || isBlockedOn(t)) continue; // blocked tasks can't be pulled forward
     const due = new Date(t.dueDate);
     const dueUtcMidnight = Date.UTC(due.getUTCFullYear(), due.getUTCMonth(), due.getUTCDate());
     const daysAway = Math.round((dueUtcMidnight - viewedUtcMidnight) / MS_PER_DAY);

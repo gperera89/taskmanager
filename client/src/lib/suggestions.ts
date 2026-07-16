@@ -4,6 +4,7 @@ import {
   getAllSuggestionDedupeKeys,
   getAiNotes,
   getAppSettings,
+  getBlockedTasks,
   getDismissedCalendarEventIds,
   getOpenTaskTitles,
   getSuggestionFeedback,
@@ -39,7 +40,7 @@ const SUGGESTIONS_SCHEMA = {
           dedupeKey: { type: "string" },
           kind: {
             type: "string",
-            enum: ["lesson-prep", "interview-review", "report", "birthday", "meeting-notes", "share-slides", "novel"],
+            enum: ["lesson-prep", "interview-review", "report", "birthday", "meeting-notes", "share-slides", "blocked-followup", "novel"],
           },
           title: { type: "string" },
           description: { type: ["string", "null"] },
@@ -68,7 +69,7 @@ export async function generateSuggestions(): Promise<{ created: number; skipped:
   const now = new Date();
   await wakeDueSnoozedSuggestions(now);
 
-  const [{ events }, dismissedIds, notes, feedback, openTitles, existingKeys, settings] = await Promise.all([
+  const [{ events }, dismissedIds, notes, feedback, openTitles, existingKeys, settings, blockedTasks] = await Promise.all([
     getCalendarEvents().catch(() => ({ events: [], errors: ["calendar unavailable"] })),
     getDismissedCalendarEventIds().catch(() => [] as string[]),
     getAiNotes(),
@@ -76,6 +77,7 @@ export async function generateSuggestions(): Promise<{ created: number; skipped:
     getOpenTaskTitles(),
     getAllSuggestionDedupeKeys(),
     getAppSettings(),
+    getBlockedTasks().catch(() => []),
   ]);
 
   const dismissed = new Set(dismissedIds);
@@ -110,6 +112,7 @@ export async function generateSuggestions(): Promise<{ created: number; skipped:
     "- One suggestion per distinct piece of work. Prep tasks get a suggestedDate 1-2 days BEFORE the event; follow-ups the day of or after.",
     "- Do not suggest anything already covered by an existing open task (list provided).",
     "- Learn from the feedback history: propose more of what gets accepted, stop proposing what gets dismissed.",
+    "- Blocked tasks: some tasks are on hold, each with a waiting-on note and an expected-clear date. When a block is expected to clear today or has passed, suggest a 'blocked-followup' to check whether it resolved and pick the task back up. When a deadline (task or project) is looming while the task is still blocked, suggest a proactive 'blocked-followup' to chase what it's waiting on. Do not suggest working on a task while its block is still active.",
     "- Include AT MOST ONE 'novel' suggestion per run — a genuinely useful blind-spot idea outside the standing rules.",
     "- Keep titles short and actionable. Descriptions optional, one sentence.",
     "- If nothing is worth suggesting, return an empty array.",
@@ -123,6 +126,9 @@ export async function generateSuggestions(): Promise<{ created: number; skipped:
     "",
     "Existing open tasks (do not duplicate):",
     JSON.stringify(openTitles),
+    "",
+    "Blocked (on-hold) tasks:",
+    blockedTasks.length ? JSON.stringify(blockedTasks) : "none",
     "",
     `Feedback so far — per-kind counts: ${statLines}`,
     "Recent responses:",

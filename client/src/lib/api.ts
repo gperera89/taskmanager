@@ -144,6 +144,8 @@ export function updateTask(
     section: string | null;
     reminderLeadMinutes: number | null;
     durationMinutes: number | null;
+    blockedReason: string | null;
+    blockedUntil: string | null; // "YYYY-MM-DD"
   }>
 ) {
   return notFoundAsError("Task not found", () =>
@@ -163,6 +165,9 @@ export function updateTask(
         section: input.section === undefined ? undefined : input.section || null,
         reminderLeadMinutes: input.reminderLeadMinutes,
         durationMinutes: input.durationMinutes,
+        blockedReason: input.blockedReason === undefined ? undefined : input.blockedReason || null,
+        blockedUntil:
+          input.blockedUntil === undefined ? undefined : input.blockedUntil ? combineDueDateTime(input.blockedUntil) : null,
         ...(input.repeat === undefined ? {} : repeatToPrismaData(input.repeat)),
       },
     })
@@ -900,6 +905,29 @@ export async function seedAiNotesIfEmpty(defaults: string[]) {
   const count = await prisma.aiNote.count();
   if (count > 0) return;
   await prisma.aiNote.createMany({ data: defaults.map((content) => ({ content })) });
+}
+
+// Blocked tasks for the generation prompt — the AI nudges when a block is due to clear or a
+// deadline is looming behind one.
+export async function getBlockedTasks() {
+  const rows = await prisma.task.findMany({
+    where: { isCompleted: false, blockedReason: { not: null } },
+    select: {
+      title: true,
+      blockedReason: true,
+      blockedUntil: true,
+      dueDate: true,
+      project: { select: { name: true, dueDate: true } },
+    },
+  });
+  return rows.map((r) => ({
+    title: r.title,
+    reason: r.blockedReason ?? "",
+    blockedUntil: r.blockedUntil ? new Date(r.blockedUntil).toISOString().slice(0, 10) : null,
+    dueDate: r.dueDate ? new Date(r.dueDate).toISOString().slice(0, 10) : null,
+    projectName: r.project?.name ?? null,
+    projectDueDate: r.project?.dueDate ? new Date(r.project.dueDate).toISOString().slice(0, 10) : null,
+  }));
 }
 
 // Open task titles for the generation prompt's duplicate-avoidance list.
