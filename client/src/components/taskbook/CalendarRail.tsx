@@ -1,8 +1,8 @@
 "use client";
 
 import type { MonthCell } from "@/lib/taskbookDates";
-import { CalendarEventMarker, CalendarTaskItem } from "./shared";
-import type { DayDetailVM, UpcomingItemVM } from "./types";
+import { CalendarEventMarker, CalendarTaskItem, RowDeleteButton } from "./shared";
+import type { CountdownVM, DayDetailVM, UpcomingItemVM } from "./types";
 
 const WEEKDAY_HEADERS = ["M", "T", "W", "T", "F", "S", "S"];
 
@@ -14,6 +14,9 @@ export default function CalendarRail({
   dayOpen,
   dayDetail,
   upcoming,
+  countdowns,
+  onEditCountdown,
+  onRemoveCountdown,
   onClickDay,
   onClickAdjacentDay,
   onPrevMonth,
@@ -30,6 +33,9 @@ export default function CalendarRail({
   dayOpen: boolean;
   dayDetail: DayDetailVM | undefined;
   upcoming: UpcomingItemVM[];
+  countdowns: CountdownVM[];
+  onEditCountdown: (countdown: CountdownVM) => void;
+  onRemoveCountdown: (id: string) => void;
   onClickDay: (day: number) => void;
   onClickAdjacentDay: (direction: "prev" | "next", day: number) => void;
   onPrevMonth: () => void;
@@ -180,6 +186,29 @@ export default function CalendarRail({
 
       {selectedDay != null && !dayOpen && (
         <div className="mt-4 text-xs italic text-(--info)">Click {selectedDay} {monthLabel} again to open the full day →</div>
+      )}
+
+      {countdowns.length > 0 && (
+        <>
+          <div className="my-5.5 h-px bg-(--rule)" />
+          <div className="mb-3 text-[11px] uppercase tracking-[0.16em] text-(--ink-soft)">Countdowns</div>
+          <div className="flex flex-col gap-3.5">
+            {countdowns.map((c) => (
+              <div key={c.id} className="group flex items-baseline gap-2.5">
+                <span className="w-17 flex-none whitespace-nowrap text-[13px] font-semibold text-(--info)">{c.daysLabel}</span>
+                <div
+                  className="min-w-0 flex-1 cursor-pointer"
+                  onClick={() => onEditCountdown(c)}
+                  title="Edit event"
+                >
+                  <div className="text-sm text-(--ink)">{c.title}</div>
+                  <div className="mt-px text-[11.5px] text-(--ink-soft)">{c.detailLabel}</div>
+                </div>
+                <RowDeleteButton action={() => onRemoveCountdown(c.id)} />
+              </div>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );

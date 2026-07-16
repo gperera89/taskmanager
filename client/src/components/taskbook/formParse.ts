@@ -4,7 +4,7 @@
 
 import type { HabitScheduleType, RoutineFrequency, RoutineMonthlyMode } from "@prisma/client";
 import { parseDurationInput } from "@/lib/shared";
-import type { HabitInput, ProjectInput, RoutineInput, TaskCreateInput, TaskRepeatInput } from "./store";
+import type { CountdownInput, HabitInput, ProjectInput, RoutineInput, TaskCreateInput, TaskRepeatInput } from "./store";
 
 const ROUTINE_FREQUENCIES: RoutineFrequency[] = ["DAILY", "WEEKLY", "MONTHLY"];
 const HABIT_SCHEDULE_TYPES: HabitScheduleType[] = ["WEEKLY_DAYS", "WEEKLY_COUNT", "MONTHLY_COUNT"];
@@ -94,6 +94,18 @@ export function parseRoutineForm(fd: FormData): RoutineInput {
     monthlyOrdinal: monthlyOrdinal || null,
     monthlyWeekday: Number.isInteger(monthlyWeekday) && monthlyWeekday >= 0 && monthlyWeekday <= 6 ? monthlyWeekday : null,
   };
+}
+
+export function parseCountdownForm(fd: FormData): CountdownInput {
+  return {
+    title: String(fd.get("title") ?? "").trim(),
+    date: String(fd.get("date") ?? "").trim(),
+    repeatsYearly: String(fd.get("repeatsYearly")) === "true",
+  };
+}
+
+export function isValidCountdownForm(input: CountdownInput): boolean {
+  return Boolean(input.title && /^\d{4}-\d{2}-\d{2}$/.test(input.date));
 }
 
 export function isValidTaskForm(input: TaskCreateInput): boolean {

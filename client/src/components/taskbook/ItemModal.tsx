@@ -5,9 +5,11 @@ import { REMINDER_LEAD_OPTIONS } from "@/lib/shared";
 import { todayInputValue } from "@/lib/taskbookDates";
 import { useTaskbook } from "./store";
 import {
+  isValidCountdownForm,
   isValidHabitForm,
   isValidRoutineForm,
   isValidTaskForm,
+  parseCountdownForm,
   parseHabitForm,
   parseProjectForm,
   parseRoutineForm,
@@ -17,7 +19,7 @@ import CategoryManager from "./CategoryManager";
 import { DateTimePickerPanel, formatPickerLabel } from "./DateTimePicker";
 import RepeatFields from "./RepeatFields";
 import { AutoGrowTextarea, DurationField } from "./shared";
-import type { CategoryOption, HabitCardVM, HabitScheduleType, ModalState, ProjectCardVM, ProjectOption, RoutineItemVM } from "./types";
+import type { CategoryOption, CountdownVM, HabitCardVM, HabitScheduleType, ModalState, ProjectCardVM, ProjectOption, RoutineItemVM } from "./types";
 
 const inputClass =
   "w-full rounded-lg border border-(--border-strong) bg-(--card) px-3 py-2 text-sm text-(--ink) outline-none focus:border-(--accent-text)";
@@ -41,13 +43,14 @@ const MONTHLY_ORDINAL_OPTIONS = [
 ];
 const WEEKDAY_FULL_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
-type Kind = "task" | "project" | "routine" | "habit";
+type Kind = "task" | "project" | "routine" | "habit" | "event";
 
 const KIND_TABS: { kind: Kind; name: string }[] = [
   { kind: "task", name: "Task" },
   { kind: "project", name: "Project" },
   { kind: "routine", name: "Routine" },
   { kind: "habit", name: "Habit" },
+  { kind: "event", name: "Event" },
 ];
 
 // The title/name field carries over when switching kind in Add mode, so starting a Task and
@@ -135,12 +138,18 @@ export default function ItemModal({
                 <HabitForm item={null} onClose={onClose} shared={shared} />
               </fieldset>
             </div>
+            <div className={`col-start-1 row-start-1 ${addKind === "event" ? "" : "invisible"}`}>
+              <fieldset disabled={addKind !== "event"} className="contents">
+                <EventForm item={null} onClose={onClose} shared={shared} />
+              </fieldset>
+            </div>
           </div>
         ) : (
           <>
             {state.kind === "project" && <ProjectForm item={state.item} onClose={onClose} />}
             {state.kind === "routine" && <RoutineForm item={state.item} onClose={onClose} />}
             {state.kind === "habit" && <HabitForm item={state.item} onClose={onClose} />}
+            {state.kind === "event" && <EventForm item={state.item} onClose={onClose} />}
           </>
         )}
       </div>
@@ -742,6 +751,83 @@ function HabitForm({
         <DurationField className={inputClass} defaultValue={item?.durationLabel ?? ""} />
       </div>
       <Actions submitLabel={item ? "Save" : "Add habit"} />
+    </form>
+  );
+}
+
+// Important-event countdowns ("Events") — the calendar rail counts down to the next occurrence.
+// Yearly events keep their original year (birth/wedding year) so the rail and pushes can say
+// how many years it's been; one-offs simply count down to the date and disappear after it.
+function EventForm({
+  item,
+  onClose,
+  shared,
+}: {
+  item: CountdownVM | null;
+  onClose: () => void;
+  shared?: SharedTitleProps;
+}) {
+  const { actions } = useTaskbook();
+  const [repeatsYearly, setRepeatsYearly] = useState(item?.repeatsYearly ?? true);
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        const input = parseCountdownForm(new FormData(e.currentTarget));
+        if (isValidCountdownForm(input)) {
+          if (item) actions.editCountdown(item.id, input);
+          else actions.addCountdown(input);
+        }
+        onClose();
+      }}
+      className="flex flex-col gap-3"
+    >
+      <div>
+        <label className={labelTextClass}>Title</label>
+        {shared ? (
+          <input
+            name="title"
+            required
+            autoFocus
+            value={shared.titleValue}
+            onChange={(e) => shared.onTitleChange(e.target.value)}
+            className={inputClass}
+          />
+        ) : (
+          <input name="title" required autoFocus defaultValue={item?.title} className={inputClass} />
+        )}
+      </div>
+      <div>
+        <label className={labelTextClass}>{repeatsYearly ? "Original date" : "Date"}</label>
+        <input name="date" type="date" required defaultValue={item?.dateValue} className={inputClass} />
+        {repeatsYearly && (
+          <p className="mt-1 text-[11.5px] text-(--ink-soft)">
+            The first occurrence (birthday, wedding day) — the year is what makes “4th anniversary” possible.
+          </p>
+        )}
+      </div>
+      <div>
+        <label className={labelTextClass}>Repeats</label>
+        <div className="flex gap-1 rounded-full border border-(--border-strong) p-1">
+          {([true, false] as const).map((yearly) => (
+            <button
+              key={String(yearly)}
+              type="button"
+              onClick={() => setRepeatsYearly(yearly)}
+              className="flex-1 cursor-pointer rounded-full py-1.5 text-xs"
+              style={{
+                background: repeatsYearly === yearly ? "var(--accent)" : "transparent",
+                color: repeatsYearly === yearly ? "var(--on-accent)" : "var(--ink-muted)",
+              }}
+            >
+              {yearly ? "Every year" : "One-off"}
+            </button>
+          ))}
+        </div>
+        <input type="hidden" name="repeatsYearly" value={String(repeatsYearly)} />
+      </div>
+      <Actions submitLabel={item ? "Save" : "Add event"} />
     </form>
   );
 }

@@ -5,15 +5,18 @@ import {
   deletePushSubscription,
   getActiveTopLevelRoutines,
   getAppSettings,
+  getCountdowns,
   getPushSubscriptions,
   getUnnotifiedDueProjects,
   getUnnotifiedDueTasks,
   isRoutineTickedNow,
+  markCountdownNotified,
   markProjectNotified,
   markTaskNotified,
 } from "@/lib/api";
+import { countdownYears, nextCountdownOccurrenceMs, MS_PER_DAY } from "@/lib/shared";
 import { isRoutineDueToday } from "@/lib/taskRecurrence";
-import { dueInstant, getTimeZoneOffsetMs, pad2, zonedNow } from "@/lib/taskbookDates";
+import { calendarDateFromDue, dueInstant, formatShortDate, getTimeZoneOffsetMs, pad2, zonedNow } from "@/lib/taskbookDates";
 
 // --- Delivery layer -------------------------------------------------------------------------
 //
@@ -179,6 +182,58 @@ async function checkAndNotifyDueRoutines(now: Date, timeZone: string): Promise<{
   return { notified: due.length };
 }
 
+// Countdown pushes fire once the local morning has arrived, not at midnight.
+const COUNTDOWN_NOTIFY_TIME = "08:00";
+// How far ahead the heads-up push fires ("plus a heads-up" — time to buy the present).
+const COUNTDOWN_HEADS_UP_DAYS = 7;
+
+// Important-event countdowns: one heads-up push a week out and one on the morning of the day,
+// each sent exactly once per occurrence (the notified* markers store which occurrence fired;
+// editing the event clears them). Yearly events name the elapsed years ("42 years today").
+async function checkAndNotifyDueCountdowns(now: Date, timeZone: string): Promise<{ notified: number }> {
+  const local = zonedNow(now.getTime(), timeZone);
+  const nowHHMM = `${pad2(local.getUTCHours())}:${pad2(local.getUTCMinutes())}`;
+  if (nowHHMM < COUNTDOWN_NOTIFY_TIME) return { notified: 0 };
+
+  const todayUtc = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate());
+  const countdowns = await getCountdowns();
+  let notified = 0;
+
+  await Promise.all(
+    countdowns.map(async (c) => {
+      const occMs = nextCountdownOccurrenceMs(c.date, c.repeatsYearly, todayUtc);
+      if (occMs < todayUtc) return; // a passed one-off, awaiting sweep
+      const occurrence = new Date(occMs);
+      const daysAway = Math.round((occMs - todayUtc) / MS_PER_DAY);
+      const years = countdownYears(c.date, occMs);
+      const yearsLabel = c.repeatsYearly && years > 0 ? `${years} ${years === 1 ? "year" : "years"}` : null;
+
+      if (daysAway === 0 && c.notifiedOnDayFor?.getTime() !== occMs) {
+        await deliver({
+          title: `Today: ${c.title}`,
+          body: yearsLabel ? `${yearsLabel} today 🎉` : "The day is here 🎉",
+          url: "/",
+          tag: `countdown-${c.id}`,
+        });
+        await markCountdownNotified(c.id, "onDay", occurrence);
+        notified++;
+      } else if (daysAway > 0 && daysAway <= COUNTDOWN_HEADS_UP_DAYS && c.notifiedHeadsUpFor?.getTime() !== occMs) {
+        const dateLabel = formatShortDate(calendarDateFromDue(occurrence));
+        await deliver({
+          title: `${c.title} in ${daysAway} ${daysAway === 1 ? "day" : "days"}`,
+          body: yearsLabel ? `${yearsLabel} on ${dateLabel}` : `On ${dateLabel}`,
+          url: "/",
+          tag: `countdown-${c.id}`,
+        });
+        await markCountdownNotified(c.id, "headsUp", occurrence);
+        notified++;
+      }
+    })
+  );
+
+  return { notified };
+}
+
 // Finds every task/project that has reached its reminder instant (due time minus its optional
 // reminderLeadMinutes) and hasn't been notified, sends a notification, and marks it notified.
 // Meant to be called on a short interval (e.g. every minute) by an external scheduler hitting
@@ -187,15 +242,17 @@ export async function checkAndNotifyDueItems(): Promise<{
   tasksNotified: number;
   projectsNotified: number;
   routinesNotified: number;
+  countdownsNotified: number;
 }> {
   const now = new Date();
   const { timeZone } = await getAppSettings();
   const until = new Date(now.getTime() + getTimeZoneOffsetMs(now, timeZone) + MAX_LEAD_MS);
 
-  const [tasks, projects, routineResult] = await Promise.all([
+  const [tasks, projects, routineResult, countdownResult] = await Promise.all([
     getUnnotifiedDueTasks(until),
     getUnnotifiedDueProjects(until),
     checkAndNotifyDueRoutines(now, timeZone),
+    checkAndNotifyDueCountdowns(now, timeZone),
   ]);
 
   const reminderInstant = (due: Date, leadMinutes: number | null) =>
@@ -230,5 +287,6 @@ export async function checkAndNotifyDueItems(): Promise<{
     tasksNotified: dueTasks.length,
     projectsNotified: dueProjects.length,
     routinesNotified: routineResult.notified,
+    countdownsNotified: countdownResult.notified,
   };
 }

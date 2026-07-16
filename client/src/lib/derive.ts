@@ -6,8 +6,8 @@
 // would have (this used to exclude the calendar rail; see git history if that distinction ever
 // needs resurrecting).
 
-import type { Task, Project, Habit, HabitCompletion, Routine, Category, VoiceCapture, DayPlanBlock, AiSuggestion, AiNote } from "@prisma/client";
-import { formatDuration, habitDateKey, habitStatus, taskOrderCompare, MS_PER_DAY, ROUTINE_TICK_EXPIRY_MS } from "@/lib/shared";
+import type { Task, Project, Habit, HabitCompletion, Routine, Category, VoiceCapture, DayPlanBlock, AiSuggestion, AiNote, Countdown } from "@prisma/client";
+import { countdownYears, formatDuration, habitDateKey, habitStatus, nextCountdownOccurrenceMs, taskOrderCompare, MS_PER_DAY, ROUTINE_TICK_EXPIRY_MS } from "@/lib/shared";
 export { combineDueDateTime, ROUTINE_TICK_EXPIRY_MS } from "@/lib/shared";
 import {
   bucketForDue,
@@ -33,6 +33,7 @@ import { packFlexible, placeLunch, type FlexItem, type Obstacle } from "@/lib/sc
 import type {
   CalendarEvent,
   CategoryOption,
+  CountdownVM,
   DayDetailVM,
   HabitCardVM,
   Mode,
@@ -68,6 +69,7 @@ export type RawState = {
   dayPlanBlocks: DayPlanBlock[]; // My Day placements, recent past + future (mirrors getDayPlanBlocks)
   suggestions: AiSuggestion[]; // PENDING AI planner suggestions (mirrors getActiveSuggestions)
   aiNotes: AiNote[]; // standing instructions for the AI planner (mirrors getAiNotes)
+  countdowns: Countdown[]; // important-event countdowns (mirrors getCountdowns)
 };
 
 // The entity slice of TaskbookData — everything except the calendar view (see
@@ -82,6 +84,7 @@ export type DerivedEntities = {
   routineTotalCount: number;
   habits: HabitCardVM[];
   habitAtRiskCount: number;
+  countdowns: CountdownVM[];
   projectOptions: ProjectOption[];
   categoryOptions: CategoryOption[];
   pendingCaptures: VoiceCaptureVM[];
@@ -314,11 +317,13 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
       (a, b) => Number(a.isCompleted) - Number(b.isCompleted) || taskOrderCompare(orderKey(a), orderKey(b))
     );
     const tasks = sorted.map((t) => toTaskVM(t, projectNameById));
-    // Group by section, preserving first-appearance order; unsectioned tasks lead.
+    // Group by section, preserving first-appearance order; unsectioned tasks lead. With
+    // sections toggled off the card renders one flat headingless group regardless of any
+    // stray section values (the disable path clears them server-side).
     const sectionOrder: (string | null)[] = [null];
     const bySection = new Map<string | null, TaskItemVM[]>([[null, []]]);
     for (const t of tasks) {
-      const key = t.section;
+      const key = p.sectionsEnabled ? t.section : null;
       if (!bySection.has(key)) {
         bySection.set(key, []);
         sectionOrder.push(key);
@@ -341,6 +346,7 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
       total,
       progressPct,
       tasks,
+      sectionsEnabled: p.sectionsEnabled,
       sections,
       sectionNames: sectionOrder.filter((s): s is string => s !== null),
     };
@@ -426,6 +432,29 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
   habitVMs.sort((a, b) => habitRank(a) - habitRank(b) || a.title.localeCompare(b.title));
   const habitAtRiskCount = habitVMs.filter((h) => h.atRisk).length;
 
+  // Countdowns — one row per event, targeting its next occurrence, soonest first. One-offs
+  // whose date has passed drop out here (their rows are swept by the notification cron).
+  // Not mode-filtered: these are personal dates, visible in work and home alike.
+  const countdownVMs: CountdownVM[] = [];
+  for (const c of raw.countdowns) {
+    const original = new Date(c.date);
+    const occMs = nextCountdownOccurrenceMs(original, c.repeatsYearly, zonedToday);
+    if (occMs < zonedToday) continue;
+    const daysAway = Math.round((occMs - zonedToday) / MS_PER_DAY);
+    const years = countdownYears(original, occMs);
+    const dateLabel = formatShortDate(calendarDateFromDue(new Date(occMs)));
+    countdownVMs.push({
+      id: c.id,
+      title: c.title,
+      dateValue: toDateInputValue(original),
+      repeatsYearly: c.repeatsYearly,
+      daysAway,
+      daysLabel: daysAway === 0 ? "Today" : daysAway === 1 ? "Tomorrow" : `${daysAway} days`,
+      detailLabel: c.repeatsYearly && years > 0 ? `${years} ${years === 1 ? "year" : "years"} · ${dateLabel}` : dateLabel,
+    });
+  }
+  countdownVMs.sort((a, b) => a.daysAway - b.daysAway || a.title.localeCompare(b.title));
+
   // Voice captures (notification panel).
   const CAPTURED_KIND_MAP: Record<string, VoiceCaptureVM["kind"]> = {
     TASK: "task",
@@ -452,6 +481,7 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
     routineTotalCount,
     habits: habitVMs,
     habitAtRiskCount,
+    countdowns: countdownVMs,
     projectOptions: raw.projects.map((p) => ({ id: p.id, name: p.name })),
     categoryOptions: raw.categories.map((c) => ({ id: c.id, name: c.name, scope: c.scope })),
     pendingCaptures,

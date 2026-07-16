@@ -209,6 +209,28 @@ export function habitFlameState(status: HabitStatus): "lit" | "flicker" | "out" 
   return "lit";
 }
 
+// --- Countdown occurrence math ----------------------------------------------------------------
+//
+// Shared by derive.ts (the calendar-rail list) and notifications.ts (the cron pushes) so both
+// agree on which occurrence a countdown is heading toward. `date` uses the UTC-midnight
+// calendar-date encoding; `todayUtcMs` is UTC midnight of today's calendar date in the
+// configured timezone (see derive's zonedToday).
+
+// The UTC-midnight ms of the next occurrence: the date itself for one-offs (even if past —
+// callers filter/sweep those), or the next anniversary of the month/day for yearly countdowns.
+export function nextCountdownOccurrenceMs(date: Date, repeatsYearly: boolean, todayUtcMs: number): number {
+  const d = new Date(date);
+  if (!repeatsYearly) return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  const year = new Date(todayUtcMs).getUTCFullYear();
+  const thisYear = Date.UTC(year, d.getUTCMonth(), d.getUTCDate());
+  return thisYear >= todayUtcMs ? thisYear : Date.UTC(year + 1, d.getUTCMonth(), d.getUTCDate());
+}
+
+// Whole years between the original date and an occurrence of it — the "42" in "42 years".
+export function countdownYears(date: Date, occurrenceMs: number): number {
+  return new Date(occurrenceMs).getUTCFullYear() - new Date(date).getUTCFullYear();
+}
+
 // Sort key for manual ordering: manually-positioned tasks first (by their fractional index),
 // then unpositioned ones by due time, then by creation time. Used identically by the tasks
 // view buckets and project-card sections.

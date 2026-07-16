@@ -337,6 +337,9 @@ export default function TaskbookApp() {
             dayOpen={dayOpen}
             dayDetail={dayDetail}
             upcoming={calendarView.upcoming}
+            countdowns={data.countdowns}
+            onEditCountdown={(item) => setModal({ mode: "edit", kind: "event", item })}
+            onRemoveCountdown={actions.removeCountdown}
             onClickDay={clickDay}
             onClickAdjacentDay={clickAdjacentDay}
             onPrevMonth={goPrevMonth}
@@ -407,6 +410,9 @@ export default function TaskbookApp() {
               dayOpen={dayOpen}
               dayDetail={dayDetail}
               upcoming={calendarView.upcoming}
+              countdowns={data.countdowns}
+              onEditCountdown={(item) => setModal({ mode: "edit", kind: "event", item })}
+              onRemoveCountdown={actions.removeCountdown}
               onClickDay={clickDay}
               onClickAdjacentDay={clickAdjacentDay}
               onPrevMonth={goPrevMonth}

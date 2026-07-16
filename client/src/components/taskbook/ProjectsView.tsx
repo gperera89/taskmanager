@@ -152,6 +152,26 @@ function ProjectCard({
           <ProjectExpandToggle mode={viewMode} onCycle={cycleViewMode} />
           <button
             type="button"
+            title={
+              project.sectionsEnabled
+                ? "Remove section headings (tasks keep their order)"
+                : "Group this project's tasks under section headings"
+            }
+            onClick={() => {
+              if (
+                project.sectionsEnabled &&
+                project.sectionNames.length > 0 &&
+                !window.confirm("Remove sections? Tasks stay, but lose their section headings.")
+              )
+                return;
+              actions.setProjectSections(project.id, !project.sectionsEnabled);
+            }}
+            className="cursor-pointer whitespace-nowrap text-[13px] text-(--ink-faint) opacity-0 transition-opacity hover:text-(--info) group-hover:opacity-100"
+          >
+            {project.sectionsEnabled ? "Remove sections" : "Create sections"}
+          </button>
+          <button
+            type="button"
             title="Duplicate as a fresh copy (templates)"
             aria-label={`Duplicate ${project.name}`}
             onClick={() => {
@@ -243,7 +263,7 @@ function ProjectCard({
                   projectOptions={projectOptions}
                   onCompleting={hold}
                   reorderIds={section.tasks.map((t) => t.id)}
-                  sectionOptions={project.sectionNames}
+                  sectionOptions={project.sectionsEnabled ? project.sectionNames : undefined}
                 />
               ))}
             </div>

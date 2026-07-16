@@ -72,8 +72,20 @@ export type ProjectCardVM = {
   total: number;
   progressPct: number;
   tasks: TaskItemVM[]; // all tasks in the project, incomplete first (flat, for lookups)
+  sectionsEnabled: boolean; // whether this card offers section headings (the header toggle)
   sections: ProjectSectionVM[]; // the same tasks grouped by section for display
   sectionNames: string[]; // existing section names, for the per-task section picker
+};
+
+// An important-event countdown row in the calendar rail ("12 days · Tracey's birthday").
+export type CountdownVM = {
+  id: string;
+  title: string;
+  dateValue: string; // yyyy-mm-dd of the ORIGINAL date (birth/wedding year), for the edit form
+  repeatsYearly: boolean;
+  daysAway: number; // days until the next occurrence; 0 = today
+  daysLabel: string; // "Today" | "Tomorrow" | "12 days"
+  detailLabel: string; // "42 years · Mon 28 Jul" (yearly) or just the date (one-off)
 };
 
 export type HabitScheduleType = "WEEKLY_DAYS" | "WEEKLY_COUNT" | "MONTHLY_COUNT";
@@ -255,6 +267,7 @@ export type TaskbookData = {
   habits: HabitCardVM[];
   habitAtRiskCount: number;
   calendarErrors: string[];
+  countdowns: CountdownVM[]; // soonest first — the calendar rail's "Countdowns" block
   projectOptions: ProjectOption[];
   categoryOptions: CategoryOption[];
   pendingCaptures: VoiceCaptureVM[];
@@ -268,7 +281,7 @@ export type AreaKey = "tasks" | "projects" | "routines" | "habits" | "calendar" 
 // deriveCalendarView in lib/derive.ts.
 export type Mode = "work" | "home" | "all";
 
-export type ItemKind = "task" | "project" | "routine" | "habit";
+export type ItemKind = "task" | "project" | "routine" | "habit" | "event";
 
 // Tasks are edited inline on their row (see TasksView) rather than through this modal.
 export type ModalState =
@@ -276,4 +289,5 @@ export type ModalState =
   | { mode: "edit"; kind: "project"; item: ProjectCardVM }
   | { mode: "edit"; kind: "routine"; item: RoutineItemVM }
   | { mode: "edit"; kind: "habit"; item: HabitCardVM }
+  | { mode: "edit"; kind: "event"; item: CountdownVM }
   | null;

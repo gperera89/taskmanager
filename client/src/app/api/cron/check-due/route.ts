@@ -1,4 +1,4 @@
-import { markCronRun, sweepDayPlanBlocks, sweepDismissedCalendarEvents } from "@/lib/api";
+import { markCronRun, sweepDayPlanBlocks, sweepDismissedCalendarEvents, sweepPastCountdowns } from "@/lib/api";
 import { checkAndNotifyDueItems } from "@/lib/notifications";
 
 // Hit on a short interval (e.g. every minute) by an external scheduler — see the project's
@@ -21,6 +21,8 @@ export async function GET(request: Request) {
     // Housekeeping that used to run a delete on the page-load read path.
     sweepDismissedCalendarEvents(),
     sweepDayPlanBlocks(),
+    // One-off countdowns are deleted once their day has passed.
+    sweepPastCountdowns(now),
   ]);
   return Response.json(result);
 }

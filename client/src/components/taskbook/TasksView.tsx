@@ -169,7 +169,6 @@ export function TaskRow({
   const progressPct = hasSubtasks ? Math.round((task.subtasksDone / task.subtasksTotal) * 100) : 0;
   const [subtasksOpen, setSubtasksOpen] = useState(false);
   const [addingSubtask, setAddingSubtask] = useState(false);
-  const [snoozeOpen, setSnoozeOpen] = useState(false);
   const [blockOpen, setBlockOpen] = useState(false);
   const [blockReasonDraft, setBlockReasonDraft] = useState(task.blockedReason ?? "");
   const [blockUntilDraft, setBlockUntilDraft] = useState(task.blockedUntilValue);
@@ -516,43 +515,9 @@ export function TaskRow({
             )}
           </div>
 
-          {task.dueLabel && !task.isCompleted && (
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setSnoozeOpen((v) => !v)}
-                aria-label="Snooze"
-                title="Snooze"
-                className={chipSelectClass}
-                style={{ color: "var(--ink-faint)", background: "transparent", border: "1px dashed var(--border-strong)" }}
-              >
-                zzz
-              </button>
-              {snoozeOpen && (
-                <div className="absolute left-0 top-7 z-20 flex flex-col rounded-lg border border-(--border-strong) bg-(--card) py-1 shadow-[0_8px_24px_rgba(70,55,30,.18)]">
-                  {[
-                    { days: 1, label: "Tomorrow" },
-                    { days: 3, label: "In 3 days" },
-                    { days: 7, label: "Next week" },
-                  ].map((o) => (
-                    <button
-                      key={o.days}
-                      type="button"
-                      onClick={() => {
-                        actions.snoozeTask(task.id, o.days);
-                        setSnoozeOpen(false);
-                      }}
-                      className="cursor-pointer whitespace-nowrap px-3 py-1 text-left text-xs text-(--ink) hover:bg-[rgba(85,118,148,.08)]"
-                    >
-                      {o.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {!task.isCompleted && (
+          {/* On-hold ("waiting on") only applies to tasks inside a project — standalone tasks
+              just move their due date instead. */}
+          {!task.isCompleted && task.projectId && (
             <div className="relative">
               <button
                 type="button"

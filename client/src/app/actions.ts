@@ -32,8 +32,11 @@ import {
   restoreCalendarEvent as restoreCalendarEventApi,
   type RoutineFrequency,
   type RoutineMonthlyMode,
-  snoozeTask as snoozeTaskApi,
+  createCountdown,
+  deleteCountdown,
+  setProjectSections,
   type TaskRepeatInput,
+  updateCountdown as updateCountdownApi,
   toggleHabitCompletion as toggleHabitCompletionApi,
   toggleTaskCompletion,
   untickRoutineCluster,
@@ -223,9 +226,33 @@ export async function reorderTaskGroup(formData: FormData) {
   if (ids.length) await reorderTasksApi(ids);
 }
 
-export async function snoozeTask(id: string, days: number) {
+// --- Countdowns (important-event countdowns in the calendar rail) ---
+
+function parseCountdownFields(formData: FormData): { title: string; date: string; repeatsYearly: boolean } | null {
+  const title = String(formData.get("title") ?? "").trim();
+  const date = String(formData.get("date") ?? "").trim();
+  if (!title || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  return { title, date, repeatsYearly: String(formData.get("repeatsYearly")) === "true" };
+}
+
+export async function addCountdown(formData: FormData): Promise<string | undefined> {
   await requireSession();
-  await snoozeTaskApi(id, Math.min(Math.max(Math.round(days) || 1, 1), 30));
+  const input = parseCountdownFields(formData);
+  if (!input) return;
+  const countdown = await createCountdown(input);
+  return countdown.id;
+}
+
+export async function editCountdown(id: string, formData: FormData) {
+  await requireSession();
+  const input = parseCountdownFields(formData);
+  if (!input) return;
+  await updateCountdownApi(id, input);
+}
+
+export async function removeCountdown(id: string) {
+  await requireSession();
+  await deleteCountdown(id);
 }
 
 // --- My Day plan blocks ---
@@ -339,6 +366,12 @@ export async function updateProjectDueDate(id: string, formData: FormData) {
   await requireSession();
   const dueDate = String(formData.get("dueDate") ?? "").trim();
   await updateProject(id, { dueDate: dueDate || null });
+}
+
+// Toggle Things-style sections on a project card; disabling clears every task's section.
+export async function updateProjectSections(id: string, enabled: boolean) {
+  await requireSession();
+  await setProjectSections(id, enabled);
 }
 
 export async function toggleProject(id: string, isCompleted: boolean) {

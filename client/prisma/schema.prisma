@@ -62,7 +62,27 @@ model Project {
   // How long this is expected to take, in minutes (null = unset). Lets a dated item occupy a
   // block of time on the schedule rather than a single instant.
   durationMinutes Int?
+  // Whether this project's card offers Things-style section headings (the "Create sections" /
+  // "Remove sections" button on the card). Turning it off clears every task's section value.
+  sectionsEnabled Boolean @default(false)
   tasks       Task[]
+}
+
+// An important date to count down to, shown in the calendar rail ("12 days · Tracey's
+// birthday"). `date` uses the UTC-midnight calendar-date encoding. Yearly countdowns target the
+// next anniversary of `date` — the stored year is the original occurrence's (birth year, wedding
+// year), so labels can carry the elapsed years ("42 years"). One-off countdowns target the date
+// itself and disappear once it has passed (swept by the notification cron).
+model Countdown {
+  id            String   @id @default(uuid())
+  title         String
+  date          DateTime
+  repeatsYearly Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  // The occurrence (UTC-midnight date) each push kind was last sent for, so the cron sends the
+  // week-before heads-up and the on-the-day push exactly once per occurrence. Cleared on edit.
+  notifiedHeadsUpFor DateTime?
+  notifiedOnDayFor   DateTime?
 }
 
 model Task {

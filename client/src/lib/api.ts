@@ -276,6 +276,15 @@ export function updateProject(
   });
 }
 
+// Toggle Things-style sections on a project's card (the "Create sections"/"Remove sections"
+// button). Disabling also clears every task's section assignment so re-enabling starts fresh.
+export async function setProjectSections(id: string, enabled: boolean) {
+  await notFoundAsError("Project not found", () =>
+    prisma.project.update({ where: { id }, data: { sectionsEnabled: enabled } })
+  );
+  if (!enabled) await prisma.task.updateMany({ where: { projectId: id }, data: { section: null } });
+}
+
 // "New from template": copies a project and its task tree (sections, categories, descriptions,
 // repeat rules and manual order carry over; completion state and dates are reset — a template's
 // dates would be stale by definition).
@@ -286,7 +295,12 @@ export async function duplicateProject(id: string, name?: string | null) {
       include: { tasks: { include: { subtasks: true } } },
     });
     const project = await prisma.project.create({
-      data: { name: name?.trim() || `${source.name} copy`, description: source.description, durationMinutes: source.durationMinutes },
+      data: {
+        name: name?.trim() || `${source.name} copy`,
+        description: source.description,
+        durationMinutes: source.durationMinutes,
+        sectionsEnabled: source.sectionsEnabled,
+      },
     });
     // Only top-level tasks carry their subtasks; a subtask row also appears in source.tasks
     // (it has projectId? no — subtasks created via addTask carry projectId only if set).
@@ -331,6 +345,54 @@ export async function deleteProject(id: string) {
   const project = await notFoundAsError("Project not found", () => prisma.project.delete({ where: { id } }));
   await deleteDayPlanBlocksFor("PROJECT", id);
   return project;
+}
+
+// --- Countdowns (important-event countdowns shown in the calendar rail) ---
+
+export const getCountdowns = () => prisma.countdown.findMany({ orderBy: { createdAt: "asc" } });
+
+export function createCountdown(input: { title: string; date: string; repeatsYearly: boolean }) {
+  const title = input.title.trim();
+  if (!title) throw new Error("Title is required");
+  return prisma.countdown.create({
+    data: { title, date: combineDueDateTime(input.date), repeatsYearly: input.repeatsYearly },
+  });
+}
+
+export function updateCountdown(id: string, input: { title: string; date: string; repeatsYearly: boolean }) {
+  // Any edit re-arms both pushes for the (possibly new) occurrence — same convention as a
+  // changed dueDate clearing Task.notifiedAt.
+  return notFoundAsError("Countdown not found", () =>
+    prisma.countdown.update({
+      where: { id },
+      data: {
+        title: input.title.trim(),
+        date: combineDueDateTime(input.date),
+        repeatsYearly: input.repeatsYearly,
+        notifiedHeadsUpFor: null,
+        notifiedOnDayFor: null,
+      },
+    })
+  );
+}
+
+export async function deleteCountdown(id: string) {
+  await notFoundAsError("Countdown not found", () => prisma.countdown.delete({ where: { id } }));
+}
+
+export function markCountdownNotified(id: string, kind: "headsUp" | "onDay", occurrence: Date) {
+  return prisma.countdown.update({
+    where: { id },
+    data: kind === "headsUp" ? { notifiedHeadsUpFor: occurrence } : { notifiedOnDayFor: occurrence },
+  });
+}
+
+// One-off countdowns are over once their day has passed — sweep them a day later (the grace
+// day keeps "Today" visible for the whole calendar date in any timezone).
+export function sweepPastCountdowns(now: Date) {
+  return prisma.countdown.deleteMany({
+    where: { repeatsYearly: false, date: { lt: new Date(now.getTime() - MS_PER_DAY) } },
+  });
 }
 
 export const getHabits = () => prisma.habit.findMany();

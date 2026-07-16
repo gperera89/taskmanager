@@ -17,13 +17,12 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { AiNote, CapturedKind, DayPlanBlock, HabitCompletion, HabitScheduleType, Routine, RoutineFrequency, RoutineMonthlyMode } from "@prisma/client";
+import type { AiNote, CapturedKind, Countdown, DayPlanBlock, HabitCompletion, HabitScheduleType, Routine, RoutineFrequency, RoutineMonthlyMode } from "@prisma/client";
 import * as serverActions from "@/app/actions";
 import { deriveEntities, type RawState, type RawTask } from "@/lib/derive";
 import {
   combineDueDateTime,
   habitDateKey,
-  MS_PER_DAY,
   NO_REPEAT,
 } from "@/lib/shared";
 import {
@@ -75,6 +74,7 @@ export type ServerCalendarData = Omit<
   | "routineTotalCount"
   | "habits"
   | "habitAtRiskCount"
+  | "countdowns"
   | "projectOptions"
   | "categoryOptions"
   | "pendingCaptures"
@@ -119,6 +119,12 @@ export type RoutineInput = {
   monthlyWeekday: number | null;
 };
 
+export type CountdownInput = {
+  title: string;
+  date: string; // "YYYY-MM-DD" — the original date (birth/wedding year for yearly events)
+  repeatsYearly: boolean;
+};
+
 export type DayPlanBlockInput = {
   date: string; // "YYYY-MM-DD"
   entityType: CapturedKind;
@@ -149,7 +155,6 @@ export type TaskbookActions = {
   setTaskReminderLead: (id: string, minutes: number | null) => void;
   setTaskDuration: (id: string, minutes: number | null) => void;
   setTaskBlock: (id: string, reason: string, untilDate: string) => void; // empty reason clears
-  snoozeTask: (id: string, days: number) => void;
   reorderGroup: (orderedIds: string[]) => void;
   // Projects
   addProject: (input: ProjectInput) => void;
@@ -159,7 +164,12 @@ export type TaskbookActions = {
   setProjectDescription: (id: string, description: string) => void;
   setProjectDueDate: (id: string, dueDate: string) => void;
   toggleProject: (id: string, isCompleted: boolean) => void;
+  setProjectSections: (id: string, enabled: boolean) => void;
   removeProject: (id: string) => void;
+  // Countdowns
+  addCountdown: (input: CountdownInput) => void;
+  editCountdown: (id: string, input: CountdownInput) => void;
+  removeCountdown: (id: string) => void;
   // Habits
   addHabit: (input: HabitInput) => void;
   editHabit: (id: string, input: HabitInput) => void;
@@ -356,7 +366,6 @@ const REGISTRY: Record<string, RegistryEntry> = {
   setTaskReminderLead: { fn: serverActions.updateTaskReminderLead },
   setTaskDuration: { fn: serverActions.updateTaskDuration },
   setTaskBlock: { fn: serverActions.updateTaskBlock },
-  snoozeTask: { fn: serverActions.snoozeTask },
   reorderGroup: { fn: serverActions.reorderTaskGroup },
   addProject: {
     fn: serverActions.addProject,
@@ -367,7 +376,14 @@ const REGISTRY: Record<string, RegistryEntry> = {
   setProjectDescription: { fn: serverActions.updateProjectDescription },
   setProjectDueDate: { fn: serverActions.updateProjectDueDate },
   toggleProject: { fn: serverActions.toggleProject },
+  setProjectSections: { fn: serverActions.updateProjectSections },
   removeProject: { fn: serverActions.removeProject },
+  addCountdown: {
+    fn: serverActions.addCountdown,
+    swap: (r, temp, real) => ({ ...r, countdowns: r.countdowns.map((c) => (c.id === temp ? { ...c, id: real } : c)) }),
+  },
+  editCountdown: { fn: serverActions.editCountdown },
+  removeCountdown: { fn: serverActions.removeCountdown },
   addHabit: {
     fn: serverActions.addHabit,
     swap: (r, temp, real) => ({
@@ -667,6 +683,7 @@ export function StoreProvider({
             dayPlanBlocks: snapshot.raw.dayPlanBlocks ?? [],
             suggestions: snapshot.raw.suggestions ?? [],
             aiNotes: snapshot.raw.aiNotes ?? [],
+            countdowns: snapshot.raw.countdowns ?? [],
           });
           if (snapshot.calendarEvents?.length) setEvents(snapshot.calendarEvents);
         }
@@ -937,19 +954,6 @@ export function StoreProvider({
           [id, fd]
         );
       },
-      snoozeTask: (id, days) =>
-        mutate(
-          (r) => ({
-            ...r,
-            tasks: mapTask(r.tasks, id, (t) => ({
-              ...t,
-              dueDate: new Date((t.dueDate ? new Date(t.dueDate).getTime() : Date.UTC(new Date().getFullYear(), new Date().getMonth(), new Date().getDate())) + days * MS_PER_DAY),
-              notifiedAt: null,
-            })),
-          }),
-          "snoozeTask",
-          [id, days]
-        ),
       reorderGroup: (orderedIds) => {
         const orderById = new Map(orderedIds.map((id, i) => [id, (i + 1) * 1024]));
         const fd = new FormData();
@@ -987,6 +991,7 @@ export function StoreProvider({
                 notifiedAt: null,
                 reminderLeadMinutes: input.reminderLeadMinutes ?? null,
                 durationMinutes: input.durationMinutes ?? null,
+                sectionsEnabled: false,
               },
             ],
           }),
@@ -1068,6 +1073,18 @@ export function StoreProvider({
           "toggleProject",
           [id, isCompleted]
         ),
+      // Turning sections off also clears every task's section locally, mirroring the server
+      // (setProjectSections in api.ts) so the card regroups instantly.
+      setProjectSections: (id, enabled) =>
+        mutate(
+          (r) => ({
+            ...r,
+            projects: r.projects.map((p) => (p.id === id ? { ...p, sectionsEnabled: enabled } : p)),
+            tasks: enabled ? r.tasks : r.tasks.map((t) => (t.projectId === id && t.section ? { ...t, section: null } : t)),
+          }),
+          "setProjectSections",
+          [id, enabled]
+        ),
       removeProject: (id) => {
         const captured = rawRef.current.projects.find((p) => p.id === id);
         if (!captured) return;
@@ -1076,6 +1093,53 @@ export function StoreProvider({
           (r) => ({ ...r, projects: r.projects.filter((p) => p.id !== id) }),
           (r) => ({ ...r, projects: [...r.projects, captured] }),
           () => enqueue("removeProject", [id])
+        );
+      },
+
+      // --- Countdowns ---
+      addCountdown: (input) => {
+        const id = tempId();
+        const fd = new FormData();
+        fd.set("title", input.title);
+        fd.set("date", input.date);
+        fd.set("repeatsYearly", String(input.repeatsYearly));
+        const row: Countdown = {
+          id,
+          title: input.title.trim(),
+          date: combineDueDateTime(input.date),
+          repeatsYearly: input.repeatsYearly,
+          createdAt: new Date(),
+          notifiedHeadsUpFor: null,
+          notifiedOnDayFor: null,
+        };
+        create((r) => ({ ...r, countdowns: [...r.countdowns, row] }), "addCountdown", [fd], id);
+      },
+      editCountdown: (id, input) => {
+        const fd = new FormData();
+        fd.set("title", input.title);
+        fd.set("date", input.date);
+        fd.set("repeatsYearly", String(input.repeatsYearly));
+        mutate(
+          (r) => ({
+            ...r,
+            countdowns: r.countdowns.map((c) =>
+              c.id === id
+                ? { ...c, title: input.title.trim(), date: combineDueDateTime(input.date), repeatsYearly: input.repeatsYearly }
+                : c
+            ),
+          }),
+          "editCountdown",
+          [id, fd]
+        );
+      },
+      removeCountdown: (id) => {
+        const captured = rawRef.current.countdowns.find((c) => c.id === id);
+        if (!captured) return;
+        deleteWithUndo(
+          "Countdown",
+          (r) => ({ ...r, countdowns: r.countdowns.filter((c) => c.id !== id) }),
+          (r) => ({ ...r, countdowns: [...r.countdowns, captured] }),
+          () => enqueue("removeCountdown", [id])
         );
       },
 
