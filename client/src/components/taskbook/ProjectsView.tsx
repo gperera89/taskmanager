@@ -360,7 +360,11 @@ function ProjectCard({
               placeholder="Task name"
               onBlur={(e) => {
                 const next = e.relatedTarget as Node | null;
-                if (!next || !e.currentTarget.form?.contains(next)) setAddingTask(false);
+                const form = e.currentTarget.form;
+                if (next && form?.contains(next)) return;
+                // Focus left the form — save what was typed rather than discard it.
+                if (e.currentTarget.value.trim()) form?.requestSubmit();
+                else setAddingTask(false);
               }}
               onKeyDown={(e) => {
                 if (e.key === "Escape") setAddingTask(false);
@@ -373,7 +377,12 @@ function ProjectCard({
               defaultValue={todayInputValue()}
               onBlur={(e) => {
                 const next = e.relatedTarget as Node | null;
-                if (!next || !e.currentTarget.form?.contains(next)) setAddingTask(false);
+                const form = e.currentTarget.form;
+                if (next && form?.contains(next)) return;
+                // Focus left the form — save if a task name was entered.
+                const title = form?.elements.namedItem("title") as HTMLInputElement | null;
+                if (title?.value.trim()) form?.requestSubmit();
+                else setAddingTask(false);
               }}
               onKeyDown={(e) => {
                 if (e.key === "Escape") setAddingTask(false);
