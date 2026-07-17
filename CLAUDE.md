@@ -50,8 +50,8 @@ all reads/writes for every entity go through its exported functions. `src/app/ac
 
 Entities (`prisma/schema.prisma`): `Task`, `Project`, `Habit`, `Routine`, `Category` (free-text
 options for `Task.category`, not a foreign key), `VoiceCapture` (unread notice pointing at a
-captured entity), `PushSubscription`. `Task` and `Routine` both self-relate for
-subtasks/sub-routines (`onDelete: Cascade`).
+captured entity). `Task` and `Routine` both self-relate for subtasks/sub-routines
+(`onDelete: Cascade`).
 
 **Recurrence** is one shared rule shape (`TaskRepeatRule` in `src/lib/taskRecurrence.ts`) used by
 two different entities with different semantics:
@@ -110,16 +110,22 @@ from Tailwind's own breakpoints used for finer-grained CSS elsewhere). `ModalCon
 — tasks are only ever *created* there, since editing an existing task happens inline on its row
 (`TasksView.tsx`'s `TaskRow`, also reused inside `ProjectsView.tsx`'s project cards).
 
-### Notifications (Web Push)
-`src/lib/notifications.ts` (`server-only`) sends Web Push via `web-push`, keyed off VAPID env vars.
-`/api/cron/check-due` (`src/app/api/cron/check-due/route.ts`) is hit by an **external** scheduler
-on a short interval (Vercel Hobby's own Cron is capped at once/day, too coarse), authenticated by a
-`CRON_SECRET` bearer token rather than a user session. Routine clusters use a `tag` per top-level
-routine so a later push replaces rather than stacks, plus a "silent push then immediately close by
-tag" trick (`public/sw.js`) to auto-dismiss an unactioned routine reminder after an hour, since Web
-Push has no real notification TTL. `NotificationSetup.tsx` handles subscribe/unsubscribe from the
-client (iOS requires the PWA be added to the home screen first — plain Safari tabs can't receive
-push at all).
+### Notifications (ntfy)
+`src/lib/notifications.ts` (`server-only`) publishes to an [ntfy](https://ntfy.sh) topic
+(`NTFY_TOPIC`/`NTFY_SERVER`/`NTFY_TOKEN` env vars; `Icon` header points at the app's public
+`/icon.png`, `Actions` headers carry the cron secret so notification buttons can hit
+`/api/notify-action` without a session). The old Web Push channel was removed after it double-
+delivered alongside ntfy — `public/sw.js` is now caching-only. `/api/cron/check-due`
+(`src/app/api/cron/check-due/route.ts`) is hit by an **external** scheduler on a short interval
+(Vercel Hobby's own Cron is capped at once/day, too coarse), authenticated by a `CRON_SECRET`
+bearer token rather than a user session.
+
+**Database-operations budget:** the hosted Prisma Postgres free tier meters ~100k operations/month,
+and a once-a-minute cron multiplies every query by ~43k/month. The cron's whole common path is
+therefore ONE raw-SQL operation (`getCronSnapshot` in `api.ts`: heartbeat-stamping CTE + all due
+reads as JSON aggregates), with retention sweeps gated to the first run of each local day. Keep it
+that way: don't add per-run queries to the cron path, and prefer batching/piggybacking reads for
+anything that runs on a schedule.
 
 ### Voice capture
 `Header.tsx`'s mic button records audio client-side and posts it to

@@ -705,15 +705,8 @@ export async function getAppSettings() {
   });
 }
 
-// Heartbeat stamp for the notification cron — the UI warns when this goes stale (i.e. the
-// external scheduler has stopped calling /api/cron/check-due).
-export function markCronRun(at: Date) {
-  return prisma.appSettings.upsert({
-    where: { id: APP_SETTINGS_ID },
-    update: { lastCronAt: at },
-    create: { id: APP_SETTINGS_ID, timeZone: DEFAULT_TIME_ZONE, lastCronAt: at },
-  });
-}
+// (The notification cron's heartbeat stamp — lastCronAt, which the UI watches for staleness —
+// is written by getCronSnapshot's CTE below, not by a standalone upsert.)
 
 export function updateTimeZone(timeZone: string) {
   if (!SUPPORTED_TIME_ZONES.some((z) => z.id === timeZone)) {
@@ -1025,48 +1018,192 @@ export function dismissVoiceCapture(id: string) {
 
 // --- Push notifications ---
 
-export const getPushSubscriptions = () => prisma.pushSubscription.findMany();
+// --- Notification cron snapshot -------------------------------------------------------------
+//
+// Everything /api/cron/check-due needs per run, in ONE database operation. The cron fires
+// every minute, so on Prisma Postgres's metered free tier each query it makes is ~43k
+// operations/month — the previous shape (settings read + 4 entity reads + heartbeat upsert +
+// 3 sweeps ≈ 9 ops/run) blew straight through the 100k cap. A single data-modifying CTE
+// stamps the heartbeat and returns the previous stamp (for once-a-day sweep gating) alongside
+// every candidate row, aggregated as JSON.
+//
+// Timestamps travel as epoch milliseconds (never date strings): Prisma DateTimes live in
+// timestamp-without-tz columns holding UTC face values, and `extract(epoch ...)` /
+// `to_timestamp(...) AT TIME ZONE 'UTC'` round-trip those to JS Dates without ever passing
+// through a session-timezone-dependent cast.
 
-// Re-subscribing the same device (e.g. after reinstalling the PWA) reuses its endpoint, so
-// this is an upsert rather than a plain create.
-export function savePushSubscription(input: { endpoint: string; p256dh: string; auth: string }) {
-  return prisma.pushSubscription.upsert({
-    where: { endpoint: input.endpoint },
-    create: input,
-    update: { p256dh: input.p256dh, auth: input.auth },
-  });
-}
+export type CronTask = { id: string; title: string; dueDate: Date; reminderLeadMinutes: number | null };
+export type CronProject = { id: string; name: string; dueDate: Date; reminderLeadMinutes: number | null };
+export type CronRoutine = TaskRepeatRule & {
+  id: string;
+  title: string;
+  reminderTime: string;
+  notifiedAt: Date | null;
+  pausedUntil: Date | null;
+  lastCompletedAt: Date | null;
+  subroutineTitles: string[];
+};
+export type CronCountdown = {
+  id: string;
+  title: string;
+  date: Date;
+  repeatsYearly: boolean;
+  notifiedHeadsUpFor: Date | null;
+  notifiedOnDayFor: Date | null;
+};
+export type CronSnapshot = {
+  timeZone: string;
+  // The heartbeat stamp as it stood BEFORE this run (null on the very first run ever).
+  lastCronAt: Date | null;
+  // Unnotified tasks/projects whose dueDate falls inside the caller's over-fetch window
+  // (notifiedAt is cleared whenever dueDate is edited, so rescheduled items notify again).
+  tasks: CronTask[];
+  projects: CronProject[];
+  // Active top-level routine clusters, each carrying its sub-routines' titles for the body.
+  routines: CronRoutine[];
+  countdowns: CronCountdown[];
+};
 
-export function deletePushSubscription(endpoint: string) {
-  return prisma.pushSubscription.deleteMany({ where: { endpoint } });
-}
+type RawCronRow = {
+  timeZone: string;
+  prevCronAtMs: number | null;
+  tasks: { id: string; title: string; dueMs: number; reminderLeadMinutes: number | null }[];
+  projects: { id: string; name: string; dueMs: number; reminderLeadMinutes: number | null }[];
+  routines: {
+    id: string;
+    title: string;
+    reminderTime: string;
+    frequency: RoutineFrequency;
+    interval: number;
+    daysOfWeek: number[];
+    monthlyMode: RoutineMonthlyMode;
+    dayOfMonth: number | null;
+    monthlyOrdinal: number | null;
+    monthlyWeekday: number | null;
+    notifiedAtMs: number | null;
+    pausedUntilMs: number | null;
+    lastCompletedAtMs: number | null;
+    subroutineTitles: string[];
+  }[];
+  countdowns: {
+    id: string;
+    title: string;
+    dateMs: number;
+    repeatsYearly: boolean;
+    notifiedHeadsUpForMs: number | null;
+    notifiedOnDayForMs: number | null;
+  }[];
+};
 
-// Tasks/projects that *might* be due for a notification, for the due-date notification cron.
-// `until` should be `now + getTimeZoneOffsetMs(now, timeZone)` (see taskbookDates.ts's
-// dueInstant/getTimeZoneOffsetMs) since stored due dates with an explicit time are face-value
-// clock times in the configured zone, up to that offset ahead of the real UTC instant — this
-// over-fetches a bit so the caller's precise `dueInstant(due, timeZone) <= now` check never
-// misses a timed item. notifiedAt is cleared whenever dueDate is edited (see
-// updateTask/updateProject) so a rescheduled item can notify again at its new time.
-export function getUnnotifiedDueTasks(until: Date) {
-  return prisma.task.findMany({ where: { dueDate: { lte: until }, isCompleted: false, notifiedAt: null } });
-}
+const msDate = (ms: number | null): Date | null => (ms == null ? null : new Date(ms));
 
-export function getUnnotifiedDueProjects(until: Date) {
-  return prisma.project.findMany({ where: { dueDate: { lte: until }, isCompleted: false, notifiedAt: null } });
-}
+export async function getCronSnapshot(now: Date, until: Date): Promise<CronSnapshot> {
+  const nowMs = now.getTime();
+  const untilMs = until.getTime();
+  const rows = await prisma.$queryRaw<RawCronRow[]>`
+    WITH beat AS (
+      INSERT INTO "AppSettings" ("id", "timeZone", "lastCronAt")
+      VALUES ('app', ${DEFAULT_TIME_ZONE}, to_timestamp(${nowMs}::float8 / 1000) AT TIME ZONE 'UTC')
+      ON CONFLICT ("id") DO UPDATE
+        SET "lastCronAt" = to_timestamp(${nowMs}::float8 / 1000) AT TIME ZONE 'UTC'
+      RETURNING
+        "timeZone",
+        -- Scalar subqueries read the statement-start snapshot, i.e. the PREVIOUS heartbeat.
+        (SELECT extract(epoch FROM s."lastCronAt") * 1000
+           FROM "AppSettings" s WHERE s."id" = 'app')::float8 AS "prevCronAtMs"
+    )
+    SELECT
+      (SELECT "timeZone" FROM beat) AS "timeZone",
+      (SELECT "prevCronAtMs" FROM beat) AS "prevCronAtMs",
+      (SELECT coalesce(json_agg(json_build_object(
+         'id', t."id",
+         'title', t."title",
+         'dueMs', extract(epoch FROM t."dueDate") * 1000,
+         'reminderLeadMinutes', t."reminderLeadMinutes")), '[]'::json)
+       FROM "Task" t
+       WHERE t."dueDate" <= to_timestamp(${untilMs}::float8 / 1000) AT TIME ZONE 'UTC'
+         AND t."isCompleted" = false AND t."notifiedAt" IS NULL
+      ) AS "tasks",
+      (SELECT coalesce(json_agg(json_build_object(
+         'id', p."id",
+         'name', p."name",
+         'dueMs', extract(epoch FROM p."dueDate") * 1000,
+         'reminderLeadMinutes', p."reminderLeadMinutes")), '[]'::json)
+       FROM "Project" p
+       WHERE p."dueDate" <= to_timestamp(${untilMs}::float8 / 1000) AT TIME ZONE 'UTC'
+         AND p."isCompleted" = false AND p."notifiedAt" IS NULL
+      ) AS "projects",
+      (SELECT coalesce(json_agg(json_build_object(
+         'id', r."id",
+         'title', r."title",
+         'reminderTime', r."reminderTime",
+         'frequency', r."frequency",
+         'interval', r."interval",
+         'daysOfWeek', to_json(r."daysOfWeek"),
+         'monthlyMode', r."monthlyMode",
+         'dayOfMonth', r."dayOfMonth",
+         'monthlyOrdinal', r."monthlyOrdinal",
+         'monthlyWeekday', r."monthlyWeekday",
+         'notifiedAtMs', extract(epoch FROM r."notifiedAt") * 1000,
+         'pausedUntilMs', extract(epoch FROM r."pausedUntil") * 1000,
+         'lastCompletedAtMs', extract(epoch FROM r."lastCompletedAt") * 1000,
+         'subroutineTitles', (SELECT coalesce(json_agg(s."title"), '[]'::json)
+                               FROM "Routine" s WHERE s."parentId" = r."id"))), '[]'::json)
+       FROM "Routine" r
+       WHERE r."parentId" IS NULL AND r."isActive" = true
+      ) AS "routines",
+      (SELECT coalesce(json_agg(json_build_object(
+         'id', c."id",
+         'title', c."title",
+         'dateMs', extract(epoch FROM c."date") * 1000,
+         'repeatsYearly', c."repeatsYearly",
+         'notifiedHeadsUpForMs', extract(epoch FROM c."notifiedHeadsUpFor") * 1000,
+         'notifiedOnDayForMs', extract(epoch FROM c."notifiedOnDayFor") * 1000)), '[]'::json)
+       FROM "Countdown" c
+      ) AS "countdowns"
+  `;
 
-// Every active top-level routine cluster, for the routine notification cron — includes
-// sub-routines so a cluster's push body can list them (e.g. "Make coffee · Brush teeth · Shave").
-export function getActiveTopLevelRoutines() {
-  return prisma.routine.findMany({
-    where: { parentId: null, isActive: true },
-    include: { subroutines: true },
-  });
-}
-
-export function markRoutineNotified(id: string, at: Date) {
-  return prisma.routine.update({ where: { id }, data: { notifiedAt: at } });
+  const row = rows[0];
+  return {
+    timeZone: row.timeZone,
+    lastCronAt: msDate(row.prevCronAtMs),
+    tasks: row.tasks.map((t) => ({
+      id: t.id,
+      title: t.title,
+      dueDate: new Date(t.dueMs),
+      reminderLeadMinutes: t.reminderLeadMinutes,
+    })),
+    projects: row.projects.map((p) => ({
+      id: p.id,
+      name: p.name,
+      dueDate: new Date(p.dueMs),
+      reminderLeadMinutes: p.reminderLeadMinutes,
+    })),
+    routines: row.routines.map((r) => ({
+      id: r.id,
+      title: r.title,
+      reminderTime: r.reminderTime,
+      frequency: r.frequency,
+      interval: r.interval,
+      daysOfWeek: r.daysOfWeek,
+      monthlyMode: r.monthlyMode,
+      dayOfMonth: r.dayOfMonth,
+      monthlyOrdinal: r.monthlyOrdinal,
+      monthlyWeekday: r.monthlyWeekday,
+      notifiedAt: msDate(r.notifiedAtMs),
+      pausedUntil: msDate(r.pausedUntilMs),
+      lastCompletedAt: msDate(r.lastCompletedAtMs),
+      subroutineTitles: r.subroutineTitles,
+    })),
+    countdowns: row.countdowns.map((c) => ({
+      id: c.id,
+      title: c.title,
+      date: new Date(c.dateMs),
+      repeatsYearly: c.repeatsYearly,
+      notifiedHeadsUpFor: msDate(c.notifiedHeadsUpForMs),
+      notifiedOnDayFor: msDate(c.notifiedOnDayForMs),
+    })),
+  };
 }
 
 export function markTaskNotified(id: string, at: Date) {

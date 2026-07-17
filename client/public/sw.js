@@ -1,4 +1,5 @@
-// Cura service worker: offline app-shell caching + Web Push display.
+// Cura service worker: offline app-shell caching. (Notifications are delivered via ntfy —
+// see lib/notifications.ts — so there are no Web Push handlers here anymore.)
 //
 // Caching strategy (GET, same-origin only; /api/* is never cached):
 //  - navigations: network-first with a timeout, falling back to the last cached shell — the
@@ -110,43 +111,5 @@ self.addEventListener("fetch", (event) => {
         .catch(() => undefined);
       return cached || (await network) || Response.error();
     })()
-  );
-});
-
-// --- Web Push (secondary channel; ntfy is primary — see lib/notifications.ts) ---
-//
-// NOTE: the old "silent push then close-by-tag" auto-dismiss branch is intentionally gone.
-// Pushes that show no notification get a PWA's push subscription silently revoked on iOS.
-
-self.addEventListener("push", (event) => {
-  let payload = { title: "Reminder", body: "", url: "/" };
-  try {
-    if (event.data) payload = { ...payload, ...event.data.json() };
-  } catch {
-    // Ignore malformed push payloads rather than crashing the service worker.
-  }
-
-  // Same tag replaces an earlier notification instead of stacking, so a routine cluster (or
-  // a task/project without one) never piles up more than one visible reminder.
-  event.waitUntil(
-    self.registration.showNotification(payload.title, {
-      body: payload.body,
-      icon: "/icon.png",
-      tag: payload.tag,
-      data: { url: payload.url },
-    })
-  );
-});
-
-self.addEventListener("notificationclick", (event) => {
-  event.notification.close();
-  const url = event.notification.data?.url || "/";
-  event.waitUntil(
-    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
-      for (const client of clients) {
-        if (client.url.includes(self.location.origin) && "focus" in client) return client.focus();
-      }
-      return self.clients.openWindow(url);
-    })
   );
 });

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { SelectField } from "./shared";
 
 const inputClass =
   "w-full rounded-lg border border-(--border-strong) bg-(--card) px-3 py-2 text-sm text-(--ink) outline-none focus:border-(--accent-text)";
@@ -198,31 +199,21 @@ export default function RepeatFields({
                   <input type="hidden" name="repeatDayOfMonth" value={dayOfMonth} />
                 </>
               ) : (
-                <div className="grid grid-cols-2 gap-3">
-                  <select
+                <div className="grid grid-cols-2 items-start gap-3">
+                  <SelectField
                     name="repeatMonthlyOrdinal"
-                    value={monthlyOrdinal}
-                    onChange={(e) => setMonthlyOrdinal(Number(e.target.value))}
+                    value={String(monthlyOrdinal)}
+                    onChange={(v) => setMonthlyOrdinal(Number(v))}
+                    options={MONTHLY_ORDINAL_OPTIONS.map((o) => ({ value: String(o.value), label: o.label }))}
                     className={inputClass}
-                  >
-                    {MONTHLY_ORDINAL_OPTIONS.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                  <select
+                  />
+                  <SelectField
                     name="repeatMonthlyWeekday"
-                    value={monthlyWeekday}
-                    onChange={(e) => setMonthlyWeekday(Number(e.target.value))}
+                    value={String(monthlyWeekday)}
+                    onChange={(v) => setMonthlyWeekday(Number(v))}
+                    options={WEEKDAY_FULL_NAMES.map((name, idx) => ({ value: String(idx), label: name }))}
                     className={inputClass}
-                  >
-                    {WEEKDAY_FULL_NAMES.map((name, idx) => (
-                      <option key={idx} value={idx}>
-                        {name}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </div>
               )}
             </div>

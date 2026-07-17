@@ -138,17 +138,6 @@ model Task {
   subtasks    Task[]    @relation("TaskSubtasks")
 }
 
-// A device's Web Push registration (one per browser/device the user has enabled notifications
-// on — e.g. one for their phone, one for their desktop). endpoint uniquely identifies the
-// device+browser's push channel with the browser vendor's push service.
-model PushSubscription {
-  id        String   @id @default(uuid())
-  endpoint  String   @unique
-  p256dh    String
-  auth      String
-  createdAt DateTime @default(now())
-}
-
 enum CapturedKind {
   TASK
   PROJECT

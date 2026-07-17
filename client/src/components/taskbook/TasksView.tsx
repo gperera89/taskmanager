@@ -5,7 +5,17 @@ import type { FocusEvent } from "react";
 import { DURATION_OPTIONS, REMINDER_LEAD_OPTIONS, parseDurationInput } from "@/lib/shared";
 import { useTaskbook } from "./store";
 import type { TaskRepeatInput } from "./store";
-import { AutoGrowTextarea, CheckSquare, RowDeleteButton, StrikeSweep, labelClass, useCompletionHold } from "./shared";
+import {
+  AutoGrowTextarea,
+  CheckSquare,
+  RowDeleteButton,
+  SELECT_CARET_INFO,
+  SELECT_CARET_MUTED,
+  selectCaretStyle,
+  StrikeSweep,
+  labelClass,
+  useCompletionHold,
+} from "./shared";
 import { DateTimePickerPanel } from "./DateTimePicker";
 import QuickAdd from "./QuickAdd";
 import RepeatFields from "./RepeatFields";
@@ -124,27 +134,9 @@ const GROUP_PREVIEW_COUNT = 4;
 const chipSelectClass =
   "cursor-pointer whitespace-nowrap rounded-full border-none px-2.5 py-0.5 text-[11.5px] outline-none";
 
-// The dropdown caret is an SVG data URI, which cannot resolve var() — these are fixed
-// mid-tones chosen to read acceptably on the chip washes in BOTH light and dark themes.
-const CARET_INFO = "#7d97b5";
-const CARET_MUTED = "#988f7a";
-
-// The two chip <select>s below reuse chipSelectClass but also need the OS-native dropdown
-// caret replaced — by default it renders flush against the pill's right edge with a lot of
-// dead space before it. This swaps in a small Material "arrow_drop_down" glyph pulled in
-// closer to the label instead, colored to match each select's text.
-function chipSelectArrowStyle(literalHex: string): React.CSSProperties {
-  const fill = encodeURIComponent(literalHex);
-  return {
-    appearance: "none",
-    WebkitAppearance: "none",
-    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 -960 960 960'%3E%3Cpath d='M480-360 240-600h480L480-360Z' fill='${fill}'/%3E%3C/svg%3E")`,
-    backgroundRepeat: "no-repeat",
-    backgroundPosition: "right 4px center",
-    backgroundSize: "13px 13px",
-    paddingRight: 20,
-  };
-}
+// The chip <select>s below reuse chipSelectClass but also need the OS-native dropdown caret
+// replaced (see shared.tsx's selectCaretStyle) — by default it renders flush against the
+// pill's right edge with a lot of dead space before it.
 
 export function TaskRow({
   task,
@@ -395,7 +387,7 @@ export function TaskRow({
             value={task.category}
             onChange={(e) => commitCategory(e.target.value)}
             className={chipSelectClass}
-            style={{ color: "var(--info)", background: "var(--info-wash)", ...chipSelectArrowStyle(CARET_INFO) }}
+            style={{ color: "var(--info)", background: "var(--info-wash)", ...selectCaretStyle(SELECT_CARET_INFO) }}
           >
             {categoryOptions.map((c) => (
               <option key={c.id} value={c.name}>
@@ -408,7 +400,7 @@ export function TaskRow({
             value={task.projectId ?? ""}
             onChange={(e) => commitProject(e.target.value)}
             className={chipSelectClass}
-            style={{ color: "var(--ink-muted)", background: "var(--muted-wash)", ...chipSelectArrowStyle(CARET_MUTED) }}
+            style={{ color: "var(--ink-muted)", background: "var(--muted-wash)", ...selectCaretStyle(SELECT_CARET_MUTED) }}
           >
             <option value="">No project</option>
             {projectOptions.map((p) => (
@@ -605,7 +597,7 @@ export function TaskRow({
               }}
               aria-label="Section"
               className={chipSelectClass}
-              style={{ color: "var(--ink-muted)", background: "var(--muted-wash)", ...chipSelectArrowStyle(CARET_MUTED) }}
+              style={{ color: "var(--ink-muted)", background: "var(--muted-wash)", ...selectCaretStyle(SELECT_CARET_MUTED) }}
             >
               <option value="">No section</option>
               {sectionOptions.map((s) => (
@@ -632,6 +624,7 @@ export function TaskRow({
                 onChange={(e) => actions.setTaskReminderLead(task.id, e.target.value ? Number(e.target.value) : null)}
                 aria-label="Remind me"
                 className="cursor-pointer rounded-md border border-(--border-strong) bg-transparent px-1.5 py-0.5 text-xs text-(--info) outline-none"
+                style={selectCaretStyle(SELECT_CARET_INFO)}
               >
                 {REMINDER_LEAD_OPTIONS.map((o) => (
                   <option key={o.label} value={o.value ?? ""}>

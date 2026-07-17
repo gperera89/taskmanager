@@ -104,6 +104,124 @@ export function DurationField({
   );
 }
 
+// The caret below is an SVG data URI, which cannot resolve var() — these are fixed mid-tones
+// chosen to read acceptably on the chip washes in BOTH light and dark themes.
+export const SELECT_CARET_INFO = "#7d97b5";
+export const SELECT_CARET_MUTED = "#988f7a";
+
+/** Replaces the OS-native dropdown caret on the few remaining native <select>s (compact chip
+    and popover controls, where SelectField's in-flow menu wouldn't fit): appearance-none plus
+    a small Material "arrow_drop_down" glyph pulled in close to the label, colored to match
+    the select's text. */
+export function selectCaretStyle(literalHex: string): React.CSSProperties {
+  const fill = encodeURIComponent(literalHex);
+  return {
+    appearance: "none",
+    WebkitAppearance: "none",
+    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 -960 960 960'%3E%3Cpath d='M480-360 240-600h480L480-360Z' fill='${fill}'/%3E%3C/svg%3E")`,
+    backgroundRepeat: "no-repeat",
+    backgroundPosition: "right 4px center",
+    backgroundSize: "13px 13px",
+    paddingRight: 20,
+  };
+}
+
+export type SelectOption = { value: string; label: string };
+
+/** A native-<select> replacement styled in the app's design language — a trigger button plus
+    a dropdown of options matching DurationField's menu, instead of the OS-chrome select and
+    its unthemeable popup. Uncontrolled (pass `name` + optional `defaultValue`, the current
+    value rides in a hidden input for FormData) or controlled (pass `value` + `onChange`; add
+    `name` too if a form also needs to read it). Like DurationField, the open menu renders in
+    normal flow so a modal's scroll container never clips it. */
+export function SelectField({
+  options,
+  name,
+  defaultValue,
+  value,
+  onChange,
+  className,
+  triggerStyle,
+  placeholder,
+  ariaLabel,
+}: {
+  options: SelectOption[];
+  name?: string;
+  defaultValue?: string;
+  value?: string;
+  onChange?: (value: string) => void;
+  /** Trigger button styling — pass the same input class the old <select> wore. */
+  className?: string;
+  triggerStyle?: React.CSSProperties;
+  /** Trigger label when the current value isn't one of the options (e.g. "More timezones…"). */
+  placeholder?: string;
+  ariaLabel?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [internal, setInternal] = useState(defaultValue ?? options[0]?.value ?? "");
+  const current = value !== undefined ? value : internal;
+  const currentLabel = options.find((o) => o.value === current)?.label ?? placeholder ?? current;
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  // Click-away close, not onBlur — macOS Safari never focuses a <button> on click.
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(e: PointerEvent) {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [open]);
+
+  function pick(next: string) {
+    if (value === undefined) setInternal(next);
+    onChange?.(next);
+    setOpen(false);
+  }
+
+  return (
+    <div ref={wrapRef} onKeyDown={(e) => e.key === "Escape" && setOpen(false)}>
+      {name && <input type="hidden" name={name} value={current} />}
+      <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={ariaLabel}
+        onClick={() => setOpen((v) => !v)}
+        className={`${className ?? ""} flex cursor-pointer items-center justify-between gap-2 text-left`}
+        style={triggerStyle}
+      >
+        <span className="truncate">{currentLabel}</span>
+        {/* Material Symbols "arrow_drop_down" — replaces the OS-native select caret. */}
+        <svg width="14" height="14" viewBox="0 -960 960 960" className="flex-none" aria-hidden>
+          <path d="M480-360 240-600h480L480-360Z" style={{ fill: "var(--ink-muted)" }} />
+        </svg>
+      </button>
+      {open && (
+        <div
+          role="listbox"
+          className="mt-1 flex max-h-56 flex-col overflow-y-auto rounded-lg border border-(--border-strong) bg-(--card) py-1 shadow-[0_8px_24px_rgba(70,55,30,.14)]"
+        >
+          {options.map((o) => (
+            <button
+              key={o.value}
+              type="button"
+              role="option"
+              aria-selected={o.value === current}
+              onClick={() => pick(o.value)}
+              className={`cursor-pointer px-3 py-1.5 text-left text-sm hover:bg-[rgba(85,118,148,.08)] ${
+                o.value === current ? "text-(--accent-text)" : "text-(--ink)"
+              }`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function Chip({ children, variant = "default" }: { children: React.ReactNode; variant?: "default" | "project" }) {
   const style =
     variant === "project"

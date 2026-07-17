@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { SELECT_CARET_MUTED, selectCaretStyle } from "./shared";
 import { useTaskbook } from "./store";
 import type { CategoryOption, CategoryScopeOption } from "./types";
 
@@ -74,6 +75,7 @@ export default function CategoryManager({ categoryOptions }: { categoryOptions: 
                     aria-label={`Mode for ${c.name}`}
                     title="Which mode (work/home) this category shows under"
                     className="cursor-pointer rounded-md border border-(--border-strong) bg-transparent px-1 py-0.5 text-[11px] text-(--ink-muted) outline-none"
+                    style={selectCaretStyle(SELECT_CARET_MUTED)}
                   >
                     {SCOPE_OPTIONS.map((o) => (
                       <option key={o.value} value={o.value}>

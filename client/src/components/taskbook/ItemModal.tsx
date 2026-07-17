@@ -18,7 +18,7 @@ import {
 import CategoryManager from "./CategoryManager";
 import { DateTimePickerPanel, formatPickerLabel } from "./DateTimePicker";
 import RepeatFields from "./RepeatFields";
-import { AutoGrowTextarea, DurationField } from "./shared";
+import { AutoGrowTextarea, DurationField, SelectField } from "./shared";
 import type { CategoryOption, CountdownVM, HabitCardVM, HabitScheduleType, ModalState, ProjectCardVM, ProjectOption, RoutineItemVM } from "./types";
 
 const inputClass =
@@ -237,13 +237,12 @@ function TaskForm({
         {showManageCategories ? (
           <CategoryManager categoryOptions={categoryOptions} />
         ) : (
-          <select name="category" required defaultValue={categoryOptions[0]?.name ?? ""} className={inputClass}>
-            {categoryOptions.map((c) => (
-              <option key={c.id} value={c.name}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+          <SelectField
+            name="category"
+            options={categoryOptions.map((c) => ({ value: c.name, label: c.name }))}
+            defaultValue={categoryOptions[0]?.name ?? ""}
+            className={inputClass}
+          />
         )}
       </div>
       <div>
@@ -275,14 +274,12 @@ function TaskForm({
         </div>
         <div className="min-w-35 flex-1">
           <label className={labelTextClass}>Project</label>
-          <select name="projectId" defaultValue="" className={inputClass}>
-            <option value="">No project</option>
-            {projectOptions.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
+          <SelectField
+            name="projectId"
+            options={[{ value: "", label: "No project" }, ...projectOptions.map((p) => ({ value: p.id, label: p.name }))]}
+            defaultValue=""
+            className={inputClass}
+          />
         </div>
         <div className="min-w-35 flex-1">
           <label className={labelTextClass}>Duration</label>
@@ -292,13 +289,12 @@ function TaskForm({
       {dueDate && (
         <div>
           <label className={labelTextClass}>Remind me</label>
-          <select name="reminderLeadMinutes" defaultValue="" className={inputClass}>
-            {REMINDER_LEAD_OPTIONS.map((o) => (
-              <option key={o.label} value={o.value ?? ""}>
-                {o.label}
-              </option>
-            ))}
-          </select>
+          <SelectField
+            name="reminderLeadMinutes"
+            options={REMINDER_LEAD_OPTIONS.map((o) => ({ value: o.value == null ? "" : String(o.value), label: o.label }))}
+            defaultValue=""
+            className={inputClass}
+          />
         </div>
       )}
       {dueOpen && (
@@ -354,14 +350,15 @@ function ProjectForm({
       {!item && data.projectOptions.length > 0 && (
         <div>
           <label className={labelTextClass}>Start from</label>
-          <select value={templateId} onChange={(e) => setTemplateId(e.target.value)} className={inputClass}>
-            <option value="">Blank project</option>
-            {data.projectOptions.map((p) => (
-              <option key={p.id} value={p.id}>
-                Copy of: {p.name}
-              </option>
-            ))}
-          </select>
+          <SelectField
+            value={templateId}
+            onChange={setTemplateId}
+            options={[
+              { value: "", label: "Blank project" },
+              ...data.projectOptions.map((p) => ({ value: p.id, label: `Copy of: ${p.name}` })),
+            ]}
+            className={inputClass}
+          />
         </div>
       )}
       <div>
@@ -399,13 +396,12 @@ function ProjectForm({
       </div>
       <div>
         <label className={labelTextClass}>Remind me</label>
-        <select name="reminderLeadMinutes" defaultValue={item?.reminderLeadMinutes ?? ""} className={inputClass}>
-          {REMINDER_LEAD_OPTIONS.map((o) => (
-            <option key={o.label} value={o.value ?? ""}>
-              {o.label}
-            </option>
-          ))}
-        </select>
+        <SelectField
+          name="reminderLeadMinutes"
+          options={REMINDER_LEAD_OPTIONS.map((o) => ({ value: o.value == null ? "" : String(o.value), label: o.label }))}
+          defaultValue={item?.reminderLeadMinutes != null ? String(item.reminderLeadMinutes) : ""}
+          className={inputClass}
+        />
       </div>
       <div>
         <label className={labelTextClass}>Duration</label>
@@ -583,31 +579,21 @@ function RoutineForm({
               <input type="hidden" name="dayOfMonth" value={dayOfMonth} />
             </>
           ) : (
-            <div className="grid grid-cols-2 gap-3">
-              <select
+            <div className="grid grid-cols-2 items-start gap-3">
+              <SelectField
                 name="monthlyOrdinal"
-                value={monthlyOrdinal}
-                onChange={(e) => setMonthlyOrdinal(Number(e.target.value))}
+                value={String(monthlyOrdinal)}
+                onChange={(v) => setMonthlyOrdinal(Number(v))}
+                options={MONTHLY_ORDINAL_OPTIONS.map((o) => ({ value: String(o.value), label: o.label }))}
                 className={inputClass}
-              >
-                {MONTHLY_ORDINAL_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-              <select
+              />
+              <SelectField
                 name="monthlyWeekday"
-                value={monthlyWeekday}
-                onChange={(e) => setMonthlyWeekday(Number(e.target.value))}
+                value={String(monthlyWeekday)}
+                onChange={(v) => setMonthlyWeekday(Number(v))}
+                options={WEEKDAY_FULL_NAMES.map((name, idx) => ({ value: String(idx), label: name }))}
                 className={inputClass}
-              >
-                {WEEKDAY_FULL_NAMES.map((name, idx) => (
-                  <option key={idx} value={idx}>
-                    {name}
-                  </option>
-                ))}
-              </select>
+              />
             </div>
           )}
         </div>

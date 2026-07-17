@@ -12,7 +12,7 @@ import { refreshSuggestions } from "@/app/actions";
 import { DURATION_OPTIONS, formatDuration, parseDurationInput } from "@/lib/shared";
 import { pad2, zonedMinutesOfDay } from "@/lib/taskbookDates";
 import { useTaskbook } from "./store";
-import { CheckSquare, labelClass } from "./shared";
+import { CheckSquare, SELECT_CARET_MUTED, selectCaretStyle, labelClass } from "./shared";
 import type { CategoryOption, MyDayBlockVM, MyDayKind, MyDayLookaheadVM, MyDayTrayItemVM, MyDayVM } from "./types";
 
 const HOUR_PX = 64;
@@ -888,6 +888,7 @@ function DurationSelect({ value, onChange }: { value: number | null; onChange: (
       value={value != null ? formatDuration(value) : ""}
       onChange={(e) => onChange(e.target.value ? parseDurationInput(e.target.value) : null)}
       className="cursor-pointer rounded border border-(--border-faint) bg-transparent px-1 py-0.5 text-[12px] text-(--ink-muted)"
+      style={selectCaretStyle(SELECT_CARET_MUTED)}
       title="Duration"
     >
       <option value="">duration</option>

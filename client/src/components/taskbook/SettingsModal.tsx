@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { formatUtcOffset, getTimeZoneOffsetMs, OTHER_TIME_ZONES, SUPPORTED_TIME_ZONES } from "@/lib/taskbookDates";
 import CategoryManager from "./CategoryManager";
-import NotificationSetup from "./NotificationSetup";
+import { SelectField } from "./shared";
 import { useTaskbook } from "./store";
 import type { CategoryOption } from "./types";
 
@@ -64,33 +64,28 @@ export default function SettingsModal({
               </button>
             ))}
           </div>
-          <select
-            value={OTHER_TIME_ZONES.some((z) => z.id === timeZone) ? timeZone : ""}
-            onChange={(e) => {
-              if (e.target.value) onSetTimeZone(e.target.value);
-            }}
-            className="mt-1.5 cursor-pointer rounded-md border px-2.5 py-1 text-xs"
-            style={
-              OTHER_TIME_ZONES.some((z) => z.id === timeZone)
-                ? { background: "var(--accent)", borderColor: "var(--accent-text)", color: "var(--on-accent)" }
-                : { background: "transparent", borderColor: "var(--border-strong)", color: "var(--ink)" }
-            }
-          >
-            <option value="" disabled>
-              More timezones…
-            </option>
-            {OTHER_TIME_ZONES.map((z) => (
-              <option key={z.id} value={z.id}>
-                {zoneLabel(z)}
-              </option>
-            ))}
-          </select>
+          <div className="mt-1.5">
+            <SelectField
+              value={OTHER_TIME_ZONES.some((z) => z.id === timeZone) ? timeZone : ""}
+              onChange={(v) => {
+                if (v) onSetTimeZone(v);
+              }}
+              options={OTHER_TIME_ZONES.map((z) => ({ value: z.id, label: zoneLabel(z) }))}
+              placeholder="More timezones…"
+              ariaLabel="More timezones"
+              className="w-full rounded-md border px-2.5 py-1 text-xs"
+              triggerStyle={
+                OTHER_TIME_ZONES.some((z) => z.id === timeZone)
+                  ? { background: "var(--accent)", borderColor: "var(--accent-text)", color: "var(--on-accent)" }
+                  : { background: "transparent", borderColor: "var(--border-strong)", color: "var(--ink)" }
+              }
+            />
+          </div>
         </div>
 
         <div className="mt-4 flex flex-col gap-1.5">
           <label className="mb-1 block text-[11px] uppercase tracking-[0.14em] text-(--ink-muted)">Notifications</label>
           <NotificationHealth />
-          <NotificationSetup />
         </div>
 
         <div className="mt-4 flex flex-col gap-1.5">

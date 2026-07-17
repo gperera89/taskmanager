@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { todayInputValue } from "@/lib/taskbookDates";
 import { useTaskbook } from "./store";
 import { parseTaskForm } from "./formParse";
-import { AutoGrowTextarea, Chip, RowDeleteButton, labelClass, useCompletionHold } from "./shared";
+import { AutoGrowTextarea, Chip, labelClass, useCompletionHold } from "./shared";
 import { TaskRow } from "./TasksView";
 import type { CategoryOption, ProjectCardVM, ProjectOption } from "./types";
 
@@ -27,6 +27,104 @@ const VIEW_MODE_ICON_PATH: Record<ProjectViewMode, string> = {
     "m480-360 160-160H320l160 160Zm0 280q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm0-80q134 0 227-93t93-227q0-134-93-227t-227-93q-134 0-227 93t-93 227q0 134 93 227t227 93Zm0-320Z",
   none: "M440-320h80v-168l64 64 56-56-160-160-160 160 56 56 64-64v168Zm40 240q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm0-80q134 0 227-93t93-227q0-134-93-227t-227-93q-134 0-227 93t-93 227q0 134 93 227t227 93Zm0-320Z",
 };
+
+// Card actions (sections/duplicate/delete) live in this kebab dropdown — as inline text
+// buttons they overflowed the header row on narrower cards. Menu styling matches the app's
+// other custom dropdowns (DurationField / MyDayPlanner's PushMenu).
+function ProjectActionsMenu({ project }: { project: ProjectCardVM }) {
+  const { actions } = useTaskbook();
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  // Click-away close, not onBlur — macOS Safari never focuses a <button> on click (see the
+  // same pattern on ItemModal's due panel).
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(e: PointerEvent) {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [open]);
+
+  const itemBaseClass = "block w-full cursor-pointer whitespace-nowrap px-3 py-1.5 text-left text-[13px]";
+  const itemClass = `${itemBaseClass} text-(--ink) hover:bg-[rgba(85,118,148,.08)]`;
+  const dangerItemClass = `${itemBaseClass} text-(--danger) hover:bg-[rgba(178,58,44,.08)]`;
+
+  function pick(action: () => void) {
+    setOpen(false);
+    action();
+  }
+
+  return (
+    <div ref={wrapRef} className="relative flex flex-none items-center">
+      <button
+        type="button"
+        title="Project options"
+        aria-label={`Options for ${project.name}`}
+        onClick={() => setOpen((v) => !v)}
+        className={`flex cursor-pointer items-center justify-center text-(--ink-soft) transition-opacity hover:text-(--info) ${
+          open ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+        }`}
+      >
+        {/* Material Symbols "more_vert" */}
+        <svg width="17" height="17" viewBox="0 -960 960 960">
+          <path
+            d="M480-160q-33 0-56.5-23.5T400-240q0-33 23.5-56.5T480-320q33 0 56.5 23.5T560-240q0 33-23.5 56.5T480-160Zm0-240q-33 0-56.5-23.5T400-480q0-33 23.5-56.5T480-560q33 0 56.5 23.5T560-480q0 33-23.5 56.5T480-400Zm0-240q-33 0-56.5-23.5T400-720q0-33 23.5-56.5T480-800q33 0 56.5 23.5T560-720q0 33-23.5 56.5T480-640Z"
+            style={{ fill: "currentColor" }}
+          />
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-30 mt-1 overflow-hidden rounded-lg border border-(--border-strong) bg-(--card) py-1 shadow-[0_8px_24px_rgba(70,55,30,.14)]">
+          <button
+            type="button"
+            title={
+              project.sectionsEnabled
+                ? "Remove section headings (tasks keep their order)"
+                : "Group this project's tasks under section headings"
+            }
+            onClick={() =>
+              pick(() => {
+                if (
+                  project.sectionsEnabled &&
+                  project.sectionNames.length > 0 &&
+                  !window.confirm("Remove sections? Tasks stay, but lose their section headings.")
+                )
+                  return;
+                actions.setProjectSections(project.id, !project.sectionsEnabled);
+              })
+            }
+            className={itemClass}
+          >
+            {project.sectionsEnabled ? "Remove sections" : "Create sections"}
+          </button>
+          <button
+            type="button"
+            title="Duplicate as a fresh copy (templates)"
+            onClick={() =>
+              pick(() => {
+                const name = window.prompt("Name for the copy", `${project.name} copy`);
+                if (name !== null) actions.duplicateProject(project.id, name.trim() || `${project.name} copy`);
+              })
+            }
+            className={itemClass}
+          >
+            Duplicate
+          </button>
+          <button
+            type="button"
+            title="Delete"
+            onClick={() => pick(() => actions.removeProject(project.id))}
+            className={dangerItemClass}
+          >
+            Delete
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function ProjectExpandToggle({ mode, onCycle }: { mode: ProjectViewMode; onCycle: () => void }) {
   const label = VIEW_MODE_LABEL[mode];
@@ -150,39 +248,7 @@ function ProjectCard({
             {project.done} / {project.total}
           </span>
           <ProjectExpandToggle mode={viewMode} onCycle={cycleViewMode} />
-          <button
-            type="button"
-            title={
-              project.sectionsEnabled
-                ? "Remove section headings (tasks keep their order)"
-                : "Group this project's tasks under section headings"
-            }
-            onClick={() => {
-              if (
-                project.sectionsEnabled &&
-                project.sectionNames.length > 0 &&
-                !window.confirm("Remove sections? Tasks stay, but lose their section headings.")
-              )
-                return;
-              actions.setProjectSections(project.id, !project.sectionsEnabled);
-            }}
-            className="cursor-pointer whitespace-nowrap text-[13px] text-(--ink-faint) opacity-0 transition-opacity hover:text-(--info) group-hover:opacity-100"
-          >
-            {project.sectionsEnabled ? "Remove sections" : "Create sections"}
-          </button>
-          <button
-            type="button"
-            title="Duplicate as a fresh copy (templates)"
-            aria-label={`Duplicate ${project.name}`}
-            onClick={() => {
-              const name = window.prompt("Name for the copy", `${project.name} copy`);
-              if (name !== null) actions.duplicateProject(project.id, name.trim() || `${project.name} copy`);
-            }}
-            className="cursor-pointer text-[13px] text-(--ink-faint) opacity-0 transition-opacity hover:text-(--info) group-hover:opacity-100"
-          >
-            Duplicate
-          </button>
-          <RowDeleteButton action={() => actions.removeProject(project.id)} />
+          <ProjectActionsMenu project={project} />
         </div>
       </div>
 
