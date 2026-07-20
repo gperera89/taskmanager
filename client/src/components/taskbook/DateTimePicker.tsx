@@ -63,11 +63,13 @@ export function DateTimePickerPanel({
   timeValue,
   onChangeDate,
   onChangeTime,
+  dateOnly = false,
 }: {
   dateValue: string; // yyyy-mm-dd, "" if unset
   timeValue: string; // HH:MM, "" if unset
   onChangeDate: (date: string) => void;
   onChangeTime: (time: string) => void;
+  dateOnly?: boolean; // hide the time column — for pickers with no clock component (e.g. routine pause)
 }) {
   const initial = dateValue ? new Date(`${dateValue}T00:00:00`) : new Date();
   const [viewedYear, setViewedYear] = useState(initial.getFullYear());
@@ -177,6 +179,7 @@ export function DateTimePickerPanel({
           })}
         </div>
       </div>
+      {!dateOnly && (
       <div className="w-22 flex-none border-l border-(--border-soft) pl-2.5">
         <button
           type="button"
@@ -213,6 +216,7 @@ export function DateTimePickerPanel({
           })}
         </div>
       </div>
+      )}
     </div>
   );
 }

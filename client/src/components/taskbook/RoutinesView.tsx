@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useModalActions } from "./ModalContext";
 import { useTaskbook } from "./store";
+import { DateTimePickerPanel } from "./DateTimePicker";
 import { CheckSquare, Chip, RowDeleteButton, StrikeSweep } from "./shared";
 import type { RoutineItemVM } from "./types";
 
@@ -51,6 +52,19 @@ function RoutineRow({ routine }: { routine: RoutineItemVM }) {
   // to persist. Cleared whenever the routine itself un-ticks (manual toggle or the hourly
   // auto-reset), ready for the next occurrence.
   const [stepChecks, setStepChecks] = useState<Record<string, boolean>>({});
+
+  // Close the pause calendar on any pointerdown outside it (buttons don't reliably take focus on
+  // click in Safari, so onBlur would miss plain clicks-away) — mirrors TaskRow's due-date popover.
+  const pausePanelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!editingPause) return;
+    function handlePointerDown(e: PointerEvent) {
+      if (pausePanelRef.current?.contains(e.target as Node)) return;
+      setEditingPause(false);
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [editingPause]);
 
   function handleToggle() {
     if (routine.isTicked) {
@@ -102,23 +116,27 @@ function RoutineRow({ routine }: { routine: RoutineItemVM }) {
           {routine.isTicked && !routine.scheduleLabel && (
             <div className="mt-0.5 text-xs italic text-(--ink-faint)">auto-resets within the hour</div>
           )}
-          <div className="mt-1 flex items-center gap-2.5" onClick={(e) => e.stopPropagation()}>
-            {editingPause ? (
-              <input
-                type="date"
-                autoFocus
-                defaultValue={routine.pausedUntil}
-                onChange={(e) => {
-                  actions.setRoutinePause(routine.id, e.target.value);
-                  setEditingPause(false);
-                }}
-                onBlur={() => setEditingPause(false)}
-                className="rounded-md border border-(--border-strong) bg-(--card) px-1.5 py-0.5 text-xs text-(--ink) outline-none focus:border-(--accent-text)"
-              />
-            ) : (
-              <button type="button" onClick={() => setEditingPause(true)} className="cursor-pointer text-xs text-(--ink-muted)">
-                Next: {routine.nextNotificationLabel}
-              </button>
+          <div className="relative mt-1 flex items-center gap-2.5" onClick={(e) => e.stopPropagation()}>
+            <button type="button" onClick={() => setEditingPause((v) => !v)} className="cursor-pointer text-xs text-(--ink-muted)">
+              Next: {routine.nextNotificationLabel}
+            </button>
+            {editingPause && (
+              <div
+                ref={pausePanelRef}
+                className="absolute left-0 top-6 z-20 w-fit rounded-lg border border-(--accent-text) bg-(--card) p-2.5 shadow-[0_8px_24px_rgba(70,55,30,.18)]"
+              >
+                <div className="mb-2 text-[11px] uppercase tracking-[0.14em] text-(--ink-muted)">Pause until</div>
+                <DateTimePickerPanel
+                  dateOnly
+                  dateValue={routine.pausedUntil ?? ""}
+                  timeValue=""
+                  onChangeDate={(d) => {
+                    actions.setRoutinePause(routine.id, d);
+                    setEditingPause(false);
+                  }}
+                  onChangeTime={() => {}}
+                />
+              </div>
             )}
             {routine.pausedUntil && (
               <button
