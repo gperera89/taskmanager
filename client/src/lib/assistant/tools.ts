@@ -2,12 +2,16 @@ import "server-only";
 import type { Task } from "@prisma/client";
 import {
   createTask,
+  getAppSettings,
   getCategories,
+  getDismissedCalendarEventIds,
   getProjects,
   getTasks,
   toggleTaskCompletion,
   updateTask,
 } from "@/lib/api";
+import { getCalendarEvents } from "@/lib/calendar";
+import { zonedMinutesOfDay, zonedYMD } from "@/lib/taskbookDates";
 
 // Same face-value encoding as the rest of the app (see combineDueDateTime in api.ts): dueDate is
 // UTC midnight of the calendar date, with a clock time layered on top at face value — read back
@@ -151,4 +155,75 @@ export async function listProjects(): Promise<{ id: string; name: string; isComp
 export async function listCategories(): Promise<string[]> {
   const categories = await getCategories();
   return categories.map((c) => c.name);
+}
+
+export type CalendarEventSummary = {
+  id: string;
+  title: string;
+  /** Calendar date in the user's configured zone, YYYY-MM-DD. */
+  date: string;
+  /** Local HH:MM start/end, or null for all-day events. */
+  startTime: string | null;
+  endTime: string | null;
+  /** Same instants as ISO UTC, for anything that needs to compute across zones. */
+  startIso: string;
+  endIso: string;
+  allDay: boolean;
+  durationMinutes: number | null;
+  location: string | null;
+  source: string;
+};
+
+export type ListCalendarEventsArgs = {
+  from?: string;
+  to?: string;
+  search?: string;
+  includeDismissed?: boolean;
+};
+
+function hhmm(minutesOfDay: number): string {
+  return `${String(Math.floor(minutesOfDay / 60)).padStart(2, "0")}:${String(minutesOfDay % 60).padStart(2, "0")}`;
+}
+
+// Read-only view of the synced ICS calendars (Google + Outlook), so an assistant can schedule
+// tasks around real commitments. Events are reported in the user's configured zone — unlike task
+// due dates (face-value UTC), ICS instants are genuine UTC, so they go through zonedYMD/
+// zonedMinutesOfDay exactly as the calendar UI does rather than the isoDate/isoTime helpers above.
+//
+// Only ~60 days ahead exist at all (CALENDAR_WINDOW_DAYS in lib/calendar.ts) and nothing before
+// today, since the feeds only carry upcoming instances. The 5-minute cache is shared with the
+// app, so this doesn't add a feed fetch per call.
+export async function listCalendarEvents(args: ListCalendarEventsArgs = {}): Promise<CalendarEventSummary[]> {
+  const [{ events }, { timeZone }, dismissedIds] = await Promise.all([
+    getCalendarEvents(),
+    getAppSettings(),
+    getDismissedCalendarEventIds(),
+  ]);
+  const dismissed = new Set(dismissedIds);
+  const search = args.search?.trim().toLowerCase();
+
+  return events
+    .filter((e) => args.includeDismissed || !dismissed.has(e.id))
+    .filter((e) => !search || e.title.toLowerCase().includes(search) || e.location?.toLowerCase().includes(search))
+    .map((e) => {
+      const start = new Date(e.start);
+      const end = new Date(e.end);
+      const ymd = zonedYMD(start, timeZone);
+      const date = `${ymd.year}-${String(ymd.month0 + 1).padStart(2, "0")}-${String(ymd.day).padStart(2, "0")}`;
+      return {
+        id: e.id,
+        title: e.title,
+        date,
+        startTime: e.allDay ? null : hhmm(zonedMinutesOfDay(start, timeZone)),
+        endTime: e.allDay ? null : hhmm(zonedMinutesOfDay(end, timeZone)),
+        startIso: e.start,
+        endIso: e.end,
+        allDay: e.allDay,
+        durationMinutes: e.allDay ? null : Math.round((end.getTime() - start.getTime()) / 60000),
+        location: e.location,
+        source: e.source,
+      };
+    })
+    .filter((e) => (!args.from || e.date >= args.from) && (!args.to || e.date <= args.to))
+    .sort((a, b) => (a.date === b.date ? a.startIso.localeCompare(b.startIso) : a.date.localeCompare(b.date)));
 }

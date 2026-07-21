@@ -2,6 +2,7 @@
 
 import type { MonthCell } from "@/lib/taskbookDates";
 import { CalendarEventMarker, CalendarTaskItem, RowDeleteButton } from "./shared";
+import { useTaskbook } from "./store";
 import type { CountdownVM, DayDetailVM, UpcomingItemVM } from "./types";
 
 const WEEKDAY_HEADERS = ["M", "T", "W", "T", "F", "S", "S"];
@@ -48,6 +49,7 @@ export default function CalendarRail({
   variant?: "rail" | "panel";
 }) {
   const railTitle = selectedDay != null && dayDetail ? `${dayDetail.weekday} ${selectedDay} ${monthLabel}` : "Coming up";
+  const { refreshCalendar, calendarRefreshing } = useTaskbook();
 
   const outerClass =
     variant === "panel"
@@ -62,6 +64,21 @@ export default function CalendarRail({
         <div className="font-script text-4xl leading-[0.8] text-(--ink)">{monthLabel}</div>
         <div className="flex items-center gap-3.5">
           <span className="text-[13px] text-(--ink-muted)">{year}</span>
+          <button
+            type="button"
+            onClick={refreshCalendar}
+            disabled={calendarRefreshing}
+            aria-label="Refresh calendar feeds"
+            title="Pull the latest Google/Outlook events"
+            className="cursor-pointer p-0.5 disabled:cursor-default"
+          >
+            <svg width="14" height="14" viewBox="0 -960 960 960" className={calendarRefreshing ? "animate-spin" : undefined}>
+              <path
+                d="M480-160q-134 0-227-93t-93-227q0-134 93-227t227-93q69 0 132 28.5T720-690v-110h80v280H520v-80h168q-32-56-87.5-88T480-720q-100 0-170 70t-70 170q0 100 70 170t170 70q77 0 139-44t87-116h84q-28 106-114 173t-196 67Z"
+                style={{ fill: "var(--ink-muted)" }}
+              />
+            </svg>
+          </button>
           <div className="flex gap-2">
             <button type="button" onClick={onPrevMonth} aria-label="Previous month" className="cursor-pointer p-0.5">
               <svg width="14" height="14" viewBox="0 -960 960 960">

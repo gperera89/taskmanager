@@ -2,6 +2,7 @@ import { createMcpHandler } from "mcp-handler";
 import { z } from "zod";
 import {
   createTaskTool,
+  listCalendarEvents,
   listCategories,
   listProjects,
   listTasks,
@@ -76,6 +77,23 @@ function buildHandler(secret: string) {
 
       server.tool("list_categories", "List existing task categories.", {}, async () =>
         jsonContent(await listCategories())
+      );
+
+      server.tool(
+        "list_calendar_events",
+        "Read the user's synced calendar (Google + Outlook), so tasks can be scheduled around real commitments. " +
+          "Read-only, and only covers today through roughly 60 days ahead — the feeds carry no past events. " +
+          "Times are in the user's configured time zone.",
+        {
+          from: z.string().optional().describe("YYYY-MM-DD, only events on or after this date"),
+          to: z.string().optional().describe("YYYY-MM-DD, only events on or before this date"),
+          search: z.string().optional().describe("Substring to match against the event title/location"),
+          includeDismissed: z
+            .boolean()
+            .optional()
+            .describe("Include events the user has hidden in the app (default false)"),
+        },
+        async (args) => jsonContent(await listCalendarEvents(args))
       );
     },
     { serverInfo: { name: "taskmanager", version: "1.0.0" } },

@@ -214,6 +214,9 @@ type TaskbookContextValue = {
   actions: TaskbookActions;
   raw: RawState;
   calendarEvents: CalendarEvent[];
+  // Manual ICS re-pull (Google/Outlook), separate from `actions` since it's a read, not a mutation.
+  refreshCalendar: () => void;
+  calendarRefreshing: boolean;
   nowMs: number;
   mode: Mode;
   setMode: (mode: Mode) => void;
@@ -533,6 +536,23 @@ export function StoreProvider({
     refreshAtRef.current = Date.now();
     router.refresh();
   }, [router]);
+
+  // Manual calendar pull. Deliberately NOT routed through the optimistic outbox: there's nothing
+  // to patch locally, it's a read that has to hit the network, so it awaits the server and then
+  // reconciles through the normal refresh path.
+  const [calendarRefreshing, setCalendarRefreshing] = useState(false);
+  const refreshCalendar = useCallback(async () => {
+    setCalendarRefreshing(true);
+    try {
+      const { errors } = await serverActions.refreshCalendarFeeds();
+      refreshNow();
+      pushToast(errors.length ? errors[0] : "Calendar refreshed");
+    } catch {
+      pushToast("Couldn't reach the calendar feeds");
+    } finally {
+      setCalendarRefreshing(false);
+    }
+  }, [pushToast, refreshNow]);
 
   const syncPendingCount = useCallback(async () => {
     if (!idbAvailable()) return;
@@ -1577,7 +1597,7 @@ export function StoreProvider({
 
   return (
     <TaskbookContext.Provider
-      value={{ data, actions, raw, calendarEvents: events, nowMs: liveNowMs, mode, setMode, offline, pendingOps, toasts, dismissToast }}
+      value={{ data, actions, raw, calendarEvents: events, refreshCalendar, calendarRefreshing, nowMs: liveNowMs, mode, setMode, offline, pendingOps, toasts, dismissToast }}
     >
       {children}
     </TaskbookContext.Provider>

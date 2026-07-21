@@ -48,7 +48,11 @@ import {
   updateTask,
   updateTimeZone as updateTimeZoneApi,
 } from "@/lib/api";
+import { CALENDAR_CACHE_TAG, getCalendarEvents } from "@/lib/calendar";
 import { parseDurationInput } from "@/lib/shared";
+// updateTag (not revalidateTag) — this is a read-your-own-writes refresh: it must expire the
+// calendar cache immediately, not serve the stale snapshot while refetching in the background.
+import { updateTag } from "next/cache";
 
 // NOTE ON REVALIDATION: these actions no longer call revalidatePath("/"). The client applies
 // every change optimistically (see components/taskbook/store.tsx) and reconciles with server
@@ -598,4 +602,15 @@ export async function dismissCalendarEvent(eventId: string) {
 export async function restoreCalendarEvent(eventId: string) {
   await requireSession();
   await restoreCalendarEventApi(eventId);
+}
+
+// Manual "pull the ICS feeds again now" — expires the 5-minute calendar cache so the very next
+// render refetches Google/Outlook instead of serving the last snapshot. Returns the freshly
+// fetched result so the caller can report per-feed failures; the client follows this with a
+// router.refresh() to pick the new events up through the normal SSR path.
+export async function refreshCalendarFeeds(): Promise<{ count: number; errors: string[] }> {
+  await requireSession();
+  updateTag(CALENDAR_CACHE_TAG);
+  const { events, errors } = await getCalendarEvents();
+  return { count: events.length, errors };
 }

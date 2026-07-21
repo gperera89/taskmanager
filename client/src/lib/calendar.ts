@@ -76,9 +76,14 @@ async function fetchCalendarEvents(): Promise<{ events: CalendarEvent[]; errors:
   return { events, errors };
 }
 
+// Tag so the "refresh calendar" button can expire this entry on demand (see
+// refreshCalendarFeeds in app/actions.ts) without waiting out the 5-minute window.
+export const CALENDAR_CACHE_TAG = "calendar-events";
+
 // Cached independently of task/habit/project/routine mutations: those call revalidatePath("/"),
 // which would otherwise force this (two live network fetches + parsing ~1000+ events) to redo
 // on every single button press. A 5-minute staleness window is fine for a read-only sync.
 export const getCalendarEvents = unstable_cache(fetchCalendarEvents, ["calendar-events"], {
   revalidate: 300,
+  tags: [CALENDAR_CACHE_TAG],
 });

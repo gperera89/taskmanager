@@ -1,12 +1,14 @@
 import "server-only";
 import {
   createTaskTool,
+  listCalendarEvents,
   listCategories,
   listProjects,
   listTasks,
   setTaskCompleted,
   updateTaskTool,
   type CreateTaskArgs,
+  type ListCalendarEventsArgs,
   type ListTasksArgs,
   type SetTaskCompletedArgs,
   type UpdateTaskArgs,
@@ -110,6 +112,24 @@ const TOOLS = [
       parameters: { type: "object", properties: {} },
     },
   },
+  {
+    type: "function" as const,
+    function: {
+      name: "list_calendar_events",
+      description:
+        "Read the user's synced calendar (Google + Outlook) so tasks can be scheduled around real commitments. " +
+        "Read-only, covers today through roughly 60 days ahead only. Times are in the user's configured time zone.",
+      parameters: {
+        type: "object",
+        properties: {
+          from: { type: "string", description: "YYYY-MM-DD, only events on or after this date" },
+          to: { type: "string", description: "YYYY-MM-DD, only events on or before this date" },
+          search: { type: "string", description: "Substring to match against the event title/location" },
+          includeDismissed: { type: "boolean", description: "Include events the user hid in the app (default false)" },
+        },
+      },
+    },
+  },
 ];
 
 async function callTool(name: string, args: Record<string, unknown>): Promise<unknown> {
@@ -126,6 +146,8 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<un
       return listProjects();
     case "list_categories":
       return listCategories();
+    case "list_calendar_events":
+      return listCalendarEvents(args as ListCalendarEventsArgs);
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
@@ -142,6 +164,7 @@ function systemPrompt(): string {
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   return `You are the assistant embedded in the user's task manager app. Today is ${today} (${WEEKDAY_NAMES[now.getDay()]}).
 Use the list_tasks/list_projects/list_categories tools to look up real data before answering questions or before creating/editing a task, rather than guessing — never invent task ids, project ids, or category names.
+When scheduling or rescheduling anything to a specific day or time, call list_calendar_events for that date range first and work around the events already there — the calendar is read-only, so never claim you have moved or created a calendar event.
 When the user asks a question about their tasks, call list_tasks with suitable filters and answer concisely in prose, don't dump raw JSON.
 When the user asks you to add, reschedule, recategorize, or complete a task, call the matching tool, then confirm briefly what you did in one short sentence.
 If a request is ambiguous (e.g. which task they mean), ask a clarifying question instead of guessing.`;
