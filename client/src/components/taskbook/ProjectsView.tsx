@@ -5,6 +5,7 @@ import { todayInputValue } from "@/lib/taskbookDates";
 import { useTaskbook } from "./store";
 import { parseTaskForm } from "./formParse";
 import { AutoGrowTextarea, Chip, labelClass, useCompletionHold } from "./shared";
+import { DateTimePickerPanel, formatPickerLabel } from "./DateTimePicker";
 import { TaskRow } from "./TasksView";
 import type { CategoryOption, ProjectCardVM, ProjectOption } from "./types";
 
@@ -197,6 +198,34 @@ function ProjectCard({
   const [editingDescription, setEditingDescription] = useState(false);
   const [editingDueDate, setEditingDueDate] = useState(false);
   const [addingTask, setAddingTask] = useState(false);
+  const [newTaskDueDate, setNewTaskDueDate] = useState(todayInputValue());
+  const [newTaskDueTime, setNewTaskDueTime] = useState("");
+  const [newTaskDueOpen, setNewTaskDueOpen] = useState(false);
+  const addTaskFormRef = useRef<HTMLFormElement>(null);
+  const newTaskDuePanelRef = useRef<HTMLDivElement>(null);
+  // A single click-away listener drives both the calendar panel and the whole add-task row —
+  // relying on onBlur/relatedTarget here is unreliable once focus moves between two <button>s
+  // (the date trigger and a calendar day), so this mirrors the click-away pattern used by
+  // ItemModal/TaskRow's own due-date panels instead.
+  useEffect(() => {
+    if (!addingTask) return;
+    function onPointerDown(e: PointerEvent) {
+      const form = addTaskFormRef.current;
+      if (!form) return;
+      const target = e.target as Node;
+      if (newTaskDuePanelRef.current?.contains(target)) return;
+      if (form.contains(target)) {
+        if (newTaskDueOpen) setNewTaskDueOpen(false);
+        return;
+      }
+      setNewTaskDueOpen(false);
+      const title = form.elements.namedItem("title") as HTMLInputElement | null;
+      if (title?.value.trim()) form.requestSubmit();
+      else setAddingTask(false);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [addingTask, newTaskDueOpen]);
   const [viewMode, setViewMode] = useState<ProjectViewMode>("unchecked");
   const cycleViewMode = () =>
     setViewMode((mode) => VIEW_MODES[(VIEW_MODES.indexOf(mode) + 1) % VIEW_MODES.length]);
@@ -343,55 +372,72 @@ function ProjectCard({
         )}
         {addingTask ? (
           <form
+            ref={addTaskFormRef}
             onSubmit={(e) => {
               e.preventDefault();
               const input = parseTaskForm(new FormData(e.currentTarget));
               if (input.title && input.category) actions.addTask(input);
               setAddingTask(false);
             }}
-            className="flex items-center gap-2"
+            className="flex flex-col gap-2"
           >
             <input type="hidden" name="projectId" value={project.id} />
             <input type="hidden" name="category" value={categoryOptions[0]?.name ?? ""} />
-            <input
-              name="title"
-              required
-              autoFocus
-              placeholder="Task name"
-              onBlur={(e) => {
-                const next = e.relatedTarget as Node | null;
-                const form = e.currentTarget.form;
-                if (next && form?.contains(next)) return;
-                // Focus left the form — save what was typed rather than discard it.
-                if (e.currentTarget.value.trim()) form?.requestSubmit();
-                else setAddingTask(false);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") setAddingTask(false);
-              }}
-              className="min-w-0 flex-1 border-b border-(--accent-text) bg-transparent text-[15px] text-(--ink) outline-none"
-            />
-            <input
-              type="date"
-              name="dueDate"
-              defaultValue={todayInputValue()}
-              onBlur={(e) => {
-                const next = e.relatedTarget as Node | null;
-                const form = e.currentTarget.form;
-                if (next && form?.contains(next)) return;
-                // Focus left the form — save if a task name was entered.
-                const title = form?.elements.namedItem("title") as HTMLInputElement | null;
-                if (title?.value.trim()) form?.requestSubmit();
-                else setAddingTask(false);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") setAddingTask(false);
-              }}
-              className="flex-none rounded-md border border-(--border-strong) bg-(--card) px-1.5 py-0.5 text-[12px] text-(--ink-muted) outline-none"
-            />
+            <input type="hidden" name="dueDate" value={newTaskDueDate} />
+            <input type="hidden" name="dueTime" value={newTaskDueTime} />
+            <div className="flex items-center gap-2">
+              <input
+                name="title"
+                required
+                autoFocus
+                placeholder="Task name"
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") setAddingTask(false);
+                }}
+                className="min-w-0 flex-1 border-b border-(--accent-text) bg-transparent text-[15px] text-(--ink) outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => setNewTaskDueOpen((v) => !v)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") (newTaskDueOpen ? setNewTaskDueOpen(false) : setAddingTask(false));
+                }}
+                className="flex-none cursor-pointer rounded-md border border-(--border-strong) bg-(--card) px-1.5 py-0.5 text-[12px] text-(--ink-muted) outline-none"
+              >
+                {formatPickerLabel(newTaskDueDate, newTaskDueTime)}
+              </button>
+            </div>
+            {newTaskDueOpen && (
+              <div ref={newTaskDuePanelRef} className="w-fit rounded-lg border border-(--accent-text) bg-(--card) p-2.5">
+                <DateTimePickerPanel
+                  dateValue={newTaskDueDate}
+                  timeValue={newTaskDueTime}
+                  onChangeDate={setNewTaskDueDate}
+                  onChangeTime={setNewTaskDueTime}
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNewTaskDueDate("");
+                    setNewTaskDueTime("");
+                  }}
+                  className="mt-2 cursor-pointer text-xs text-(--ink-faint) hover:text-(--danger)"
+                >
+                  Clear
+                </button>
+              </div>
+            )}
           </form>
         ) : (
-          <div className={`${labelClass} cursor-pointer`} onClick={() => setAddingTask(true)}>
+          <div
+            className={`${labelClass} cursor-pointer`}
+            onClick={() => {
+              setNewTaskDueDate(todayInputValue());
+              setNewTaskDueTime("");
+              setNewTaskDueOpen(false);
+              setAddingTask(true);
+            }}
+          >
             + Add task
           </div>
         )}
