@@ -95,6 +95,7 @@ function parseTaskRepeat(formData: FormData): TaskRepeatInput | null {
   const dayOfMonth = Number(formData.get("repeatDayOfMonth") ?? "");
   const monthlyOrdinal = Number(formData.get("repeatMonthlyOrdinal") ?? "");
   const monthlyWeekday = Number(formData.get("repeatMonthlyWeekday") ?? "");
+  const repeatUntil = String(formData.get("repeatUntil") ?? "").trim();
   return {
     frequency: frequency as RoutineFrequency,
     interval,
@@ -106,6 +107,7 @@ function parseTaskRepeat(formData: FormData): TaskRepeatInput | null {
     dayOfMonth: dayOfMonth || null,
     monthlyOrdinal: monthlyOrdinal || null,
     monthlyWeekday: Number.isInteger(monthlyWeekday) && monthlyWeekday >= 0 && monthlyWeekday <= 6 ? monthlyWeekday : null,
+    repeatUntil: /^\d{4}-\d{2}-\d{2}$/.test(repeatUntil) ? repeatUntil : null,
   };
 }
 
@@ -192,6 +194,12 @@ export async function updateTaskProject(id: string, formData: FormData) {
 export async function updateTaskRepeat(id: string, formData: FormData) {
   await requireSession();
   await updateTask(id, { repeat: parseTaskRepeat(formData) });
+}
+
+export async function updateTaskPause(id: string, formData: FormData) {
+  await requireSession();
+  const pausedUntil = String(formData.get("pausedUntil") ?? "").trim();
+  await updateTask(id, { pausedUntil: pausedUntil || null });
 }
 
 export async function updateTaskSection(id: string, formData: FormData) {
@@ -407,6 +415,15 @@ export async function editHabit(id: string, formData: FormData) {
   if (!title || !schedule) return;
 
   await updateHabit(id, { title, ...schedule, durationMinutes: parseDurationInput(String(formData.get("duration") ?? "")) });
+}
+
+// Sets or clears a habit's planned break band (both dates required to set; empty = clear).
+export async function updateHabitPause(id: string, formData: FormData) {
+  await requireSession();
+  const start = String(formData.get("pauseStart") ?? "").trim();
+  const end = String(formData.get("pauseEnd") ?? "").trim();
+  const valid = /^\d{4}-\d{2}-\d{2}$/.test(start) && /^\d{4}-\d{2}-\d{2}$/.test(end);
+  await updateHabit(id, valid ? { pauseStart: start, pauseEnd: end } : { pauseStart: null, pauseEnd: null });
 }
 
 export async function markHabitDone(id: string) {

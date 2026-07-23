@@ -8,6 +8,7 @@ import {
   habitDateKey,
   MS_PER_DAY,
   NO_REPEAT,
+  utcCalendarDay,
 } from "@/lib/shared";
 
 export type { Task, Project, Habit, HabitCompletion, Routine, Category, CategoryScope, CompletionLog, HabitScheduleType, RoutineFrequency, RoutineMonthlyMode, CapturedKind, CaptureSource } from "@prisma/client";
@@ -86,12 +87,14 @@ export type TaskRepeatInput = {
   dayOfMonth?: number | null;
   monthlyOrdinal?: number | null;
   monthlyWeekday?: number | null;
+  // Series end date ("YYYY-MM-DD"), null/undefined = repeats forever.
+  repeatUntil?: string | null;
 };
 
 function repeatToPrismaData(repeat: TaskRepeatInput | null) {
   if (!repeat) return NO_REPEAT;
-  const resolved = resolveTaskRepeat(repeat);
-  return resolved;
+  // resolveTaskRepeat is pure date-math (no parsing); layer the end date on top of its output.
+  return { ...resolveTaskRepeat(repeat), repeatUntil: repeat.repeatUntil ? combineDueDateTime(repeat.repeatUntil) : null };
 }
 
 export function createTask(input: {
@@ -146,6 +149,7 @@ export function updateTask(
     durationMinutes: number | null;
     blockedReason: string | null;
     blockedUntil: string | null; // "YYYY-MM-DD"
+    pausedUntil: string | null; // "YYYY-MM-DD" — break/holiday; null clears it
   }>
 ) {
   return notFoundAsError("Task not found", () =>
@@ -168,6 +172,8 @@ export function updateTask(
         blockedReason: input.blockedReason === undefined ? undefined : input.blockedReason || null,
         blockedUntil:
           input.blockedUntil === undefined ? undefined : input.blockedUntil ? combineDueDateTime(input.blockedUntil) : null,
+        pausedUntil:
+          input.pausedUntil === undefined ? undefined : input.pausedUntil ? combineDueDateTime(input.pausedUntil) : null,
         ...(input.repeat === undefined ? {} : repeatToPrismaData(input.repeat)),
       },
     })
@@ -229,6 +235,11 @@ export async function toggleTaskCompletion(id: string, isCompleted: boolean) {
         monthlyWeekday: task.repeatMonthlyWeekday,
       };
       const next = nextOccurrence(task.dueDate, rule);
+      // End the series once the next occurrence would fall past the chosen end date — the
+      // occurrence just completed was the last one, so mark it done instead of rolling forward.
+      if (task.repeatUntil && utcCalendarDay(next) > utcCalendarDay(task.repeatUntil)) {
+        return prisma.task.update({ where: { id }, data: { isCompleted: true, completedAt: new Date() } });
+      }
       return prisma.task.update({ where: { id }, data: { dueDate: next, isCompleted: false, notifiedAt: null } });
     }
     return prisma.task.update({ where: { id }, data: { isCompleted: true, completedAt: new Date() } });
@@ -474,9 +485,19 @@ export async function toggleHabitCompletion(id: string, dateKey: string): Promis
 
 export function updateHabit(
   id: string,
-  input: { title?: string } & Partial<HabitScheduleInput> & { durationMinutes?: number | null }
+  input: { title?: string } & Partial<HabitScheduleInput> & {
+    durationMinutes?: number | null;
+    // Break band ("YYYY-MM-DD" | null). undefined = leave as-is, null = clear.
+    pauseStart?: string | null;
+    pauseEnd?: string | null;
+  }
 ) {
-  const data: Prisma.HabitUpdateInput = { title: input.title, durationMinutes: input.durationMinutes };
+  const data: Prisma.HabitUpdateInput = {
+    title: input.title,
+    durationMinutes: input.durationMinutes,
+    pauseStart: input.pauseStart === undefined ? undefined : input.pauseStart ? combineDueDateTime(input.pauseStart) : null,
+    pauseEnd: input.pauseEnd === undefined ? undefined : input.pauseEnd ? combineDueDateTime(input.pauseEnd) : null,
+  };
   if (input.scheduleType !== undefined) {
     Object.assign(
       data,
@@ -1032,7 +1053,7 @@ export function dismissVoiceCapture(id: string) {
 // `to_timestamp(...) AT TIME ZONE 'UTC'` round-trip those to JS Dates without ever passing
 // through a session-timezone-dependent cast.
 
-export type CronTask = { id: string; title: string; dueDate: Date; reminderLeadMinutes: number | null };
+export type CronTask = { id: string; title: string; dueDate: Date; reminderLeadMinutes: number | null; pausedUntil: Date | null };
 export type CronProject = { id: string; name: string; dueDate: Date; reminderLeadMinutes: number | null };
 export type CronRoutine = TaskRepeatRule & {
   id: string;
@@ -1067,7 +1088,7 @@ export type CronSnapshot = {
 type RawCronRow = {
   timeZone: string;
   prevCronAtMs: number | null;
-  tasks: { id: string; title: string; dueMs: number; reminderLeadMinutes: number | null }[];
+  tasks: { id: string; title: string; dueMs: number; reminderLeadMinutes: number | null; pausedUntilMs: number | null }[];
   projects: { id: string; name: string; dueMs: number; reminderLeadMinutes: number | null }[];
   routines: {
     id: string;
@@ -1119,7 +1140,8 @@ export async function getCronSnapshot(now: Date, until: Date): Promise<CronSnaps
          'id', t."id",
          'title', t."title",
          'dueMs', extract(epoch FROM t."dueDate") * 1000,
-         'reminderLeadMinutes', t."reminderLeadMinutes")), '[]'::json)
+         'reminderLeadMinutes', t."reminderLeadMinutes",
+         'pausedUntilMs', extract(epoch FROM t."pausedUntil") * 1000)), '[]'::json)
        FROM "Task" t
        WHERE t."dueDate" <= to_timestamp(${untilMs}::float8 / 1000) AT TIME ZONE 'UTC'
          AND t."isCompleted" = false AND t."notifiedAt" IS NULL
@@ -1172,6 +1194,7 @@ export async function getCronSnapshot(now: Date, until: Date): Promise<CronSnaps
       title: t.title,
       dueDate: new Date(t.dueMs),
       reminderLeadMinutes: t.reminderLeadMinutes,
+      pausedUntil: msDate(t.pausedUntilMs),
     })),
     projects: row.projects.map((p) => ({
       id: p.id,

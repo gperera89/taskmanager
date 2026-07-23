@@ -24,6 +24,7 @@ import {
   combineDueDateTime,
   habitDateKey,
   NO_REPEAT,
+  utcCalendarDay,
 } from "@/lib/shared";
 import {
   deserializeArg,
@@ -88,6 +89,7 @@ export type TaskRepeatInput = {
   dayOfMonth?: number | null;
   monthlyOrdinal?: number | null;
   monthlyWeekday?: number | null;
+  repeatUntil?: string | null; // series end date "YYYY-MM-DD", null = forever
 } | null;
 
 export type TaskCreateInput = {
@@ -151,6 +153,7 @@ export type TaskbookActions = {
   setTaskProject: (id: string, projectId: string) => void;
   setTaskDue: (id: string, dueDate: string, dueTime: string) => void;
   setTaskRepeat: (id: string, repeat: TaskRepeatInput) => void;
+  setTaskPause: (id: string, pausedUntil: string) => void; // empty clears the break
   setTaskSection: (id: string, section: string) => void;
   setTaskReminderLead: (id: string, minutes: number | null) => void;
   setTaskDuration: (id: string, minutes: number | null) => void;
@@ -175,6 +178,7 @@ export type TaskbookActions = {
   editHabit: (id: string, input: HabitInput) => void;
   markHabitDone: (id: string) => void;
   toggleHabitCompletion: (habitId: string, dateKey: string) => void;
+  setHabitPause: (id: string, pauseStart: string, pauseEnd: string) => void; // empty clears
   removeHabit: (id: string) => void;
   // Routines
   addRoutine: (input: RoutineInput) => void;
@@ -281,7 +285,9 @@ function repeatRuleOf(t: RawTask): TaskRepeatRule | null {
 }
 
 function repeatFields(repeat: TaskRepeatInput) {
-  return repeat ? resolveTaskRepeat(repeat) : NO_REPEAT;
+  return repeat
+    ? { ...resolveTaskRepeat(repeat), repeatUntil: repeat.repeatUntil ? combineDueDateTime(repeat.repeatUntil) : null }
+    : NO_REPEAT;
 }
 
 // Patches a task wherever it lives — as a top-level row or inside a parent's subtasks
@@ -326,6 +332,7 @@ function repeatToFd(fd: FormData, repeat: TaskRepeatInput) {
   if (repeat.dayOfMonth != null) fd.set("repeatDayOfMonth", String(repeat.dayOfMonth));
   if (repeat.monthlyOrdinal != null) fd.set("repeatMonthlyOrdinal", String(repeat.monthlyOrdinal));
   if (repeat.monthlyWeekday != null) fd.set("repeatMonthlyWeekday", String(repeat.monthlyWeekday));
+  if (repeat.repeatUntil) fd.set("repeatUntil", repeat.repeatUntil);
   for (const d of repeat.daysOfWeek ?? []) fd.append("repeatDaysOfWeek", String(d));
 }
 
@@ -365,6 +372,7 @@ const REGISTRY: Record<string, RegistryEntry> = {
   setTaskProject: { fn: serverActions.updateTaskProject },
   setTaskDue: { fn: serverActions.updateTaskDueDate },
   setTaskRepeat: { fn: serverActions.updateTaskRepeat },
+  setTaskPause: { fn: serverActions.updateTaskPause },
   setTaskSection: { fn: serverActions.updateTaskSection },
   setTaskReminderLead: { fn: serverActions.updateTaskReminderLead },
   setTaskDuration: { fn: serverActions.updateTaskDuration },
@@ -398,6 +406,7 @@ const REGISTRY: Record<string, RegistryEntry> = {
   editHabit: { fn: serverActions.editHabit },
   markHabitDone: { fn: serverActions.markHabitDone },
   toggleHabitCompletion: { fn: serverActions.toggleHabitCompletion },
+  setHabitPause: { fn: serverActions.updateHabitPause },
   removeHabit: { fn: serverActions.removeHabit },
   addRoutine: {
     fn: serverActions.addRoutine,
@@ -819,6 +828,7 @@ export function StoreProvider({
           durationMinutes: input.durationMinutes ?? null,
           blockedReason: null,
           blockedUntil: null,
+          pausedUntil: null,
           subtasks: [],
           ...repeatFields(input.repeat ?? null),
         };
@@ -852,7 +862,12 @@ export function StoreProvider({
               if (isCompleted) return { ...t, isCompleted: false, completedAt: null };
               const rule = repeatRuleOf(t);
               if (rule && t.dueDate) {
-                return { ...t, dueDate: nextOccurrence(new Date(t.dueDate), rule), isCompleted: false, notifiedAt: null };
+                const next = nextOccurrence(new Date(t.dueDate), rule);
+                // End the series once the next occurrence would land past the repeat-until date.
+                if (t.repeatUntil && utcCalendarDay(next) > utcCalendarDay(new Date(t.repeatUntil))) {
+                  return { ...t, isCompleted: true, completedAt: new Date() };
+                }
+                return { ...t, dueDate: next, isCompleted: false, notifiedAt: null };
               }
               return { ...t, isCompleted: true, completedAt: new Date() };
             }),
@@ -928,6 +943,18 @@ export function StoreProvider({
         const fd = new FormData();
         repeatToFd(fd, repeat);
         mutate((r) => ({ ...r, tasks: mapTask(r.tasks, id, (t) => ({ ...t, ...repeatFields(repeat) })) }), "setTaskRepeat", [id, fd]);
+      },
+      setTaskPause: (id, pausedUntil) => {
+        const fd = new FormData();
+        fd.set("pausedUntil", pausedUntil);
+        mutate(
+          (r) => ({
+            ...r,
+            tasks: mapTask(r.tasks, id, (t) => ({ ...t, pausedUntil: pausedUntil ? combineDueDateTime(pausedUntil) : null })),
+          }),
+          "setTaskPause",
+          [id, fd]
+        );
       },
       setTaskSection: (id, section) => {
         const fd = new FormData();
@@ -1179,6 +1206,8 @@ export function StoreProvider({
                 targetCount: input.targetCount,
                 daysOfWeek: input.daysOfWeek,
                 durationMinutes: input.durationMinutes ?? null,
+                pauseStart: null,
+                pauseEnd: null,
               },
             ],
           }),
@@ -1230,6 +1259,24 @@ export function StoreProvider({
           "toggleHabitCompletion",
           [habitId, dateKey]
         ),
+      setHabitPause: (id, pauseStart, pauseEnd) => {
+        const fd = new FormData();
+        fd.set("pauseStart", pauseStart);
+        fd.set("pauseEnd", pauseEnd);
+        const valid = /^\d{4}-\d{2}-\d{2}$/.test(pauseStart) && /^\d{4}-\d{2}-\d{2}$/.test(pauseEnd);
+        mutate(
+          (r) => ({
+            ...r,
+            habits: r.habits.map((h) =>
+              h.id === id
+                ? { ...h, pauseStart: valid ? combineDueDateTime(pauseStart) : null, pauseEnd: valid ? combineDueDateTime(pauseEnd) : null }
+                : h
+            ),
+          }),
+          "setHabitPause",
+          [id, fd]
+        );
+      },
       removeHabit: (id) => {
         const captured = rawRef.current.habits.find((h) => h.id === id);
         if (!captured) return;
@@ -1540,6 +1587,7 @@ export function StoreProvider({
           durationMinutes: null,
           blockedReason: null,
           blockedUntil: null,
+          pausedUntil: null,
           subtasks: [],
           ...NO_REPEAT,
         };

@@ -167,9 +167,10 @@ function toTimeInputValue(date: Date | null): string {
 
 // --- Task VMs ---
 
-function toTaskVM(t: RawTask, projectNameById: Map<string, string>): TaskItemVM {
+function toTaskVM(t: RawTask, projectNameById: Map<string, string>, now: Date): TaskItemVM {
   const due = t.dueDate ? new Date(t.dueDate) : null;
   const dueLabel = due ? formatDueLabel(due) : null;
+  const repeatUntil = t.repeatUntil ? new Date(t.repeatUntil) : null;
   const repeatLabel = t.repeatFrequency
     ? describeTaskRepeat({
         frequency: t.repeatFrequency,
@@ -179,8 +180,12 @@ function toTaskVM(t: RawTask, projectNameById: Map<string, string>): TaskItemVM 
         dayOfMonth: t.repeatDayOfMonth,
         monthlyOrdinal: t.repeatMonthlyOrdinal,
         monthlyWeekday: t.repeatMonthlyWeekday,
-      })
+      }) + (repeatUntil ? ` · until ${formatShortDate(calendarDateFromDue(repeatUntil))}` : "")
     : null;
+  // A break is "active" while its resume date is still in the future (same calendar-day
+  // convention as the due-bucket logic).
+  const pausedUntil = t.pausedUntil ? new Date(t.pausedUntil) : null;
+  const pauseActive = pausedUntil != null && daysUntil(pausedUntil, now) > 0;
   return {
     id: t.id,
     title: t.title,
@@ -202,6 +207,9 @@ function toTaskVM(t: RawTask, projectNameById: Map<string, string>): TaskItemVM 
     repeatMonthlyOrdinal: t.repeatMonthlyOrdinal,
     repeatMonthlyWeekday: t.repeatMonthlyWeekday,
     repeatLabel,
+    repeatUntilValue: toDateInputValue(repeatUntil),
+    pausedUntilValue: toDateInputValue(pausedUntil),
+    pausedLabel: pauseActive && pausedUntil ? `Paused until ${formatShortDate(calendarDateFromDue(pausedUntil))}` : null,
     section: t.section,
     sortOrder: t.sortOrder,
     reminderLeadMinutes: t.reminderLeadMinutes,
@@ -271,10 +279,15 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
   const grouped = new Map<DueBucket, { vm: TaskItemVM; dueMs: number | null; createdMs: number }[]>();
   for (const t of raw.tasks) {
     if (!taskMatchesMode(t.category, mode, scopeByName)) continue;
-    const vm = toTaskVM(t, projectNameById);
-    const b = bucketForDue(t.dueDate ? new Date(t.dueDate) : null, now);
+    const vm = toTaskVM(t, projectNameById, now);
+    // While a break is active the task is bucketed/sorted by its resume date, so it drops out
+    // of Overdue/Today and reappears as due when the break ends (like a paused routine skips).
+    const realDue = t.dueDate ? new Date(t.dueDate) : null;
+    const pausedUntil = t.pausedUntil ? new Date(t.pausedUntil) : null;
+    const effectiveDue = pausedUntil && daysUntil(pausedUntil, now) > 0 ? pausedUntil : realDue;
+    const b = bucketForDue(effectiveDue, now);
     if (!grouped.has(b)) grouped.set(b, []);
-    grouped.get(b)!.push({ vm, dueMs: t.dueDate ? new Date(t.dueDate).getTime() : null, createdMs: new Date(t.createdAt).getTime() });
+    grouped.get(b)!.push({ vm, dueMs: effectiveDue ? effectiveDue.getTime() : null, createdMs: new Date(t.createdAt).getTime() });
   }
   // Within each bucket: manual order first (drag-and-drop), then due time, then creation.
   for (const entries of grouped.values()) {
@@ -316,7 +329,7 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
     const sorted = [...items].sort(
       (a, b) => Number(a.isCompleted) - Number(b.isCompleted) || taskOrderCompare(orderKey(a), orderKey(b))
     );
-    const tasks = sorted.map((t) => toTaskVM(t, projectNameById));
+    const tasks = sorted.map((t) => toTaskVM(t, projectNameById, now));
     // Group by section, preserving first-appearance order; unsectioned tasks lead. With
     // sections toggled off the card renders one flat headingless group regardless of any
     // stray section values (the disable path clears them server-side).
@@ -424,6 +437,8 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
       progressTarget: status.progressTarget,
       detailLabel: habitScheduleLabel(habit),
       completedDates: [...keys].sort(),
+      pauseStart: toDateInputValue(habit.pauseStart),
+      pauseEnd: toDateInputValue(habit.pauseEnd),
       durationMinutes: habit.durationMinutes,
       durationLabel: habit.durationMinutes != null ? formatDuration(habit.durationMinutes) : null,
     };

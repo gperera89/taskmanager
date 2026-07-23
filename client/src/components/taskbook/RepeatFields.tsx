@@ -36,6 +36,7 @@ export type RepeatInitial = {
   dayOfMonth: number | null;
   monthlyOrdinal: number | null;
   monthlyWeekday: number | null;
+  repeatUntil: string | null; // yyyy-mm-dd series end date, null = repeats forever
 };
 
 // Task recurrence controls — same shape of rule as Routines, but tasks default to "does not
@@ -59,6 +60,7 @@ export default function RepeatFields({
   const [dayOfMonth, setDayOfMonth] = useState(initial?.dayOfMonth ?? (anchorDate ?? new Date()).getDate());
   const [monthlyOrdinal, setMonthlyOrdinal] = useState(initial?.monthlyOrdinal ?? 1);
   const [monthlyWeekday, setMonthlyWeekday] = useState(initial?.monthlyWeekday ?? (anchorDate ?? new Date()).getDay());
+  const [repeatUntil, setRepeatUntil] = useState(initial?.repeatUntil ?? "");
   const isSingular = intervalStr === "1";
 
   // Skip the very first run so opening the popover doesn't immediately re-save the unchanged
@@ -77,9 +79,10 @@ export default function RepeatFields({
       dayOfMonth,
       monthlyOrdinal,
       monthlyWeekday,
+      repeatUntil: repeatUntil || null,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [frequency, intervalStr, daysOfWeek, monthlyMode, dayOfMonth, monthlyOrdinal, monthlyWeekday]);
+  }, [frequency, intervalStr, daysOfWeek, monthlyMode, dayOfMonth, monthlyOrdinal, monthlyWeekday, repeatUntil]);
 
   return (
     <div className="flex flex-col gap-3">
@@ -218,6 +221,31 @@ export default function RepeatFields({
               )}
             </div>
           )}
+
+          <div>
+            <label className={labelTextClass}>Ends</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
+                name="repeatUntil"
+                value={repeatUntil}
+                min={anchorDate ? anchorDate.toISOString().slice(0, 10) : undefined}
+                onChange={(e) => setRepeatUntil(e.target.value)}
+                className={`${inputClass} w-auto`}
+              />
+              {repeatUntil ? (
+                <button
+                  type="button"
+                  onClick={() => setRepeatUntil("")}
+                  className="cursor-pointer text-xs text-(--ink-faint) hover:text-(--danger)"
+                >
+                  Never
+                </button>
+              ) : (
+                <span className="text-xs italic text-(--ink-ghost)">Repeats forever</span>
+              )}
+            </div>
+          </div>
         </>
       )}
     </div>

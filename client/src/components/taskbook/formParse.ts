@@ -18,6 +18,7 @@ export function parseTaskRepeat(fd: FormData): TaskRepeatInput {
   const dayOfMonth = Number(fd.get("repeatDayOfMonth") ?? "");
   const monthlyOrdinal = Number(fd.get("repeatMonthlyOrdinal") ?? "");
   const monthlyWeekday = Number(fd.get("repeatMonthlyWeekday") ?? "");
+  const repeatUntil = String(fd.get("repeatUntil") ?? "").trim();
   return {
     frequency: frequency as RoutineFrequency,
     interval,
@@ -29,6 +30,7 @@ export function parseTaskRepeat(fd: FormData): TaskRepeatInput {
     dayOfMonth: dayOfMonth || null,
     monthlyOrdinal: monthlyOrdinal || null,
     monthlyWeekday: Number.isInteger(monthlyWeekday) && monthlyWeekday >= 0 && monthlyWeekday <= 6 ? monthlyWeekday : null,
+    repeatUntil: /^\d{4}-\d{2}-\d{2}$/.test(repeatUntil) ? repeatUntil : null,
   };
 }
 

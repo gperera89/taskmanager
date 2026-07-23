@@ -31,6 +31,9 @@ export type TaskItemVM = {
   repeatMonthlyOrdinal: number | null;
   repeatMonthlyWeekday: number | null;
   repeatLabel: string | null; // e.g. "Every week · Mon, Wed", null when repeatFrequency is null
+  repeatUntilValue: string; // yyyy-mm-dd of the series end date for the edit form, "" if none
+  pausedUntilValue: string; // yyyy-mm-dd of the break's resume date for the edit form, "" if none
+  pausedLabel: string | null; // e.g. "Paused until 5 Jan", only while the break is active
   section: string | null; // grouping heading within a project card
   sortOrder: number | null; // manual position within its bucket/section (fractional index)
   reminderLeadMinutes: number | null; // notify this long before the due time (null = at it)
@@ -106,6 +109,9 @@ export type HabitCardVM = {
   detailLabel: string;
   // YYYY-MM-DD keys of every completed day (up to a year back) — feeds the heatmap.
   completedDates: string[];
+  // Planned-break band (yyyy-mm-dd, inclusive), "" when unset — greyed in the heatmap.
+  pauseStart: string;
+  pauseEnd: string;
   durationMinutes: number | null;
   durationLabel: string | null;
 };

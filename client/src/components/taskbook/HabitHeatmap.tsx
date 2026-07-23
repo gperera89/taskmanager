@@ -66,6 +66,9 @@ export default function HabitHeatmap({ habit, onClose }: { habit: HabitCardVM; o
   const todayKey = habitDateKey(new Date(nowMs), raw.timeZone);
   const columns = buildColumns(todayKey, range.days);
 
+  // A day is "on break" when it falls inside the habit's planned pause band (inclusive).
+  const isPaused = (key: string) => Boolean(habit.pauseStart) && key >= habit.pauseStart && key <= habit.pauseEnd;
+
   const cellSize = 15;
   const gap = 3;
 
@@ -131,6 +134,7 @@ export default function HabitHeatmap({ habit, onClose }: { habit: HabitCardVM; o
                         cell={cell}
                         size={cellSize}
                         completed={cell ? completed.has(cell.key) : false}
+                        paused={cell ? isPaused(cell.key) : false}
                         onToggle={(key) => actions.toggleHabitCompletion(habit.id, key)}
                       />
                     ))}
@@ -141,7 +145,56 @@ export default function HabitHeatmap({ habit, onClose }: { habit: HabitCardVM; o
           </div>
         </div>
 
-        <p className="mt-4 text-[11.5px] text-(--ink-soft)">Tap a day to add or remove a completion.</p>
+        <HabitBreakControl habit={habit} onSet={(start, end) => actions.setHabitPause(habit.id, start, end)} />
+
+        <p className="mt-3 text-[11.5px] text-(--ink-soft)">Tap a day to add or remove a completion.</p>
+      </div>
+    </div>
+  );
+}
+
+// Sets or clears a planned break (holiday) for the habit — an inclusive [start, end] band that
+// greys out in the grid above and is excluded from streak / at-risk math.
+function HabitBreakControl({
+  habit,
+  onSet,
+}: {
+  habit: HabitCardVM;
+  onSet: (start: string, end: string) => void;
+}) {
+  const [start, setStart] = useState(habit.pauseStart);
+  const [end, setEnd] = useState(habit.pauseEnd);
+  const dateInputClass =
+    "rounded-md border border-(--border-strong) bg-transparent px-1.5 py-0.5 text-xs text-(--ink) outline-none";
+  const canApply = /^\d{4}-\d{2}-\d{2}$/.test(start) && /^\d{4}-\d{2}-\d{2}$/.test(end) && start <= end;
+  return (
+    <div className="mt-4 border-t border-(--border-soft) pt-3">
+      <div className="mb-1.5 text-[11px] uppercase tracking-[0.14em] text-(--ink-muted)">Planned break</div>
+      <div className="flex flex-wrap items-center gap-2">
+        <input type="date" aria-label="Break start" value={start} max={end || undefined} onChange={(e) => setStart(e.target.value)} className={dateInputClass} />
+        <span className="text-xs text-(--ink-soft)">to</span>
+        <input type="date" aria-label="Break end" value={end} min={start || undefined} onChange={(e) => setEnd(e.target.value)} className={dateInputClass} />
+        <button
+          type="button"
+          disabled={!canApply}
+          onClick={() => onSet(start, end)}
+          className="cursor-pointer rounded-md bg-(--accent) px-2.5 py-1 text-xs text-(--on-accent) disabled:opacity-50"
+        >
+          Set break
+        </button>
+        {habit.pauseStart && (
+          <button
+            type="button"
+            onClick={() => {
+              setStart("");
+              setEnd("");
+              onSet("", "");
+            }}
+            className="cursor-pointer text-xs text-(--ink-faint) hover:text-(--danger)"
+          >
+            Clear
+          </button>
+        )}
       </div>
     </div>
   );
@@ -151,23 +204,33 @@ function HeatCell({
   cell,
   size,
   completed,
+  paused,
   onToggle,
 }: {
   cell: Cell;
   size: number;
   completed: boolean;
+  paused: boolean;
   onToggle: (key: string) => void;
 }) {
   if (!cell) return <div style={{ width: size, height: size }} />;
   const clickable = cell.inRange && !cell.isFuture;
-  const background = completed ? "var(--accent)" : cell.isFuture ? "transparent" : "var(--border-faint)";
+  // A completed day inside a break still shows the accent (they did it anyway); an uncompleted
+  // break day is hatched-grey so a planned skip reads clearly instead of as a miss.
+  const background = completed
+    ? "var(--accent)"
+    : paused
+      ? "repeating-linear-gradient(45deg, var(--border-soft) 0 2px, transparent 2px 4px)"
+      : cell.isFuture
+        ? "transparent"
+        : "var(--border-faint)";
   return (
     <button
       type="button"
-      disabled={!clickable}
-      onClick={() => onToggle(cell.key)}
-      title={cell.key}
-      aria-label={`${cell.key}${completed ? " — completed" : ""}`}
+      disabled={!clickable && !paused}
+      onClick={() => clickable && onToggle(cell.key)}
+      title={paused && !completed ? `${cell.key} — on break` : cell.key}
+      aria-label={`${cell.key}${completed ? " — completed" : paused ? " — on break" : ""}`}
       style={{
         width: size,
         height: size,
@@ -175,7 +238,7 @@ function HeatCell({
         borderRadius: 3,
         border: cell.isToday ? "1.5px solid var(--accent-text)" : "1px solid var(--border-faint)",
         cursor: clickable ? "pointer" : "default",
-        opacity: cell.isFuture ? 0.35 : 1,
+        opacity: cell.isFuture && !paused ? 0.35 : 1,
       }}
     />
   );

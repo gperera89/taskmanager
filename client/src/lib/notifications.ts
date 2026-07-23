@@ -226,7 +226,17 @@ export async function checkAndNotifyDueItems(): Promise<{
   const reminderInstant = (due: Date, leadMinutes: number | null) =>
     new Date(dueInstant(due, timeZone).getTime() - (leadMinutes ?? 0) * 60_000);
 
-  const dueTasks = snap.tasks.filter((t) => reminderInstant(t.dueDate, t.reminderLeadMinutes) <= now);
+  // A task on a break stays silent until its resume date arrives — compare calendar days in the
+  // configured zone, like the routine pause check in notifyDueRoutines.
+  const local = zonedNow(now.getTime(), timeZone);
+  const todayUTC = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate());
+  const isPaused = (pausedUntil: Date | null) =>
+    pausedUntil != null &&
+    todayUTC < Date.UTC(pausedUntil.getUTCFullYear(), pausedUntil.getUTCMonth(), pausedUntil.getUTCDate());
+
+  const dueTasks = snap.tasks.filter(
+    (t) => !isPaused(t.pausedUntil) && reminderInstant(t.dueDate, t.reminderLeadMinutes) <= now
+  );
   const dueProjects = snap.projects.filter((p) => reminderInstant(p.dueDate, p.reminderLeadMinutes) <= now);
 
   const [routineResult, countdownResult] = await Promise.all([

@@ -382,6 +382,10 @@ export function TaskRow({
           </div>
         )}
 
+        {task.pausedLabel && !task.isCompleted && (
+          <div className="mt-0.5 text-[12.5px] italic text-(--ink-muted)">↻ {task.pausedLabel}</div>
+        )}
+
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           <select
             value={task.category}
@@ -656,6 +660,7 @@ export function TaskRow({
                 dayOfMonth: task.repeatDayOfMonth,
                 monthlyOrdinal: task.repeatMonthlyOrdinal,
                 monthlyWeekday: task.repeatMonthlyWeekday,
+                repeatUntil: task.repeatUntilValue || null,
               }}
               anchorDate={task.dueDateValue ? new Date(`${task.dueDateValue}T00:00:00`) : undefined}
               onChange={(rule) => {
@@ -669,10 +674,12 @@ export function TaskRow({
                       dayOfMonth: rule.dayOfMonth,
                       monthlyOrdinal: rule.monthlyOrdinal,
                       monthlyWeekday: rule.monthlyWeekday,
+                      repeatUntil: rule.repeatUntil,
                     }
                   : null;
               }}
             />
+            {task.repeatFrequency && <TaskBreakRow task={task} />}
           </div>
         )}
 
@@ -775,6 +782,56 @@ export function TaskRow({
       <div className="flex flex-none items-start pt-0.5">
         <RowDeleteButton action={() => actions.removeTask(task.id)} />
       </div>
+    </div>
+  );
+}
+
+// Holiday/break control for a repeating task, shown inside the repeat popover. Mirrors the
+// routine pause affordance (RoutinesView): a "Pause until" date sets a break during which the
+// task drops out of the due buckets and stops nagging, resuming on/after the chosen date.
+function TaskBreakRow({ task }: { task: TaskItemVM }) {
+  const { actions } = useTaskbook();
+  const [editing, setEditing] = useState(false);
+  return (
+    <div className="mt-3 border-t border-(--border-soft) pt-3">
+      <div className="mb-1 text-[11px] uppercase tracking-[0.14em] text-(--ink-muted)">Break</div>
+      <div className="flex flex-wrap items-center gap-2.5">
+        <button
+          type="button"
+          onClick={() => setEditing((v) => !v)}
+          className={chipSelectClass}
+          style={{
+            color: task.pausedUntilValue ? "var(--info)" : "var(--ink-faint)",
+            background: task.pausedUntilValue ? "var(--info-wash)" : "transparent",
+            border: task.pausedUntilValue ? "none" : "1px dashed var(--border-strong)",
+          }}
+        >
+          {task.pausedUntilValue ? `Paused until ${task.pausedUntilValue}` : "Pause until…"}
+        </button>
+        {task.pausedUntilValue && (
+          <button
+            type="button"
+            onClick={() => actions.setTaskPause(task.id, "")}
+            className="cursor-pointer text-xs text-(--ink-faint) hover:text-(--danger)"
+          >
+            Clear pause
+          </button>
+        )}
+      </div>
+      {editing && (
+        <div className="mt-2 w-fit rounded-lg border border-(--accent-text) bg-(--card) p-2.5">
+          <DateTimePickerPanel
+            dateOnly
+            dateValue={task.pausedUntilValue}
+            timeValue=""
+            onChangeDate={(d) => {
+              actions.setTaskPause(task.id, d);
+              setEditing(false);
+            }}
+            onChangeTime={() => {}}
+          />
+        </div>
+      )}
     </div>
   );
 }
