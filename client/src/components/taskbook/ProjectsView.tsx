@@ -6,6 +6,7 @@ import { useTaskbook } from "./store";
 import { parseTaskForm } from "./formParse";
 import { AutoGrowTextarea, Chip, labelClass, useCompletionHold } from "./shared";
 import { DateTimePickerPanel, formatPickerLabel } from "./DateTimePicker";
+import SearchBar from "./SearchBar";
 import { TaskRow } from "./TasksView";
 import type { CategoryOption, ProjectCardVM, ProjectOption } from "./types";
 
@@ -148,12 +149,14 @@ export default function ProjectsView({
   cards,
   activeCount,
   query,
+  onQueryChange,
   categoryOptions,
   projectOptions,
 }: {
   cards: ProjectCardVM[];
   activeCount: number;
   query: string;
+  onQueryChange: (v: string) => void;
   categoryOptions: CategoryOption[];
   projectOptions: ProjectOption[];
 }) {
@@ -166,7 +169,9 @@ export default function ProjectsView({
         <div className="font-script text-[62px] leading-[0.8] text-(--ink)">Projects</div>
         <div className="pb-2.5 text-[13px] text-(--ink-muted)">{activeCount} active</div>
       </div>
-      <div className="my-5 mb-6 h-px bg-(--rule)" />
+      <div className="my-5 mb-1 h-px bg-(--rule)" />
+
+      <SearchBar query={query} onQueryChange={onQueryChange} placeholder="Search projects…" />
 
       {filtered.length === 0 && (
         <p className="py-8 text-[15px] italic text-(--ink-soft)">

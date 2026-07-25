@@ -17,8 +17,8 @@ import {
   useCompletionHold,
 } from "./shared";
 import { DateTimePickerPanel } from "./DateTimePicker";
-import QuickAdd from "./QuickAdd";
 import RepeatFields from "./RepeatFields";
+import SearchBar from "./SearchBar";
 import type { CategoryOption, ProjectOption, TaskGroupVM, TaskItemVM } from "./types";
 
 // Drag-to-reorder passes the dragged task id between rows of the same group via this shared
@@ -29,12 +29,14 @@ export default function TasksView({
   groups,
   remainingToday,
   query,
+  onQueryChange,
   categoryOptions,
   projectOptions,
 }: {
   groups: TaskGroupVM[];
   remainingToday: number;
   query: string;
+  onQueryChange: (v: string) => void;
   categoryOptions: CategoryOption[];
   projectOptions: ProjectOption[];
 }) {
@@ -57,7 +59,7 @@ export default function TasksView({
       </div>
       <div className="my-5 mt-5 mb-1 h-px max-w-[680px] bg-(--rule)" />
 
-      <QuickAdd />
+      <SearchBar query={query} onQueryChange={onQueryChange} placeholder="Search tasks…" />
 
       <div className="max-w-[680px]">
         {filtered.length === 0 && completedTasks.length === 0 && (

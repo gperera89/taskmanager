@@ -155,7 +155,9 @@ export default function TaskbookApp() {
         setModal({ mode: "add", initialKind: AREA_TO_KIND[areaRef.current] });
       } else if (e.key === "/") {
         e.preventDefault();
-        document.getElementById("taskbook-search")?.focus();
+        // The search field is rendered per view (and once per carousel panel on mobile), so
+        // focus whichever copy is in the DOM first rather than looking one up by id.
+        document.querySelector<HTMLInputElement>("[data-taskbook-search]")?.focus();
       } else if (AREA_SHORTCUTS[e.key]) {
         // Calendar is the side rail on desktop, not a main view — "5" is mobile-only
         // (selecting it on desktop would just get render-corrected back to Tasks).
@@ -296,6 +298,7 @@ export default function TaskbookApp() {
             groups={data.taskGroups}
             remainingToday={data.tasksRemainingToday}
             query={query}
+            onQueryChange={setQuery}
             categoryOptions={data.categoryOptions}
             projectOptions={data.projectOptions}
           />
@@ -306,6 +309,7 @@ export default function TaskbookApp() {
             cards={data.projectCards}
             activeCount={data.activeProjectCount}
             query={query}
+            onQueryChange={setQuery}
             categoryOptions={data.categoryOptions}
             projectOptions={data.projectOptions}
           />
@@ -316,6 +320,7 @@ export default function TaskbookApp() {
             routines={data.routineList}
             total={data.routineTotalCount}
             query={query}
+            onQueryChange={setQuery}
           />
         );
       case "habits":
@@ -324,6 +329,7 @@ export default function TaskbookApp() {
             habits={data.habits}
             atRiskCount={data.habitAtRiskCount}
             query={query}
+            onQueryChange={setQuery}
           />
         );
       case "calendar":
@@ -359,8 +365,6 @@ export default function TaskbookApp() {
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-(--surface) font-serif">
         <Header
           todayLabel={data.todayLabel}
-          query={query}
-          onQueryChange={setQuery}
           pendingCaptures={data.pendingCaptures}
           onEditCapture={openEditForCapture}
           onOpenMyDay={openMyDay}

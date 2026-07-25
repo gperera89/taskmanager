@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useModalActions } from "./ModalContext";
 import { useTaskbook } from "./store";
+import SearchBar from "./SearchBar";
 import { RowDeleteButton } from "./shared";
 import type { HabitCardVM } from "./types";
 
@@ -20,10 +21,12 @@ export default function HabitsView({
   habits,
   atRiskCount,
   query,
+  onQueryChange,
 }: {
   habits: HabitCardVM[];
   atRiskCount: number;
   query: string;
+  onQueryChange: (v: string) => void;
 }) {
   const q = query.trim().toLowerCase();
   const filtered = q ? habits.filter((h) => h.title.toLowerCase().includes(q)) : habits;
@@ -34,7 +37,9 @@ export default function HabitsView({
         <div className="font-script text-[62px] leading-[0.8] text-(--ink)">Habits</div>
         <div className="pb-2.5 text-[13px] text-(--ink-muted)">{atRiskCount} needs attention</div>
       </div>
-      <div className="my-5 mb-6 h-px bg-(--rule)" />
+      <div className="my-5 mb-1 h-px bg-(--rule)" />
+
+      <SearchBar query={query} onQueryChange={onQueryChange} placeholder="Search habits…" />
 
       {habits.length === 0 && <p className="py-8 text-[15px] italic text-(--ink-soft)">Nothing here yet.</p>}
 

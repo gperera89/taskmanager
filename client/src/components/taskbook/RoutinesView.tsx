@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useModalActions } from "./ModalContext";
 import { useTaskbook } from "./store";
 import { DateTimePickerPanel } from "./DateTimePicker";
+import SearchBar from "./SearchBar";
 import { CheckSquare, Chip, RowDeleteButton, StrikeSweep } from "./shared";
 import type { RoutineItemVM } from "./types";
 
@@ -11,10 +12,12 @@ export default function RoutinesView({
   routines,
   total,
   query,
+  onQueryChange,
 }: {
   routines: RoutineItemVM[];
   total: number;
   query: string;
+  onQueryChange: (v: string) => void;
 }) {
   const q = query.trim().toLowerCase();
   const filtered = q ? routines.filter((r) => r.title.toLowerCase().includes(q)) : routines;
@@ -25,7 +28,9 @@ export default function RoutinesView({
         <div className="font-script text-[62px] leading-[0.8] text-(--ink)">Routines</div>
         <div className="pb-2.5 text-[13px] text-(--ink-muted)">{total} total</div>
       </div>
-      <div className="my-5 mb-6 h-px max-w-[680px] bg-(--rule)" />
+      <div className="my-5 mb-1 h-px max-w-[680px] bg-(--rule)" />
+
+      <SearchBar query={query} onQueryChange={onQueryChange} placeholder="Search routines…" />
 
       {total === 0 && <p className="py-8 text-[15px] italic text-(--ink-soft)">Nothing here yet.</p>}
       {total > 0 && filtered.length === 0 && (

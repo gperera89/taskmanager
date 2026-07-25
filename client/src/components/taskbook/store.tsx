@@ -221,6 +221,10 @@ type TaskbookContextValue = {
   // Manual ICS re-pull (Google/Outlook), separate from `actions` since it's a read, not a mutation.
   refreshCalendar: () => void;
   calendarRefreshing: boolean;
+  // Manual "pull server truth now" — the same reconcile the tab does on focus, on demand, for
+  // when a phone has been asleep and the focus event either hasn't fired or is still in flight.
+  syncNow: () => void;
+  syncing: boolean;
   nowMs: number;
   mode: Mode;
   setMode: (mode: Mode) => void;
@@ -515,10 +519,13 @@ export function StoreProvider({
   // triggered by our own optimistic setRaw don't clobber local state. This is React's
   // "adjust state when a prop changes" pattern (compared during render, no effect needed).
   const [seededFrom, setSeededFrom] = useState(initialRaw);
+  // A manual refresh is "done" exactly when that new snapshot lands (see syncNow below).
+  const [syncing, setSyncing] = useState(false);
   if (initialRaw !== seededFrom) {
     setSeededFrom(initialRaw);
     setRaw(initialRaw);
     setEvents(calendarEvents);
+    if (syncing) setSyncing(false);
   }
 
   // --- Toasts -------------------------------------------------------------------------------
@@ -640,6 +647,24 @@ export function StoreProvider({
   useEffect(() => {
     flushRef.current = flush;
   }, [flush]);
+
+  // Manual refresh (the header's ⟳). Rolls the clock forward so date labels/buckets are right
+  // straight away, drains anything still queued, then pulls a fresh server render — the same
+  // reconcile the focus handler does, but on demand: on a phone the tab is often restored from
+  // the background without a focus refresh landing promptly, leaving stale rows on screen. The
+  // spinner clears when the new snapshot arrives (the re-seed above), with a timeout so a
+  // refresh that never comes back can't leave it spinning forever.
+  const syncTimeoutRef = useRef<number | null>(null);
+  const syncNow = useCallback(() => {
+    setSyncing(true);
+    setLiveNowMs(Date.now());
+    if (syncTimeoutRef.current) window.clearTimeout(syncTimeoutRef.current);
+    syncTimeoutRef.current = window.setTimeout(() => {
+      syncTimeoutRef.current = null;
+      setSyncing(false);
+    }, 15_000);
+    void flushRef.current().finally(() => refreshNow());
+  }, [refreshNow]);
 
   // Enqueue + immediately try to flush. Falls back to a direct call when IndexedDB is
   // unavailable (very old browser / blocked storage) — the pre-outbox behavior.
@@ -1645,7 +1670,7 @@ export function StoreProvider({
 
   return (
     <TaskbookContext.Provider
-      value={{ data, actions, raw, calendarEvents: events, refreshCalendar, calendarRefreshing, nowMs: liveNowMs, mode, setMode, offline, pendingOps, toasts, dismissToast }}
+      value={{ data, actions, raw, calendarEvents: events, refreshCalendar, calendarRefreshing, syncNow, syncing, nowMs: liveNowMs, mode, setMode, offline, pendingOps, toasts, dismissToast }}
     >
       {children}
     </TaskbookContext.Provider>

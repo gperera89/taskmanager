@@ -18,7 +18,8 @@ const KIND_LABEL: Record<CapturedKind, string> = {
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 
-type BarMode = "search" | "chat" | "mic";
+// Search used to live here too; it now sits inline at the top of each view (SearchBar.tsx).
+type BarMode = "chat" | "mic";
 
 // Material Symbols glyphs (24dp, outlined), inlined so fill color can react to selection —
 // same convention as ModeToggle's ICON_PATH.
@@ -26,9 +27,10 @@ const ADD_ICON_PATH = "M440-440H200v-80h240v-240h80v240h240v80H520v240h-80v-240Z
 // Material Symbols "light_mode" — the My Day (today's schedule) shortcut.
 const MY_DAY_ICON_PATH =
   "M480-360q50 0 85-35t35-85q0-50-35-85t-85-35q-50 0-85 35t-35 85q0 50 35 85t85 35Zm0 80q-83 0-141.5-58.5T280-480q0-83 58.5-141.5T480-680q83 0 141.5 58.5T680-480q0 83-58.5 141.5T480-360ZM200-440H40v-80h160v80Zm720 0H760v-80h160v80ZM440-760v-160h80v160h-80Zm0 720v-160h80v160h-80ZM256-650l-101-97 57-59 96 100-52 56Zm492 496-97-101 53-55 101 97-57 59Zm-98-550 97-101 59 57-100 96-56-52ZM154-212l101-97 55 53-97 101-59-57Zm326-268Z";
+// Material Symbols "refresh" — the manual pull-from-server button.
+const REFRESH_ICON_PATH =
+  "M480-160q-134 0-227-93t-93-227q0-134 93-227t227-93q69 0 132 28.5T720-690v-110h80v280H520v-80h168q-32-56-87.5-88T480-720q-100 0-170 70t-70 170q0 100 70 170t170 70q77 0 139-44t87-116h84q-28 106-114 173t-196 67Z";
 const BAR_ICON_PATH: Record<BarMode, string> = {
-  search:
-    "M784-120 532-372q-30 24-69 38t-83 14q-109 0-184.5-75.5T120-580q0-109 75.5-184.5T380-840q109 0 184.5 75.5T640-580q0 44-14 83t-38 69l252 252-56 56ZM380-400q75 0 127.5-52.5T560-580q0-75-52.5-127.5T380-760q-75 0-127.5 52.5T200-580q0 75 52.5 127.5T380-400Z",
   chat: "M240-400h320v-80H240v80Zm0-120h480v-80H240v80Zm0-120h480v-80H240v80ZM80-80v-720q0-33 23.5-56.5T160-880h640q33 0 56.5 23.5T880-800v480q0 33-23.5 56.5T800-240H240L80-80Zm126-240h594v-480H160v525l46-45Zm-46 0v-480 480Z",
   mic: "M395-435q-35-35-35-85v-240q0-50 35-85t85-35q50 0 85 35t35 85v240q0 50-35 85t-85 35q-50 0-85-35Zm85-205Zm-40 520v-123q-104-14-172-93t-68-184h80q0 83 58.5 141.5T480-320q83 0 141.5-58.5T680-520h80q0 105-68 184t-172 93v123h-80Zm68.5-371.5Q520-503 520-520v-240q0-17-11.5-28.5T480-800q-17 0-28.5 11.5T440-760v240q0 17 11.5 28.5T480-480q17 0 28.5-11.5Z",
 };
@@ -42,8 +44,6 @@ function extensionFor(mimeType: string): string {
 
 export default function Header({
   todayLabel,
-  query,
-  onQueryChange,
   pendingCaptures,
   onEditCapture,
   onOpenMyDay,
@@ -53,8 +53,6 @@ export default function Header({
   isMobile,
 }: {
   todayLabel: string;
-  query: string;
-  onQueryChange: (v: string) => void;
   pendingCaptures: VoiceCaptureVM[];
   onEditCapture: (kind: CapturedKind, entityId: string) => void;
   onOpenMyDay: () => void;
@@ -65,11 +63,11 @@ export default function Header({
 }) {
   const router = useRouter();
   const { openAdd } = useModalActions();
-  const { actions, mode, setMode, offline } = useTaskbook();
+  const { actions, mode, setMode, offline, syncNow, syncing } = useTaskbook();
   const [showNotif, setShowNotif] = useState(false);
   // On mobile, settings/notifications/mode toggle are portaled into the sign-out bar in
   // layout.tsx (top-right) instead of rendered here, since they'd otherwise overflow off-screen
-  // alongside the search bar below the lg breakpoint.
+  // alongside the Add/My Day buttons below the lg breakpoint.
   const [mobileActionsEl, setMobileActionsEl] = useState<HTMLElement | null>(null);
   const [listening, setListening] = useState(false);
   const [processing, setProcessing] = useState(false);
@@ -81,9 +79,9 @@ export default function Header({
   const canceledRef = useRef(false);
   const notifRef = useRef<HTMLDivElement>(null);
 
-  // Search/chat/mic toggle for the search bar — "barMode" to avoid confusion with the unrelated
+  // Chat/mic toggle for the header bar — "barMode" to avoid confusion with the unrelated
   // home/all/work `mode` from useTaskbook() above.
-  const [barMode, setBarMode] = useState<BarMode>("search");
+  const [barMode, setBarMode] = useState<BarMode>("chat");
   const [chatDraft, setChatDraft] = useState("");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
@@ -91,10 +89,10 @@ export default function Header({
   const [chatPanelOpen, setChatPanelOpen] = useState(false);
   const chatRef = useRef<HTMLDivElement>(null);
 
-  // Mobile only: the Add button opens a dropdown (Add item / Search / Chat / Voice); picking a
+  // Mobile only: the Add button opens a dropdown (Add item / Chat / Voice); picking a
   // tool opens a full-screen modal hosting it. `mobileTool` is which tool the modal shows —
   // kept separate from the desktop `barMode` so the two surfaces don't fight over one piece of
-  // state. Desktop keeps its inline search/chat/mic bar and never touches these.
+  // state. Desktop keeps its inline chat/mic bar and never touches these.
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [mobileTool, setMobileTool] = useState<BarMode | null>(null);
   const addMenuRef = useRef<HTMLDivElement>(null);
@@ -188,7 +186,7 @@ export default function Header({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Voice capture failed");
       setShowNotif(true);
-      setBarMode("search");
+      setBarMode("chat");
       // On mobile the mic lives in the tools modal — close it once the capture lands so the user
       // isn't stranded on an idle mic screen (harmless on desktop, where mobileTool is null).
       setMobileTool(null);
@@ -245,15 +243,11 @@ export default function Header({
     mediaRecorderRef.current = null;
     setListening(false);
     setCaptureError(null);
-    setBarMode("search");
+    setBarMode("chat");
   }
 
-  // Selecting search/chat while a recording is in flight stops it (still processes/uploads
-  // whatever was captured) rather than leaving it running silently in the background.
-  function selectSearchMode() {
-    if (listening) void toggleListening();
-    setBarMode("search");
-  }
+  // Selecting chat while a recording is in flight stops it (still processes/uploads whatever
+  // was captured) rather than leaving it running silently in the background.
   function selectChatMode() {
     if (listening) void toggleListening();
     setBarMode("chat");
@@ -403,6 +397,25 @@ export default function Header({
           <span className="text-sm">My Day</span>
         </button>
 
+        {/* Sits here rather than in the actions cluster so it's on the main row at every width —
+            on mobile that cluster is portaled into the cramped sign-out bar. */}
+        <button
+          type="button"
+          onClick={() => {
+            setShowNotif(false);
+            setAddMenuOpen(false);
+            syncNow();
+          }}
+          disabled={syncing}
+          title="Refresh — pull the latest from the database"
+          aria-label="Refresh"
+          className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-(--border-strong) disabled:cursor-default"
+        >
+          <svg width="16" height="16" viewBox="0 -960 960 960" className={syncing ? "animate-spin" : undefined}>
+            <path d={REFRESH_ICON_PATH} style={{ fill: "var(--ink-muted)" }} />
+          </svg>
+        </button>
+
         {isMobile && addMenuOpen && (
           <div
             role="menu"
@@ -415,11 +428,6 @@ export default function Header({
                 setAddMenuOpen(false);
                 openAdd();
               }}
-            />
-            <MobileMenuItem
-              iconPath={BAR_ICON_PATH.search}
-              label="Search"
-              onClick={() => openMobileTool("search")}
             />
             <MobileMenuItem
               iconPath={BAR_ICON_PATH.chat}
@@ -443,18 +451,6 @@ export default function Header({
         <div className="relative" ref={chatRef}>
           <div className="flex items-center gap-1.5">
             <div className="flex items-center gap-0.5 rounded-full border border-(--border-strong) p-1">
-              <button
-                type="button"
-                title="Search"
-                aria-pressed={barMode === "search"}
-                onClick={selectSearchMode}
-                className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-full"
-                style={{ background: barMode === "search" ? "var(--accent-wash-strong)" : "transparent" }}
-              >
-                <svg width="13" height="13" viewBox="0 -960 960 960">
-                  <path d={BAR_ICON_PATH.search} style={{ fill: barMode === "search" ? "var(--accent-text)" : "var(--ink-soft)" }} />
-                </svg>
-              </button>
               <button
                 type="button"
                 title={offline ? "Chat needs a connection" : "Chat"}
@@ -491,18 +487,8 @@ export default function Header({
               style={{ animation: barMode === "mic" && listening ? "mic-pulse 1.6s ease-in-out infinite" : undefined }}
             >
               <svg width="15" height="15" viewBox="0 -960 960 960" className="flex-none">
-                <path d={BAR_ICON_PATH[barMode === "chat" ? "chat" : barMode === "mic" ? "mic" : "search"]} style={{ fill: "var(--ink-faint)" }} />
+                <path d={BAR_ICON_PATH[barMode]} style={{ fill: "var(--ink-faint)" }} />
               </svg>
-              {barMode === "search" && (
-                <input
-                  id="taskbook-search"
-                  value={query}
-                  onChange={(e) => onQueryChange(e.target.value)}
-                  placeholder="Search tasks…"
-                  aria-label="Search tasks"
-                  className="w-full min-w-0 bg-transparent text-[13.5px] text-(--ink) outline-none placeholder:text-(--ink-soft)"
-                />
-              )}
               {barMode === "chat" && (
                 <input
                   value={chatDraft}
@@ -623,16 +609,15 @@ export default function Header({
             >
               <div className="flex items-center justify-between border-b border-(--border) px-4 py-3">
                 <div className="flex items-center gap-0.5 rounded-full border border-(--border-strong) p-1">
-                  {(["search", "chat", "mic"] as BarMode[]).map((tool) => {
-                    const disabled = offline && tool !== "search";
+                  {(["chat", "mic"] as BarMode[]).map((tool) => {
                     return (
                       <button
                         key={tool}
                         type="button"
                         aria-pressed={mobileTool === tool}
-                        disabled={disabled}
+                        disabled={offline}
                         onClick={() => switchMobileTool(tool)}
-                        title={tool === "search" ? "Search" : tool === "chat" ? "Chat" : "Voice"}
+                        title={tool === "chat" ? "Chat" : "Voice"}
                         className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-full disabled:cursor-not-allowed disabled:opacity-50"
                         style={{ background: mobileTool === tool ? "var(--accent-wash-strong)" : "transparent" }}
                       >
@@ -662,45 +647,6 @@ export default function Header({
               </div>
 
               <div className="min-h-0 flex-1 overflow-y-auto p-4">
-                {mobileTool === "search" && (
-                  <div>
-                    <div className="flex items-center gap-2 rounded-full border border-(--border-strong) px-3.5 py-2 text-(--ink-soft)">
-                      <svg width="15" height="15" viewBox="0 -960 960 960" className="flex-none">
-                        <path d={BAR_ICON_PATH.search} style={{ fill: "var(--ink-faint)" }} />
-                      </svg>
-                      <input
-                        autoFocus
-                        value={query}
-                        onChange={(e) => onQueryChange(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") closeMobileTool();
-                        }}
-                        placeholder="Search tasks…"
-                        aria-label="Search tasks"
-                        className="w-full min-w-0 bg-transparent text-sm text-(--ink) outline-none placeholder:text-(--ink-soft)"
-                      />
-                      {query && (
-                        <button
-                          type="button"
-                          aria-label="Clear search"
-                          onClick={() => onQueryChange("")}
-                          className="flex h-5 w-5 flex-none cursor-pointer items-center justify-center rounded-full"
-                        >
-                          <svg width="12" height="12" viewBox="0 -960 960 960">
-                            <path
-                              d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z"
-                              style={{ fill: "var(--ink-soft)" }}
-                            />
-                          </svg>
-                        </button>
-                      )}
-                    </div>
-                    <div className="mt-2 text-xs italic text-(--ink-soft)">
-                      Close to see the filtered lists behind.
-                    </div>
-                  </div>
-                )}
-
                 {mobileTool === "chat" && (
                   <div className="flex flex-col gap-3">
                     <div className="flex items-center gap-2 rounded-full border border-(--border-strong) px-3.5 py-2 text-(--ink-soft)">
