@@ -128,7 +128,7 @@ function RoutineRow({ routine }: { routine: RoutineItemVM }) {
             {editingPause && (
               <div
                 ref={pausePanelRef}
-                className="absolute left-0 top-6 z-20 w-fit rounded-lg border border-(--accent-text) bg-(--card) p-2.5 shadow-[0_8px_24px_rgba(70,55,30,.18)]"
+                className="absolute left-0 top-6 z-20 mx-auto w-fit max-w-full rounded-lg border border-(--accent-text) bg-(--card) p-2.5 shadow-[0_8px_24px_rgba(70,55,30,.18)]"
               >
                 <div className="mb-2 text-[11px] uppercase tracking-[0.14em] text-(--ink-muted)">Pause until</div>
                 <DateTimePickerPanel

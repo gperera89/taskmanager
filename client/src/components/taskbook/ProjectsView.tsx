@@ -413,7 +413,7 @@ function ProjectCard({
               </button>
             </div>
             {newTaskDueOpen && (
-              <div ref={newTaskDuePanelRef} className="w-fit rounded-lg border border-(--accent-text) bg-(--card) p-2.5">
+              <div ref={newTaskDuePanelRef} className="mx-auto w-fit max-w-full rounded-lg border border-(--accent-text) bg-(--card) p-2.5">
                 <DateTimePickerPanel
                   dateValue={newTaskDueDate}
                   timeValue={newTaskDueTime}

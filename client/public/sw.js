@@ -8,7 +8,9 @@
 //  - /_next/static/: cache-first (content-hashed filenames, immutable).
 //  - other static GETs (fonts, icons): stale-while-revalidate.
 
-const CACHE_VERSION = "cura-v1";
+// Bumping this drops every previously cached shell/asset on the next activation — the escape
+// hatch when a device is stuck serving a stale build.
+const CACHE_VERSION = "cura-v2";
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const NAV_TIMEOUT_MS = 4000;
@@ -28,10 +30,10 @@ self.addEventListener("activate", (event) => {
   );
 });
 
-function fetchWithTimeout(request, ms) {
+function withTimeout(promise, ms) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("sw-nav-timeout")), ms);
-    fetch(request).then(
+    promise.then(
       (res) => {
         clearTimeout(timer);
         resolve(res);
@@ -51,14 +53,25 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith("/api/")) return;
 
-  // App navigations: network-first, cached shell as the offline fallback. Every successful
+  // App navigations: network-first, cached shell as the *offline* fallback only. Every successful
   // navigation refreshes the cached copy of "/" so the fallback stays as current as possible.
+  //
+  // Two rules matter here, both learned the hard way:
+  //  - The timeout must never hand back the cached shell while the device is actually online. A
+  //    slow cold start would otherwise serve a shell from an older deploy, whose `/_next/static`
+  //    chunks are gone from the CDN — the app then fails every fetch and latches into "offline"
+  //    on that one machine while every other device is fine.
+  //  - Never cache a redirected or non-HTML response: an expired session redirects to the Google
+  //    sign-in flow, and caching that as the shell poisons the fallback permanently.
   if (request.mode === "navigate") {
     event.respondWith(
       (async () => {
+        const network = fetch(request);
         try {
-          const response = await fetchWithTimeout(request, NAV_TIMEOUT_MS);
-          if (response.ok) {
+          const response = self.navigator.onLine === false ? await withTimeout(network, NAV_TIMEOUT_MS) : await network;
+          const responseUrl = new URL(response.url || request.url);
+          const isHtml = (response.headers.get("Content-Type") || "").includes("text/html");
+          if (response.ok && !response.redirected && isHtml && responseUrl.origin === self.location.origin) {
             const cache = await caches.open(SHELL_CACHE);
             cache.put("/", response.clone());
           }

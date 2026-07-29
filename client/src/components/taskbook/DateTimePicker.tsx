@@ -122,8 +122,11 @@ export function DateTimePickerPanel({
   }, []);
 
   return (
-    <div className="flex gap-3">
-      <div className="w-52 flex-none">
+    // The columns shrink rather than overflow (`min-w-0` + `flex-1` capped at the desktop width):
+    // on a phone the panel is dropped inside an already-indented row, so a fixed 208+88px pair
+    // pushed past the viewport edge and forced sideways scrolling.
+    <div className="flex justify-center gap-2 sm:gap-3">
+      <div className="w-52 max-w-52 min-w-0 flex-1">
         <div className="mb-2 flex items-center justify-between">
           <button type="button" onClick={goPrevMonth} aria-label="Previous month" className="cursor-pointer p-0.5">
             <svg width="12" height="12" viewBox="0 -960 960 960">
@@ -180,11 +183,11 @@ export function DateTimePickerPanel({
         </div>
       </div>
       {!dateOnly && (
-      <div className="w-22 flex-none border-l border-(--border-soft) pl-2.5">
+      <div className="w-19 flex-none border-l border-(--border-soft) pl-2">
         <button
           type="button"
           onClick={() => onChangeTime("")}
-          className="mb-1 flex w-full flex-none items-center rounded px-1.5 py-1 text-left text-[11px] italic"
+          className="mb-1 flex w-full flex-none items-center rounded px-1 py-1 text-left text-[11px] italic"
           style={{
             color: !timeValue ? "var(--accent-text)" : "var(--ink-soft)",
             background: !timeValue ? "var(--accent-wash)" : "transparent",
@@ -202,7 +205,7 @@ export function DateTimePickerPanel({
                 key={t}
                 ref={isActive ? activeTimeRef : undefined}
                 onClick={() => onChangeTime(t)}
-                className="flex flex-none items-center justify-between gap-1 rounded px-1.5 py-1 text-left text-[12px] whitespace-nowrap"
+                className="flex flex-none items-center justify-between gap-0.5 rounded px-1 py-1 text-left text-[11.5px] whitespace-nowrap"
                 style={{ background: isSet ? "var(--accent-wash)" : "transparent", color: isSet ? "var(--accent)" : "var(--ink-strong)" }}
               >
                 {formatTimeLabel(t)}

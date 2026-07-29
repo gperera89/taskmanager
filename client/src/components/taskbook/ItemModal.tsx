@@ -298,7 +298,7 @@ function TaskForm({
         </div>
       )}
       {dueOpen && (
-        <div ref={duePanelRef} className="w-fit rounded-lg border border-(--accent-text) bg-(--card) p-2.5">
+        <div ref={duePanelRef} className="mx-auto w-fit max-w-full rounded-lg border border-(--accent-text) bg-(--card) p-2.5">
           <DateTimePickerPanel dateValue={dueDate} timeValue={dueTime} onChangeDate={setDueDate} onChangeTime={setDueTime} />
           <button
             type="button"

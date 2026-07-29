@@ -526,6 +526,8 @@ export function StoreProvider({
     setRaw(initialRaw);
     setEvents(calendarEvents);
     if (syncing) setSyncing(false);
+    // A fresh server render is proof the connection is back, whatever the flag said.
+    if (offline) setOffline(false);
   }
 
   // --- Toasts -------------------------------------------------------------------------------
@@ -590,7 +592,14 @@ export function StoreProvider({
     try {
       for (;;) {
         const op = await outboxPeek();
-        if (!op) break;
+        if (!op) {
+          // Nothing left to send and the browser thinks it's online — clear the banner. Without
+          // this the flag only ever cleared on a *successful op*, so a device that hiccupped once
+          // with an empty outbox stayed stuck on "Offline" until an actual `online` event fired
+          // (which never comes if the OS never saw the connection drop).
+          if (typeof navigator === "undefined" || navigator.onLine) setOffline(false);
+          break;
+        }
         const entry = REGISTRY[op.action];
         if (!entry) {
           // Op from an older build whose action no longer exists — drop it.

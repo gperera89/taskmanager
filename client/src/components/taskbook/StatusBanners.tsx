@@ -11,6 +11,23 @@ const CRON_STALE_MS = 10 * 60 * 1000;
 export default function StatusBanners() {
   const { offline, pendingOps, data, nowMs } = useTaskbook();
 
+  // Escape hatch for a device stuck on a stale cached shell: drop the service worker and every
+  // cache, then hard-reload. Queued edits live in IndexedDB, which this deliberately leaves alone.
+  async function resetAppCache() {
+    try {
+      if ("serviceWorker" in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map((r) => r.unregister()));
+      }
+      if ("caches" in window) {
+        const names = await caches.keys();
+        await Promise.all(names.map((n) => caches.delete(n)));
+      }
+    } finally {
+      window.location.reload();
+    }
+  }
+
   const cronStale = data.lastCronAtMs === null || nowMs - data.lastCronAtMs > CRON_STALE_MS;
   const showSync = offline || pendingOps > 0;
   if (!showSync && !cronStale) return null;
@@ -24,6 +41,15 @@ export default function StatusBanners() {
               ? `Offline — ${pendingOps} change${pendingOps === 1 ? "" : "s"} will sync when you reconnect.`
               : "Offline — changes will sync when you reconnect."
             : `Syncing ${pendingOps} change${pendingOps === 1 ? "" : "s"}…`}
+          {offline && (
+            <button
+              type="button"
+              onClick={() => void resetAppCache()}
+              className="ml-2 cursor-pointer underline decoration-dotted underline-offset-2"
+            >
+              Reset &amp; reload
+            </button>
+          )}
         </div>
       )}
       {cronStale && (

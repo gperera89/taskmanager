@@ -617,7 +617,7 @@ export function TaskRow({
         </div>
 
         {dueOpen && (
-          <div ref={duePanelRef} className="mt-2 w-fit rounded-lg border border-(--accent-text) bg-(--card) p-2.5">
+          <div ref={duePanelRef} className="mt-2 mx-auto w-fit max-w-full rounded-lg border border-(--accent-text) bg-(--card) p-2.5">
             <DateTimePickerPanel
               dateValue={dueDateDraft}
               timeValue={dueTimeDraft}
@@ -738,7 +738,7 @@ export function TaskRow({
                   type="button"
                   onClick={() => actions.removeTask(s.id)}
                   aria-label={`Remove subtask ${s.title}`}
-                  className="cursor-pointer text-xs text-(--ink-faint) opacity-0 transition-opacity hover:text-(--danger) group-hover/sub:opacity-100"
+                  className="cursor-pointer text-xs text-(--ink-faint) opacity-0 transition-opacity hover:text-(--danger) group-hover/sub:opacity-100 [@media(hover:none)]:opacity-100"
                 >
                   Remove
                 </button>
@@ -821,7 +821,7 @@ function TaskBreakRow({ task }: { task: TaskItemVM }) {
         )}
       </div>
       {editing && (
-        <div className="mt-2 w-fit rounded-lg border border-(--accent-text) bg-(--card) p-2.5">
+        <div className="mt-2 mx-auto w-fit max-w-full rounded-lg border border-(--accent-text) bg-(--card) p-2.5">
           <DateTimePickerPanel
             dateOnly
             dateValue={task.pausedUntilValue}
