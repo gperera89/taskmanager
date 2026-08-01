@@ -59,10 +59,10 @@ function normalizeTime(v: unknown): string | null {
   return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
 }
 
-// Whisper picks its decoder from the upload's filename extension, so we make sure the file we send
-// has one that matches its actual container. The in-app recorder sends webm; the iPhone Shortcut
-// sends m4a (audio/mp4). If the incoming File already has a real extension we keep it.
-function whisperFilename(file: File): string {
+// The transcription API picks its decoder from the upload's filename extension, so we make sure the
+// file we send has one that matches its actual container. The in-app recorder sends webm; the
+// iPhone Shortcut sends m4a (audio/mp4). If the incoming File already has a real extension we keep it.
+function transcriptionFilename(file: File): string {
   if (file.name && /\.[a-z0-9]+$/i.test(file.name)) return file.name;
   const byType: Record<string, string> = {
     "audio/webm": "webm",
@@ -78,13 +78,30 @@ function whisperFilename(file: File): string {
   return `recording.${ext}`;
 }
 
-// Sends the recorded clip to OpenAI's Whisper API and returns the transcribed text.
-export async function transcribeAudio(file: File): Promise<string> {
+// Terms the transcriber would otherwise have no reason to guess correctly, seeded on every request
+// alongside the caller's own project/category names.
+const ALWAYS_SEEDED_VOCABULARY = ["Cura", "Perth", "YCIS", "Pudong"];
+
+// Builds the `prompt` hint for the transcription request. Getting proper nouns right matters more
+// here than raw word accuracy: parseCaptureFromTranscript can only attach a capture to a project or
+// category when the name comes back matching *exactly*, so a mangled name silently becomes null.
+function transcriptionPrompt(vocabulary: string[]): string {
+  const terms = [...new Set([...ALWAYS_SEEDED_VOCABULARY, ...vocabulary.map((v) => v.trim()).filter(Boolean)])];
+  return `A short spoken to-do memo. Names that may come up: ${terms.join(", ")}.`;
+}
+
+// Sends the recorded clip to OpenAI's transcription API and returns the transcribed text.
+// `vocabulary` is a list of names (projects, categories) to bias the transcription toward.
+export async function transcribeAudio(file: File, vocabulary: string[] = []): Promise<string> {
   const apiKey = requireApiKey();
 
   const form = new FormData();
-  form.append("file", file, whisperFilename(file));
-  form.append("model", "whisper-1");
+  form.append("file", file, transcriptionFilename(file));
+  // gpt-4o-transcribe is notably stronger than whisper-1 on proper nouns and short utterances, and
+  // supports the `prompt` vocabulary hint below. It has no verbose_json/timestamp support, which we
+  // don't use — the default json response ({ text }) is all this function reads.
+  form.append("model", "gpt-4o-transcribe");
+  form.append("prompt", transcriptionPrompt(vocabulary));
 
   const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
     method: "POST",
@@ -92,7 +109,7 @@ export async function transcribeAudio(file: File): Promise<string> {
     body: form,
   });
   if (!res.ok) {
-    throw new Error(`Whisper transcription failed: ${res.status} ${await res.text().catch(() => "")}`);
+    throw new Error(`Transcription failed: ${res.status} ${await res.text().catch(() => "")}`);
   }
 
   const data = await res.json();

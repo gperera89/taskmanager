@@ -28,8 +28,10 @@ export async function POST(request: Request) {
   }
 
   try {
-    const transcript = await transcribeAudio(audio);
+    // Fetched before transcribing, not after: the project/category names are fed to the transcriber
+    // as a vocabulary hint, since the parser can only match them when they come back spelled exactly.
     const [categories, projects] = await Promise.all([getCategories(), getProjects()]);
+    const transcript = await transcribeAudio(audio, [...categories.map((c) => c.name), ...projects.map((p) => p.name)]);
     const parsed = await parseCaptureFromTranscript(
       transcript,
       categories.map((c) => c.name),
