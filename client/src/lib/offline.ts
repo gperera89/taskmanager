@@ -19,7 +19,17 @@ export type QueuedOp = {
   args: SerializedArg[];
   // For creates: the optimistic temp id whose real id the server will return.
   tempId?: string;
+  // How many times this op has failed with what looked like a network error. Capped, because
+  // "looked like a network error" is a guess (see isNetworkError) and a wrong guess would
+  // otherwise keep the op at the head of the queue forever — which pins the whole device to its
+  // local snapshot and stops it ever reconciling with the server (see store.tsx's hydrate and
+  // focus-refresh paths, both of which stand down while ops are queued).
+  attempts?: number;
 };
+
+// Give up on an op after this many network-looking failures. A real offline stretch drains long
+// before this: the retry schedule backs off to 15 minutes, so ~6 attempts is hours of retrying.
+export const MAX_OP_ATTEMPTS = 6;
 
 export type SerializedArg = string | number | boolean | null | { __fd: [string, string][] };
 
@@ -109,6 +119,16 @@ export async function outboxPeek(): Promise<QueuedOp | undefined> {
   const tx = (await db()).transaction("outbox", "readonly");
   const cursor = await reqResult(tx.objectStore("outbox").openCursor());
   return cursor?.value as QueuedOp | undefined;
+}
+
+// Records a failed attempt against the op at the head of the queue. Returns the new count so the
+// caller can decide whether to keep retrying or drop it.
+export async function outboxBumpAttempts(op: QueuedOp): Promise<number> {
+  const attempts = (op.attempts ?? 0) + 1;
+  const tx = (await db()).transaction("outbox", "readwrite");
+  tx.objectStore("outbox").put({ ...op, attempts });
+  await txDone(tx);
+  return attempts;
 }
 
 export async function outboxDelete(seq: number): Promise<void> {

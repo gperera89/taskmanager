@@ -32,7 +32,9 @@ import {
   isNetworkError,
   kvGet,
   kvSet,
+  MAX_OP_ATTEMPTS,
   outboxAdd,
+  outboxBumpAttempts,
   outboxCount,
   outboxDelete,
   outboxPeek,
@@ -459,7 +461,12 @@ const REGISTRY: Record<string, RegistryEntry> = {
   restoreEvent: { fn: serverActions.restoreCalendarEvent },
 };
 
-type Snapshot = { raw: RawState; calendarEvents: CalendarEvent[]; savedAt: number };
+// `renderedAt` is the server's `nowMs` from the render this snapshot was taken against — a
+// *server* clock reading, so it's comparable with a later render's `nowMs`. `savedAt` is the
+// local clock and is kept for diagnostics only: comparing it against `nowMs` would pit this
+// browser's clock against Vercel's, and a device running even slightly fast would then prefer
+// its own stale snapshot over fresh server data on every load.
+type Snapshot = { raw: RawState; calendarEvents: CalendarEvent[]; savedAt: number; renderedAt?: number };
 
 export function StoreProvider({
   initialRaw,
@@ -620,6 +627,19 @@ export function StoreProvider({
           setOffline(false);
         } catch (err) {
           if (isNetworkError(err)) {
+            // A failure that only *looks* like a network error — the classic one is a tab left
+            // open across a deploy, where every server action 404s on a build id that no longer
+            // exists — never resolves by waiting. Retrying it forever keeps the outbox non-empty,
+            // and a non-empty outbox stops this device reconciling with the server at all. Cap
+            // the retries so it degrades into a normal rejection instead.
+            const attempts = await outboxBumpAttempts(op).catch(() => 0);
+            if (attempts >= MAX_OP_ATTEMPTS) {
+              console.error(`[store] giving up on queued ${op.action} after ${attempts} attempts:`, err);
+              pushToast("A change couldn't be saved and was rolled back.");
+              await outboxDelete(op.seq!);
+              sawServerError = true;
+              continue;
+            }
             // Leave the op queued; retry on the backoff schedule (capped, page-open only) or
             // when an online/visibility event arrives — whichever comes first.
             setOffline(true);
@@ -738,7 +758,11 @@ export function StoreProvider({
         if (idMap) idMapRef.current = idMap;
         setPendingOps(queued);
         const offlineNow = typeof navigator !== "undefined" && !navigator.onLine;
-        if (snapshot && (snapshot.savedAt > nowMs || queued > 0 || offlineNow)) {
+        // Server-clock vs server-clock: the snapshot wins only when it was taken against a
+        // *newer server render* than the one currently on screen, which is exactly the cached-
+        // shell case. Snapshots written before `renderedAt` existed never win on age alone.
+        const shellIsStale = snapshot?.renderedAt !== undefined && snapshot.renderedAt > nowMs;
+        if (snapshot && (shellIsStale || queued > 0 || offlineNow)) {
           // Backfill fields added after the snapshot was written (schema drift across deploys) —
           // a stale snapshot without them would crash the derivers on `.filter`/`.map`.
           setRaw({
@@ -766,10 +790,15 @@ export function StoreProvider({
   useEffect(() => {
     if (!idbAvailable()) return;
     const timer = window.setTimeout(() => {
-      void kvSet(SNAPSHOT_KEY, { raw, calendarEvents: events, savedAt: Date.now() } satisfies Snapshot).catch(() => {});
+      void kvSet(SNAPSHOT_KEY, {
+        raw,
+        calendarEvents: events,
+        savedAt: Date.now(),
+        renderedAt: nowMs,
+      } satisfies Snapshot).catch(() => {});
     }, 500);
     return () => window.clearTimeout(timer);
-  }, [raw, events]);
+  }, [raw, events, nowMs]);
 
   // Reconcile with the server when the tab regains focus (covers optimistic drift, other
   // devices, and voice captures landing while away). Debounced: focus + visibilitychange fire
