@@ -867,9 +867,38 @@ export function getActiveSuggestions() {
   });
 }
 
-export async function getAllSuggestionDedupeKeys(): Promise<Set<string>> {
-  const rows = await prisma.aiSuggestion.findMany({ select: { dedupeKey: true } });
-  return new Set(rows.map((r) => r.dedupeKey));
+// What generation must not produce again. `keys` is the hard dedupeKey history (any status);
+// `titleKeys` is a softer "<kind>|<normalised title>" index, because the model has been known to
+// mint two different keys for the same piece of work (e.g. one with a description and one
+// without) and land both in the list.
+export async function getSuggestionDedupeIndex(): Promise<{ keys: Set<string>; titleKeys: Set<string> }> {
+  const rows = await prisma.aiSuggestion.findMany({ select: { dedupeKey: true, kind: true, title: true } });
+  return {
+    keys: new Set(rows.map((r) => r.dedupeKey)),
+    titleKeys: new Set(rows.map((r) => suggestionTitleKey(r.kind, r.title))),
+  };
+}
+
+// Normalised identity for a suggestion's visible content: same kind + same words = same idea.
+export function suggestionTitleKey(kind: string, title: string): string {
+  return `${kind.trim().toLowerCase()}|${title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()}`;
+}
+
+// Drop PENDING suggestions that have gone stale: their date has passed (the prep window is gone
+// — the linked event has already happened), or an undated "novel" idea has sat unanswered for a
+// month. Deleting rather than dismissing keeps the feedback log honest (the user never actually
+// responded to these) and frees the dedupeKey should the same work ever be relevant again.
+export function deleteStaleSuggestions(todayKey: string, undatedMaxAgeDays = 30) {
+  const cutoff = new Date(Date.now() - undatedMaxAgeDays * 24 * 60 * 60 * 1000);
+  return prisma.aiSuggestion.deleteMany({
+    where: {
+      status: "PENDING",
+      OR: [
+        { suggestedDate: { lt: combineDueDateTime(todayKey) } },
+        { suggestedDate: null, createdAt: { lt: cutoff } },
+      ],
+    },
+  });
 }
 
 export function createSuggestions(
