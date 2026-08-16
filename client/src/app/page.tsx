@@ -1,86 +1,25 @@
-import {
-  getActiveSuggestions,
-  getAiNotes,
-  getAppSettings,
-  getCategories,
-  getCountdowns,
-  getDayPlanBlocks,
-  getDismissedCalendarEventIds,
-  getHabitCompletions,
-  getHabits,
-  getProjects,
-  getRoutines,
-  getTasks,
-  getUnreadVoiceCaptures,
-} from "@/lib/api";
-import { getCalendarEvents } from "@/lib/calendar";
+import { getPageSnapshot } from "@/lib/api";
 import { formatLongDate } from "@/lib/taskbookDates";
 import type { RawState } from "@/lib/derive";
 import TaskbookApp from "@/components/taskbook/TaskbookApp";
 import { StoreProvider, type ServerCalendarData } from "@/components/taskbook/store";
 
 export default async function Home() {
-  // Every fetch below is independent, so kick them all off at once and await each with its own
-  // fallback — the calendar (ICS parse of ~1000 events), voice captures, settings, and dismissed
-  // events no longer sit behind the entity queries in a serial waterfall. Each non-critical fetch
-  // resolves to a safe default on failure so a single failing section can't take down the page.
-  const entitiesPromise = Promise.all([getTasks(), getProjects(), getHabits(), getHabitCompletions(), getRoutines(), getCategories(), getCountdowns()]);
-  const calendarPromise = getCalendarEvents().catch((err) => {
-    console.error("[page] failed to load calendar events:", err);
-    return { events: [] as Awaited<ReturnType<typeof getCalendarEvents>>["events"], errors: ["Could not load the calendar."] };
-  });
-  const capturesPromise = getUnreadVoiceCaptures().catch((err) => {
-    console.error("[page] failed to load pending voice captures:", err);
-    return [] as Awaited<ReturnType<typeof getUnreadVoiceCaptures>>;
-  });
-  const settingsPromise = getAppSettings().catch((err) => {
-    console.error("[page] failed to load app settings:", err);
-    return { timeZone: "Asia/Shanghai", lastCronAt: null as Date | null };
-  });
-  const dismissedPromise = getDismissedCalendarEventIds().catch((err) => {
-    console.error("[page] failed to load dismissed events:", err);
-    return [] as string[];
-  });
-  const dayPlanPromise = getDayPlanBlocks().catch((err) => {
-    console.error("[page] failed to load day plan blocks:", err);
-    return [] as Awaited<ReturnType<typeof getDayPlanBlocks>>;
-  });
-  const suggestionsPromise = getActiveSuggestions().catch((err) => {
-    console.error("[page] failed to load AI suggestions:", err);
-    return [] as Awaited<ReturnType<typeof getActiveSuggestions>>;
-  });
-  const aiNotesPromise = getAiNotes().catch((err) => {
-    console.error("[page] failed to load AI notes:", err);
-    return [] as Awaited<ReturnType<typeof getAiNotes>>;
-  });
-
-  let tasks: Awaited<ReturnType<typeof getTasks>>;
-  let projects: Awaited<ReturnType<typeof getProjects>>;
-  let habits: Awaited<ReturnType<typeof getHabits>>;
-  let habitCompletions: Awaited<ReturnType<typeof getHabitCompletions>>;
-  let routines: Awaited<ReturnType<typeof getRoutines>>;
-  let categories: Awaited<ReturnType<typeof getCategories>>;
-  let countdowns: Awaited<ReturnType<typeof getCountdowns>>;
+  // One I/O operation for the whole page. This used to be thirteen parallel Prisma calls plus a
+  // live fetch of the ICS calendar feeds; at ~490ms per round trip against the hosted database
+  // that cost ~3 seconds before anything could render. The calendar is gone from here entirely —
+  // the client store fetches it after mount (see StoreProvider).
+  let snapshot: Awaited<ReturnType<typeof getPageSnapshot>>;
   try {
-    [tasks, projects, habits, habitCompletions, routines, categories, countdowns] = await entitiesPromise;
+    snapshot = await getPageSnapshot();
   } catch (err) {
-    console.error("[page] failed to load tasks/projects/habits/routines/categories:", err);
-    // Settle the other in-flight promises so their rejections (if any) don't go unhandled.
-    await Promise.allSettled([calendarPromise, capturesPromise, settingsPromise, dismissedPromise, dayPlanPromise, suggestionsPromise, aiNotesPromise]);
+    console.error("[page] failed to load the page snapshot:", err);
     return (
       <div className="flex flex-1 items-center justify-center bg-(--surface)">
         <p className="font-serif text-(--ink-muted)">Could not reach the database. Check DATABASE_URL in .env.local.</p>
       </div>
     );
   }
-
-  const { events: calendarEvents, errors: calendarErrors } = await calendarPromise;
-  const captures = await capturesPromise;
-  const { timeZone, lastCronAt } = await settingsPromise;
-  const dismissedEventIds = await dismissedPromise;
-  const dayPlanBlocks = await dayPlanPromise;
-  const suggestions = await suggestionsPromise;
-  const aiNotes = await aiNotesPromise;
 
   const now = new Date();
   const nowMs = now.getTime();
@@ -90,30 +29,29 @@ export default async function Home() {
   // component rendered on the server too — so it can react instantly to optimistic edits, month
   // navigation, and timezone changes rather than needing a page refresh (see lib/derive.ts).
   const raw: RawState = {
-    tasks,
-    projects,
-    habits,
-    habitCompletions,
-    routines,
-    categories,
-    captures,
-    timeZone,
-    dismissedEventIds,
-    dayPlanBlocks,
-    suggestions,
-    aiNotes,
-    countdowns,
+    tasks: snapshot.tasks,
+    projects: snapshot.projects,
+    habits: snapshot.habits,
+    habitCompletions: snapshot.habitCompletions,
+    routines: snapshot.routines,
+    categories: snapshot.categories,
+    captures: snapshot.captures,
+    timeZone: snapshot.timeZone,
+    dismissedEventIds: snapshot.dismissedEventIds,
+    dayPlanBlocks: snapshot.dayPlanBlocks,
+    suggestions: snapshot.suggestions,
+    aiNotes: snapshot.aiNotes,
+    countdowns: snapshot.countdowns,
   };
 
   const serverData: ServerCalendarData = {
     todayLabel: formatLongDate(now),
-    calendarErrors,
     // Notification heartbeat — the UI warns when the cron scheduler has stopped calling in.
-    lastCronAtMs: lastCronAt ? lastCronAt.getTime() : null,
+    lastCronAtMs: snapshot.lastCronAt ? snapshot.lastCronAt.getTime() : null,
   };
 
   return (
-    <StoreProvider initialRaw={raw} serverData={serverData} calendarEvents={calendarEvents} nowMs={nowMs}>
+    <StoreProvider initialRaw={raw} serverData={serverData} nowMs={nowMs}>
       <TaskbookApp />
     </StoreProvider>
   );

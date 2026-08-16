@@ -64,11 +64,13 @@ function isMode(v: string | null): v is Mode {
   return v === "work" || v === "home" || v === "all";
 }
 
-// Server snapshot fields that this store does NOT derive (labels/errors/heartbeat — the
-// calendar view itself is computed by deriveCalendarView, called from TaskbookApp since it
-// also needs the viewed month, which this store doesn't own).
+// Server snapshot fields that this store does NOT derive (labels/heartbeat — the calendar view
+// itself is computed by deriveCalendarView, called from TaskbookApp since it also needs the
+// viewed month, which this store doesn't own). `calendarErrors` is excluded too: the calendar
+// now streams in after the initial render, so its errors aren't known when this object is built.
 export type ServerCalendarData = Omit<
   TaskbookData,
+  | "calendarErrors"
   | "taskGroups"
   | "tasksRemainingToday"
   | "projectCards"
@@ -471,19 +473,21 @@ type Snapshot = { raw: RawState; calendarEvents: CalendarEvent[]; savedAt: numbe
 export function StoreProvider({
   initialRaw,
   serverData,
-  calendarEvents,
   nowMs,
   children,
 }: {
   initialRaw: RawState;
   serverData: ServerCalendarData;
-  calendarEvents: CalendarEvent[];
   nowMs: number;
   children: React.ReactNode;
 }) {
   const router = useRouter();
   const [raw, setRaw] = useState(initialRaw);
-  const [events, setEvents] = useState(calendarEvents);
+  const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const [calendarErrors, setCalendarErrors] = useState<string[]>([]);
+  // Gates the IndexedDB snapshot write below: until the calendar lands, `events` is empty, and
+  // snapshotting that would blank out the perfectly good event list already on disk.
+  const [calendarSettled, setCalendarSettled] = useState(false);
   // Undo-capture reads the current row without making `actions` depend on (and rebuild with)
   // every raw change. Updated in an effect (not during render) per react-hooks/refs; handlers
   // only run after effects, so they always see the latest value.
@@ -531,11 +535,40 @@ export function StoreProvider({
   if (initialRaw !== seededFrom) {
     setSeededFrom(initialRaw);
     setRaw(initialRaw);
-    setEvents(calendarEvents);
+    // Events are not re-seeded here — each server render brings a *new* calendar promise, and the
+    // effect keyed on that promise's identity applies it when it resolves. Re-seeding from the
+    // unresolved promise would only blank the calendar until it landed.
     if (syncing) setSyncing(false);
     // A fresh server render is proof the connection is back, whatever the flag said.
     if (offline) setOffline(false);
   }
+
+  // Pull the calendar once, after mount. Deliberately a client-side fetch rather than part of the
+  // page render: the ICS feeds are the one read on this screen that leaves the datacentre, and
+  // nothing above the fold needs them, so the task list should never wait on Google and Outlook.
+  // Everything else about the calendar (month grid, day details) is derived client-side already,
+  // so the events landing a moment later just fills the rail in.
+  useEffect(() => {
+    let cancelled = false;
+    void serverActions
+      .loadCalendarFeeds()
+      .then(({ events: nextEvents, errors }) => {
+        if (cancelled) return;
+        setEvents(nextEvents);
+        setCalendarErrors(errors);
+      })
+      .catch((err) => {
+        console.error("[store] calendar fetch failed:", err);
+        if (!cancelled) setCalendarErrors(["Could not load the calendar."]);
+      })
+      .finally(() => {
+        // Releases the snapshot gate below whether or not the fetch worked.
+        if (!cancelled) setCalendarSettled(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // --- Toasts -------------------------------------------------------------------------------
 
@@ -569,15 +602,18 @@ export function StoreProvider({
   const refreshCalendar = useCallback(async () => {
     setCalendarRefreshing(true);
     try {
-      const { errors } = await serverActions.refreshCalendarFeeds();
-      refreshNow();
+      // Swap the events in directly. They no longer arrive through the page render, so the
+      // router.refresh() this used to do wouldn't bring anything new back.
+      const { events: nextEvents, errors } = await serverActions.refreshCalendarFeeds();
+      setEvents(nextEvents);
+      setCalendarErrors(errors);
       pushToast(errors.length ? errors[0] : "Calendar refreshed");
     } catch {
       pushToast("Couldn't reach the calendar feeds");
     } finally {
       setCalendarRefreshing(false);
     }
-  }, [pushToast, refreshNow]);
+  }, [pushToast]);
 
   const syncPendingCount = useCallback(async () => {
     if (!idbAvailable()) return;
@@ -736,9 +772,24 @@ export function StoreProvider({
   // Register the service worker on every load (used to happen only when Settings was opened,
   // which meant a device that never visited Settings had no offline shell and no push).
   useEffect(() => {
-    if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/sw.js").catch((err) => console.error("[sw] register failed:", err));
-    }
+    if (!("serviceWorker" in navigator)) return;
+    navigator.serviceWorker.register("/sw.js").catch((err) => console.error("[sw] register failed:", err));
+
+    // Navigations are served from cache first (see sw.js), so this page may be running a shell
+    // from an older deploy. The worker's background revalidate posts this once it notices a new
+    // build; reloading now picks it up, and the shell it reloads onto is already cached, so the
+    // reload is near-instant. Held back while ops are queued — a reload mid-flush would drop the
+    // optimistic rows that only exist in memory.
+    const onMessage = (event: MessageEvent) => {
+      if (event.data?.type !== "cura-shell-updated") return;
+      void outboxCount()
+        .catch(() => 1)
+        .then((queued) => {
+          if (queued === 0) window.location.reload();
+        });
+    };
+    navigator.serviceWorker.addEventListener("message", onMessage);
+    return () => navigator.serviceWorker.removeEventListener("message", onMessage);
   }, []);
 
   // Hydrate from the IndexedDB snapshot when it's newer than the server render (the service
@@ -776,6 +827,12 @@ export function StoreProvider({
         }
         if (offlineNow) setOffline(true);
         if (queued > 0) void flushRef.current();
+        // A stale shell means the service worker answered this navigation from cache instead of
+        // the network (see sw.js) — so the HTML on screen is from a previous visit and nothing
+        // is on its way to replace it. Pull server truth now. Skipped when ops are queued: a
+        // server render would clobber their optimistic rows, and the post-drain refresh in
+        // `flush` covers that case instead.
+        if (shellIsStale && queued === 0 && !offlineNow) refreshNow();
       } catch (err) {
         console.error("[store] snapshot hydration failed:", err);
       }
@@ -786,9 +843,11 @@ export function StoreProvider({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Snapshot the raw state (debounced) so an offline start has data to render.
+  // Snapshot the raw state (debounced) so an offline start has data to render. Held until the
+  // calendar has settled: writing before that would persist an empty event list over the good
+  // one already stored, and a cached-shell start would then come up with no calendar at all.
   useEffect(() => {
-    if (!idbAvailable()) return;
+    if (!idbAvailable() || !calendarSettled) return;
     const timer = window.setTimeout(() => {
       void kvSet(SNAPSHOT_KEY, {
         raw,
@@ -798,7 +857,7 @@ export function StoreProvider({
       } satisfies Snapshot).catch(() => {});
     }, 500);
     return () => window.clearTimeout(timer);
-  }, [raw, events, nowMs]);
+  }, [raw, events, nowMs, calendarSettled]);
 
   // Reconcile with the server when the tab regains focus (covers optimistic drift, other
   // devices, and voice captures landing while away). Debounced: focus + visibilitychange fire
@@ -1702,8 +1761,8 @@ export function StoreProvider({
   }, [enqueue, deleteWithUndo, pushToast, refreshNow]);
 
   const data = useMemo<TaskbookData>(
-    () => ({ ...serverData, ...deriveEntities(raw, liveNowMs, mode) }),
-    [serverData, raw, liveNowMs, mode]
+    () => ({ ...serverData, calendarErrors, ...deriveEntities(raw, liveNowMs, mode) }),
+    [serverData, calendarErrors, raw, liveNowMs, mode]
   );
 
   return (

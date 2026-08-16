@@ -2,22 +2,46 @@
 // see lib/notifications.ts — so there are no Web Push handlers here anymore.)
 //
 // Caching strategy (GET, same-origin only; /api/* is never cached):
-//  - navigations: network-first with a timeout, falling back to the last cached shell — the
-//    page HTML embeds a server snapshot, and the client store then hydrates anything fresher
-//    from its IndexedDB snapshot (see store.tsx), so a stale shell is only a starting point.
+//  - navigations: cache-first (stale-while-revalidate) — the cached shell paints immediately and
+//    a background fetch refreshes it for next time. The page HTML embeds a server snapshot, and
+//    the client store hydrates anything fresher from its IndexedDB snapshot and then pulls a live
+//    render (see store.tsx), so a stale shell is only a starting point.
 //  - /_next/static/: cache-first (content-hashed filenames, immutable).
 //  - other static GETs (fonts, icons): stale-while-revalidate.
 
 // Bumping this drops every previously cached shell/asset on the next activation — the escape
 // hatch when a device is stuck serving a stale build.
-const CACHE_VERSION = "cura-v2";
+const CACHE_VERSION = "cura-v3";
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
-const NAV_TIMEOUT_MS = 4000;
+// Where the build id of the currently cached shell is parked, so a background revalidate can tell
+// "same deploy, just newer data" from "the app has been redeployed underneath this device".
+const BUILD_KEY = "/__cura-shell-build";
+
+// `next dev` stamps each compilation with its own build id and the HMR client force-reloads the
+// page whenever the document it loaded doesn't match the server's current one. Serving a cached
+// shell guarantees that mismatch, so cache-first navigation and the dev server together spin in
+// a reload loop: HMR reloads, the worker replays the same stale shell, HMR reloads again. Stand
+// down entirely on localhost — the caching here exists for the deployed PWA on a phone, and dev
+// has nothing to gain from it.
+const IS_DEV_HOST = ["localhost", "127.0.0.1", "[::1]"].includes(self.location.hostname);
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
-  event.waitUntil(caches.open(SHELL_CACHE).then((cache) => cache.add("/").catch(() => {})));
+  event.waitUntil(
+    (async () => {
+      if (IS_DEV_HOST) return;
+      try {
+        const cache = await caches.open(SHELL_CACHE);
+        const response = await fetch("/");
+        // putShell (rather than cache.add) so the very first cached shell records its build id
+        // too — otherwise the first background revalidate has nothing to compare against.
+        if (isCacheableShell(response, self.location.origin + "/")) await putShell(cache, response);
+      } catch {
+        // No shell on this device yet; the first navigation will populate it.
+      }
+    })()
+  );
 });
 
 self.addEventListener("activate", (event) => {
@@ -30,55 +54,91 @@ self.addEventListener("activate", (event) => {
   );
 });
 
-function withTimeout(promise, ms) {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("sw-nav-timeout")), ms);
-    promise.then(
-      (res) => {
-        clearTimeout(timer);
-        resolve(res);
-      },
-      (err) => {
-        clearTimeout(timer);
-        reject(err);
-      }
-    );
-  });
+// The build id is stamped into the document by layout.tsx as <meta name="cura-build" ...>.
+// Parsed by regex rather than any DOM API — a service worker has no DOMParser.
+function readBuildId(html) {
+  const match = /<meta\s+name="cura-build"\s+content="([^"]*)"/.exec(html);
+  return match ? match[1] : null;
+}
+
+async function cachedBuildId(cache) {
+  const stored = await cache.match(BUILD_KEY);
+  return stored ? stored.text() : null;
+}
+
+// Only ever called with a response that already passed `isCacheableShell`. Returns the build id
+// it stored (null if the document carried no stamp), so the caller doesn't re-read the body.
+async function putShell(cache, response) {
+  const body = await response.clone().text();
+  await cache.put("/", new Response(body, { status: 200, headers: response.headers }));
+  const buildId = readBuildId(body);
+  if (buildId) await cache.put(BUILD_KEY, new Response(buildId));
+  return buildId;
+}
+
+// Never cache a redirected or non-HTML response: an expired session redirects to the Google
+// sign-in flow, and caching that as the shell poisons the fallback permanently.
+function isCacheableShell(response, requestUrl) {
+  const responseUrl = new URL(response.url || requestUrl);
+  const isHtml = (response.headers.get("Content-Type") || "").includes("text/html");
+  return response.ok && !response.redirected && isHtml && responseUrl.origin === self.location.origin;
+}
+
+async function notifyClients(message) {
+  const clients = await self.clients.matchAll({ type: "window" });
+  for (const client of clients) client.postMessage(message);
 }
 
 self.addEventListener("fetch", (event) => {
+  if (IS_DEV_HOST) return;
   const request = event.request;
   if (request.method !== "GET") return;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith("/api/")) return;
 
-  // App navigations: network-first, cached shell as the *offline* fallback only. Every successful
-  // navigation refreshes the cached copy of "/" so the fallback stays as current as possible.
+  // App navigations: cache-first, revalidating in the background. This is what makes the app open
+  // instantly instead of waiting out a cold serverless start plus a dozen queries to hosted
+  // Postgres — the cached shell paints at once, the store re-hydrates from its IndexedDB snapshot
+  // and immediately pulls a live server render to reconcile (see store.tsx).
   //
-  // Two rules matter here, both learned the hard way:
-  //  - The timeout must never hand back the cached shell while the device is actually online. A
-  //    slow cold start would otherwise serve a shell from an older deploy, whose `/_next/static`
-  //    chunks are gone from the CDN — the app then fails every fetch and latches into "offline"
-  //    on that one machine while every other device is fine.
-  //  - Never cache a redirected or non-HTML response: an expired session redirects to the Google
-  //    sign-in flow, and caching that as the shell poisons the fallback permanently.
+  // This used to be network-first specifically to avoid one failure mode: serving a shell from an
+  // *older deploy* whose `/_next/static` chunks are gone from the CDN, which broke hydration and
+  // latched that one device into "offline". Two things defuse it now:
+  //  - Those chunks are themselves cache-first in STATIC_CACHE below, populated by the same
+  //    service worker that cached the shell. A shell served from cache finds its own chunks in
+  //    cache, CDN or no CDN.
+  //  - The background revalidate compares build ids and tells the page to reload itself onto the
+  //    new deploy the moment one is detected, so a device can't sit on a stale build.
   if (request.mode === "navigate") {
     event.respondWith(
       (async () => {
-        const network = fetch(request);
-        try {
-          const response = self.navigator.onLine === false ? await withTimeout(network, NAV_TIMEOUT_MS) : await network;
-          const responseUrl = new URL(response.url || request.url);
-          const isHtml = (response.headers.get("Content-Type") || "").includes("text/html");
-          if (response.ok && !response.redirected && isHtml && responseUrl.origin === self.location.origin) {
-            const cache = await caches.open(SHELL_CACHE);
-            cache.put("/", response.clone());
+        const cache = await caches.open(SHELL_CACHE);
+        const cached = await cache.match("/");
+
+        const revalidate = (async () => {
+          const response = await fetch(request);
+          if (!isCacheableShell(response, request.url)) return response;
+          const previousBuild = await cachedBuildId(cache);
+          const nextBuild = await putShell(cache, response);
+          // Only meaningful when we actually served the old shell — otherwise the caller below
+          // is already returning this very response and there's nothing to reload onto.
+          if (cached && previousBuild && nextBuild && previousBuild !== nextBuild) {
+            await notifyClients({ type: "cura-shell-updated" });
           }
           return response;
+        })();
+
+        if (cached) {
+          // Let the revalidate finish even though the response has already gone out.
+          event.waitUntil(revalidate.catch(() => {}));
+          return cached;
+        }
+
+        // First load on this device: nothing to serve but the network.
+        try {
+          return await revalidate;
         } catch {
-          const cached = await caches.match("/", { cacheName: SHELL_CACHE });
-          if (cached) return cached;
           return new Response("<h1>Offline</h1><p>Cura hasn't been loaded on this device yet.</p>", {
             status: 503,
             headers: { "Content-Type": "text/html" },

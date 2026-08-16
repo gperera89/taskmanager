@@ -48,7 +48,7 @@ import {
   updateTask,
   updateTimeZone as updateTimeZoneApi,
 } from "@/lib/api";
-import { CALENDAR_CACHE_TAG, getCalendarEvents } from "@/lib/calendar";
+import { CALENDAR_CACHE_TAG, getCalendarEvents, type CalendarEvent } from "@/lib/calendar";
 import { parseDurationInput } from "@/lib/shared";
 // updateTag (not revalidateTag) — this is a read-your-own-writes refresh: it must expire the
 // calendar cache immediately, not serve the stale snapshot while refetching in the background.
@@ -621,13 +621,24 @@ export async function restoreCalendarEvent(eventId: string) {
   await restoreCalendarEventApi(eventId);
 }
 
-// Manual "pull the ICS feeds again now" — expires the 5-minute calendar cache so the very next
-// render refetches Google/Outlook instead of serving the last snapshot. Returns the freshly
-// fetched result so the caller can report per-feed failures; the client follows this with a
-// router.refresh() to pick the new events up through the normal SSR path.
-export async function refreshCalendarFeeds(): Promise<{ count: number; errors: string[] }> {
+export type CalendarPayload = { events: CalendarEvent[]; errors: string[] };
+
+// The calendar is fetched by the client store after mount rather than rendered into the page.
+// It's the one read on this screen that leaves the datacentre — two live HTTPS fetches to the
+// ICS feeds plus expansion of ~1000 recurring events, behind a cache that only holds 5 minutes,
+// so an infrequent visitor nearly always pays full price. Keeping it out of the server render
+// means the task list never waits on Google and Outlook.
+export async function loadCalendarFeeds(): Promise<CalendarPayload> {
+  await requireSession();
+  return getCalendarEvents();
+}
+
+// Manual "pull the ICS feeds again now" — expires the 5-minute calendar cache so this call
+// refetches Google/Outlook instead of serving the last snapshot. Returns the fresh events for the
+// store to swap in directly (they no longer arrive via the page render, so a router.refresh()
+// wouldn't pick them up).
+export async function refreshCalendarFeeds(): Promise<CalendarPayload> {
   await requireSession();
   updateTag(CALENDAR_CACHE_TAG);
-  const { events, errors } = await getCalendarEvents();
-  return { count: events.length, errors };
+  return getCalendarEvents();
 }

@@ -1236,3 +1236,138 @@ export function markTaskNotified(id: string, at: Date) {
 export function markProjectNotified(id: string, at: Date) {
   return prisma.project.update({ where: { id }, data: { notifiedAt: at } });
 }
+
+// --- Page-load snapshot ---------------------------------------------------------------------
+//
+// Everything `app/page.tsx` renders, in ONE database operation.
+//
+// The page used to fire thirteen separate Prisma queries and `Promise.all` them. Parallel or
+// not, each one is a round trip to hosted Postgres, and measured against the live database that
+// round trip is ~490ms — twelve of them in parallel still took ~3.1 seconds wall-clock (serially,
+// ~6.1s), because the pool opens a connection per query and they contend on handshakes. That was
+// the single largest chunk of the mobile first-paint delay: nothing renders until it's done.
+// Collapsing it into one statement makes the whole read cost one round trip.
+//
+// Rows come back as whole-row JSON (`to_jsonb(t)`) rather than hand-listed columns, unlike
+// getCronSnapshot above. That's deliberate: the cron reads a fixed handful of fields, but this
+// reads every column of nine tables, and spelling them out would mean every schema change needs
+// a matching edit here — exactly the kind of drift the "add a mutable field" checklist in
+// CLAUDE.md is meant to avoid. With `to_jsonb`, new columns flow through automatically.
+
+// `to_jsonb` renders a Postgres `timestamp without time zone` as "2026-08-16T00:00:00.000" — no
+// zone suffix, because the column has none. Prisma's own decoder would have produced a Date, and
+// the rest of the app (derive.ts, taskbookDates.ts) expects Dates, so they're revived here.
+// Matching on shape rather than a per-model column list keeps this generic; the app's stored
+// timestamps are UTC face values (see the date/time encoding note in CLAUDE.md), which is exactly
+// what appending "Z" reconstructs.
+const PG_TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?$/;
+
+function reviveDates<T>(value: T): T {
+  if (typeof value === "string") {
+    return (PG_TIMESTAMP_RE.test(value) ? new Date(`${value}Z`) : value) as unknown as T;
+  }
+  if (Array.isArray(value)) return value.map(reviveDates) as unknown as T;
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) out[k] = reviveDates(v);
+    return out as T;
+  }
+  return value;
+}
+
+export type PageSnapshot = {
+  tasks: Awaited<ReturnType<typeof getTasks>>;
+  projects: Awaited<ReturnType<typeof getProjects>>;
+  habits: Awaited<ReturnType<typeof getHabits>>;
+  habitCompletions: Awaited<ReturnType<typeof getHabitCompletions>>;
+  routines: Awaited<ReturnType<typeof getRoutines>>;
+  categories: Awaited<ReturnType<typeof getCategories>>;
+  countdowns: Awaited<ReturnType<typeof getCountdowns>>;
+  captures: Awaited<ReturnType<typeof getUnreadVoiceCaptures>>;
+  dayPlanBlocks: Awaited<ReturnType<typeof getDayPlanBlocks>>;
+  suggestions: Awaited<ReturnType<typeof getActiveSuggestions>>;
+  aiNotes: Awaited<ReturnType<typeof getAiNotes>>;
+  dismissedEventIds: string[];
+  timeZone: string;
+  lastCronAt: Date | null;
+};
+
+// Describes the row as it looks *after* `reviveDates` (which is typed as shape-preserving), so
+// timestamps are Dates here even though Postgres hands them over as strings.
+type RawSnapshotRow = Omit<PageSnapshot, "dismissedEventIds" | "timeZone" | "lastCronAt"> & {
+  dismissedEventIds: { eventId: string }[];
+  settings: { timeZone: string; lastCronAt: Date | null } | null;
+};
+
+export async function getPageSnapshot(): Promise<PageSnapshot> {
+  const completedCutoffMs = Date.now() - COMPLETED_TASK_RETENTION_MS;
+  const habitSinceMs = Date.now() - 366 * MS_PER_DAY;
+  const dayPlanSinceMs = Date.now() - DAY_PLAN_LOOKBACK_MS;
+
+  const rows = await prisma.$queryRaw<RawSnapshotRow[]>`
+    SELECT
+      (SELECT coalesce(jsonb_agg(
+         to_jsonb(t) || jsonb_build_object('subtasks', (
+           SELECT coalesce(jsonb_agg(to_jsonb(s) ORDER BY s."createdAt" ASC), '[]'::jsonb)
+             FROM "Task" s WHERE s."parentId" = t."id"))
+         ORDER BY t."createdAt" ASC), '[]'::jsonb)
+       FROM "Task" t
+       WHERE t."parentId" IS NULL
+         AND (t."isCompleted" = false
+              OR t."completedAt" IS NULL
+              OR t."completedAt" >= to_timestamp(${completedCutoffMs}::float8 / 1000) AT TIME ZONE 'UTC')
+      ) AS "tasks",
+      (SELECT coalesce(jsonb_agg(to_jsonb(p)), '[]'::jsonb) FROM "Project" p) AS "projects",
+      (SELECT coalesce(jsonb_agg(to_jsonb(h)), '[]'::jsonb) FROM "Habit" h) AS "habits",
+      (SELECT coalesce(jsonb_agg(to_jsonb(hc) ORDER BY hc."date" ASC), '[]'::jsonb)
+         FROM "HabitCompletion" hc
+        WHERE hc."date" >= to_timestamp(${habitSinceMs}::float8 / 1000) AT TIME ZONE 'UTC'
+      ) AS "habitCompletions",
+      (SELECT coalesce(jsonb_agg(
+         to_jsonb(r) || jsonb_build_object('subroutines', (
+           SELECT coalesce(jsonb_agg(to_jsonb(sr) ORDER BY sr."title" ASC), '[]'::jsonb)
+             FROM "Routine" sr WHERE sr."parentId" = r."id"))
+         ORDER BY r."reminderTime" ASC), '[]'::jsonb)
+       FROM "Routine" r WHERE r."parentId" IS NULL
+      ) AS "routines",
+      (SELECT coalesce(jsonb_agg(to_jsonb(c) ORDER BY c."name" ASC), '[]'::jsonb) FROM "Category" c) AS "categories",
+      (SELECT coalesce(jsonb_agg(to_jsonb(cd) ORDER BY cd."createdAt" ASC), '[]'::jsonb) FROM "Countdown" cd) AS "countdowns",
+      (SELECT coalesce(jsonb_agg(to_jsonb(v) ORDER BY v."createdAt" DESC), '[]'::jsonb) FROM "VoiceCapture" v) AS "captures",
+      (SELECT coalesce(jsonb_agg(to_jsonb(d) ORDER BY d."createdAt" ASC), '[]'::jsonb)
+         FROM "DayPlanBlock" d
+        WHERE d."date" >= to_timestamp(${dayPlanSinceMs}::float8 / 1000) AT TIME ZONE 'UTC'
+      ) AS "dayPlanBlocks",
+      (SELECT coalesce(jsonb_agg(to_jsonb(g) ORDER BY g."suggestedDate" ASC, g."createdAt" ASC), '[]'::jsonb)
+         FROM "AiSuggestion" g WHERE g."status" = 'PENDING'
+      ) AS "suggestions",
+      (SELECT coalesce(jsonb_agg(to_jsonb(n) ORDER BY n."createdAt" ASC), '[]'::jsonb) FROM "AiNote" n) AS "aiNotes",
+      (SELECT coalesce(jsonb_agg(jsonb_build_object('eventId', e."eventId")), '[]'::jsonb)
+         FROM "DismissedCalendarEvent" e
+      ) AS "dismissedEventIds",
+      (SELECT to_jsonb(a) FROM "AppSettings" a WHERE a."id" = ${APP_SETTINGS_ID}) AS "settings"
+  `;
+
+  const row = reviveDates(rows[0]);
+
+  // Two first-run bootstraps that the plain read above can't do. Both are one-time: on a
+  // provisioned database neither branch is ever taken, so the common path stays at one round trip.
+  const categories = row.categories.length > 0 ? row.categories : await getCategories();
+  const settings = row.settings ?? (await getAppSettings());
+
+  return {
+    tasks: row.tasks,
+    projects: row.projects,
+    habits: row.habits,
+    habitCompletions: row.habitCompletions,
+    routines: row.routines,
+    categories,
+    countdowns: row.countdowns,
+    captures: row.captures,
+    dayPlanBlocks: row.dayPlanBlocks,
+    suggestions: row.suggestions,
+    aiNotes: row.aiNotes,
+    dismissedEventIds: row.dismissedEventIds.map((d) => d.eventId),
+    timeZone: settings.timeZone,
+    lastCronAt: settings.lastCronAt,
+  };
+}
