@@ -240,6 +240,7 @@ function Suggestions() {
   const visible = raw.suggestions.filter(
     (s) => !s.suggestedDate || new Date(s.suggestedDate).toISOString().slice(0, 10) >= todayKey
   );
+  const groups = groupSuggestionsByEvent(visible);
 
   return (
     <div className="mt-5">
@@ -258,8 +259,8 @@ function Suggestions() {
       {visible.length === 0 && (
         <div className="py-2 text-[13px] italic text-(--ink-soft)">No suggestions right now.</div>
       )}
-      {visible.map((s) => (
-        <SuggestionCard key={s.id} suggestion={s} category={defaultCategory(data.categoryOptions)} actions={actions} />
+      {groups.map((g) => (
+        <SuggestionGroup key={g.key} group={g} todayKey={todayKey} category={defaultCategory(data.categoryOptions)} actions={actions} />
       ))}
 
       {/* Quick note for future generations — full manager lives in Settings */}
@@ -289,14 +290,104 @@ function Suggestions() {
   );
 }
 
+// Suggestions arrive as a flat list, but they cluster hard around a handful of calendar events
+// (prep + follow-up + review for one interview, say). Grouping turns a 50-row scroll into a
+// short list of events you can scan and open one at a time.
+type SuggestionGroupVM = {
+  key: string;
+  eventTitle: string | null; // null = the "not tied to an event" bucket
+  items: AiSuggestion[];
+  earliestKey: string | null; // earliest suggestedDate in the group, drives ordering + expansion
+};
+
+function suggestionDateKey(s: AiSuggestion): string | null {
+  return s.suggestedDate ? new Date(s.suggestedDate).toISOString().slice(0, 10) : null;
+}
+
+function groupSuggestionsByEvent(items: AiSuggestion[]): SuggestionGroupVM[] {
+  const byEvent = new Map<string, SuggestionGroupVM>();
+  for (const s of items) {
+    // eventId is the reliable identity; eventTitle is the label. Fall back to the title for rows
+    // that carry one without an id, and bucket the rest together.
+    const key = s.eventId ?? (s.eventTitle ? `title:${s.eventTitle}` : "");
+    let group = byEvent.get(key);
+    if (!group) {
+      group = { key: key || "ungrouped", eventTitle: s.eventTitle, items: [], earliestKey: null };
+      byEvent.set(key, group);
+    }
+    group.items.push(s);
+    const dateKey = suggestionDateKey(s);
+    if (dateKey && (group.earliestKey == null || dateKey < group.earliestKey)) group.earliestKey = dateKey;
+  }
+
+  const groups = [...byEvent.values()];
+  for (const g of groups) {
+    g.items.sort((a, b) => (suggestionDateKey(a) ?? "9999").localeCompare(suggestionDateKey(b) ?? "9999"));
+  }
+  // Soonest first; the event-less bucket sinks to the bottom.
+  return groups.sort((a, b) => {
+    if (!a.eventTitle !== !b.eventTitle) return a.eventTitle ? -1 : 1;
+    return (a.earliestKey ?? "9999").localeCompare(b.earliestKey ?? "9999");
+  });
+}
+
+function SuggestionGroup({
+  group,
+  todayKey,
+  category,
+  actions,
+}: {
+  group: SuggestionGroupVM;
+  todayKey: string;
+  category: string;
+  actions: ReturnType<typeof useTaskbook>["actions"];
+}) {
+  // Groups that want attention today open themselves; everything further out starts collapsed so
+  // the list stays scannable. A single-suggestion group has no header worth collapsing behind.
+  const actionableNow = group.earliestKey != null && group.earliestKey <= todayKey;
+  const [open, setOpen] = useState(actionableNow || group.items.length === 1);
+
+  if (!group.eventTitle && group.items.length === 1) {
+    return <SuggestionCard suggestion={group.items[0]} category={category} actions={actions} />;
+  }
+
+  return (
+    <div className="border-b border-(--border-soft)">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full cursor-pointer items-baseline gap-2 py-2 text-left"
+      >
+        <span className="text-[11px] text-(--ink-faint)">{open ? "▾" : "▸"}</span>
+        <span className="min-w-0 flex-1 truncate text-[13.5px] text-(--ink)">
+          {group.eventTitle ?? "Other ideas"}
+        </span>
+        <span className="whitespace-nowrap text-[11.5px] text-(--ink-soft)">
+          {group.items.length} suggestion{group.items.length === 1 ? "" : "s"}
+          {group.earliestKey ? ` · from ${group.earliestKey}` : ""}
+        </span>
+      </button>
+      {open && (
+        <div className="pl-4">
+          {group.items.map((s) => (
+            <SuggestionCard key={s.id} suggestion={s} category={category} actions={actions} showEventTitle={false} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SuggestionCard({
   suggestion,
   category,
   actions,
+  showEventTitle = true,
 }: {
   suggestion: AiSuggestion;
   category: string;
   actions: ReturnType<typeof useTaskbook>["actions"];
+  showEventTitle?: boolean; // off inside a group — the header already names the event
 }) {
   const [pickDate, setPickDate] = useState(false);
   const [snoozeOpen, setSnoozeOpen] = useState(false);
@@ -315,7 +406,11 @@ function SuggestionCard({
         <div className="min-w-0 flex-1">
           <div className="text-[14.5px] text-(--ink)">{suggestion.title}</div>
           <div className="text-[11.5px] text-(--ink-soft)">
-            {[suggestion.description, suggestion.eventTitle ? `for “${suggestion.eventTitle}”` : null, suggestedKey ? `suggested ${suggestedKey}` : null]
+            {[
+              suggestion.description,
+              showEventTitle && suggestion.eventTitle ? `for “${suggestion.eventTitle}”` : null,
+              suggestedKey ? `suggested ${suggestedKey}` : null,
+            ]
               .filter(Boolean)
               .join(" · ")}
           </div>
