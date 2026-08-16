@@ -172,6 +172,10 @@ export type MyDayBlockVM = {
   description: string | null;
   startMinutes: number;
   durationMinutes: number; // layout duration — falls back to 30 when unset
+  // Vertical extent the block actually occupies on screen: durationMinutes floored at the
+  // minimum readable block height, so a 10-minute block doesn't visually cover its neighbour.
+  // Lane assignment and rendering both use this — never durationMinutes on its own.
+  layoutMinutes: number;
   hasExplicitDuration: boolean;
   isCompleted: boolean;
   pinned: boolean;

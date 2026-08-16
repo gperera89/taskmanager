@@ -37,6 +37,35 @@ function findSlot(obstacles: Obstacle[], from: number, until: number, duration: 
   return null;
 }
 
+// Where a manually dropped/placed item should actually land: the free start closest to where the
+// user aimed, so drops land *beside* existing events rather than on top of them. Searches outward
+// from `desired` in `step` increments, preferring the later of two equally-near candidates (a
+// nudge down the day reads as "after that thing" rather than silently pulling work earlier).
+// Returns the clamped desired start when the day is too congested to fit anywhere — an honest
+// visible overlap beats refusing the drop.
+export function nearestFreeStart(
+  obstacles: Obstacle[],
+  desired: number,
+  duration: number,
+  bounds: { startMinutes: number; endMinutes: number },
+  step = 15
+): number {
+  const latest = Math.max(bounds.startMinutes, bounds.endMinutes - duration);
+  const clamp = (m: number) => Math.min(Math.max(m, bounds.startMinutes), latest);
+  const target = clamp(Math.round(desired / step) * step);
+  const fits = (start: number) => !overlaps(obstacles, start, start + duration);
+  if (fits(target)) return target;
+
+  const span = Math.ceil((latest - bounds.startMinutes) / step);
+  for (let i = 1; i <= span; i++) {
+    const after = target + i * step;
+    if (after <= latest && fits(after)) return after;
+    const before = target - i * step;
+    if (before >= bounds.startMinutes && fits(before)) return before;
+  }
+  return target;
+}
+
 // Lunch floats to the free slot in its window nearest the target time (noon). If the whole
 // window is blocked by meetings it falls back to the target anyway — a visible overlap beats
 // silently skipping lunch.

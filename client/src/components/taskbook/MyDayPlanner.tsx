@@ -10,7 +10,8 @@ import { useRouter } from "next/navigation";
 import type { AiSuggestion, CapturedKind } from "@prisma/client";
 import { refreshSuggestions } from "@/app/actions";
 import { DURATION_OPTIONS, formatDuration, parseDurationInput } from "@/lib/shared";
-import { pad2, zonedMinutesOfDay } from "@/lib/taskbookDates";
+import { nearestFreeStart, type Obstacle } from "@/lib/scheduler";
+import { pad2, zonedMinutesOfDay, zonedYMD } from "@/lib/taskbookDates";
 import { useTaskbook } from "./store";
 import { CheckSquare, SELECT_CARET_MUTED, selectCaretStyle, labelClass } from "./shared";
 import type { CategoryOption, MyDayBlockVM, MyDayKind, MyDayLookaheadVM, MyDayTrayItemVM, MyDayVM } from "./types";
@@ -18,6 +19,7 @@ import type { CategoryOption, MyDayBlockVM, MyDayKind, MyDayLookaheadVM, MyDayTr
 const HOUR_PX = 64;
 const SNAP_MINUTES = 15;
 const MIN_BLOCK_PX = 26; // short blocks stay clickable
+const DEFAULT_DROP_MINUTES = 30; // what an item with no duration is assumed to take
 
 // Drag payload shared between the tray/blocks/look-ahead rows and the timeline's drop handler
 // (dataTransfer is unreadable during dragover). Module-level is fine: one drag at a time.
@@ -26,6 +28,10 @@ type DragPayload = {
   entityId: string;
   planBlockId: string | null;
   durationMinutes: number | null;
+  // On-screen extent to reserve when landing this item (>= durationMinutes; see layoutMinutes).
+  layoutMinutes: number;
+  // Timeline key of the block being dragged, so it isn't treated as an obstacle to itself.
+  blockKey: string | null;
 };
 let draggingItem: DragPayload | null = null;
 
@@ -54,6 +60,13 @@ function formatHourLabel(hour: number): string {
   return `${h12} ${hour < 12 ? "AM" : "PM"}`;
 }
 
+function formatClockShort(minutes: number): string {
+  const h24 = Math.floor(minutes / 60) % 24;
+  const mm = minutes % 60;
+  const h12 = h24 % 12 || 12;
+  return `${h12}${mm ? `:${pad2(mm)}` : ""} ${h24 < 12 ? "AM" : "PM"}`;
+}
+
 function addDaysToDateKey(dateKey: string, days: number): string {
   const [y, m, d] = dateKey.split("-").map(Number);
   const next = new Date(Date.UTC(y, m - 1, d + days));
@@ -77,11 +90,31 @@ export default function MyDayPlanner({ myDay }: { myDay: MyDayVM }) {
     }
   }
 
+  // Everything already committed to a time on this day: fixed obstacles a manual placement must
+  // not land on. Auto-scheduled ("unpinned") blocks are deliberately excluded — they re-pack
+  // around whatever the user pins, so treating them as walls would push manual drops around for
+  // no reason. The dragged item itself is excluded so it can be nudged within its own slot.
+  function obstaclesFor(payload: DragPayload): Obstacle[] {
+    return myDay.timeline
+      .filter((b) => b.pinned && !b.isCompleted && b.key !== payload.blockKey)
+      .map((b) => ({ startMinutes: b.startMinutes, endMinutes: b.startMinutes + b.layoutMinutes }));
+  }
+
+  // Where a placement will actually land: the free slot nearest what the user aimed at, so drags,
+  // "Place", and the popover's time field all drop items *beside* existing events rather than on
+  // top of them.
+  function resolveStart(payload: DragPayload, desiredMinutes: number): number {
+    return nearestFreeStart(obstaclesFor(payload), desiredMinutes, payload.layoutMinutes, {
+      startMinutes: myDay.startHour * 60,
+      endMinutes: myDay.endHour * 60,
+    }, SNAP_MINUTES);
+  }
+
   // Pin an item at a time on the viewed day. Tasks with their own due time still get a block —
   // the block wins in the deriver, and the task's dueDate stays untouched (its deadline is a
   // separate fact from when it's planned to be worked on).
-  function placeAt(payload: DragPayload, minutes: number) {
-    const startTime = hhmm(minutes);
+  function placeAt(payload: DragPayload, desiredMinutes: number) {
+    const startTime = hhmm(resolveStart(payload, desiredMinutes));
     if (payload.planBlockId) {
       actions.updateDayPlanBlock(payload.planBlockId, { startTime });
       return;
@@ -126,7 +159,7 @@ export default function MyDayPlanner({ myDay }: { myDay: MyDayVM }) {
     actions.addDayPlanBlock({ date: myDay.dateKey, entityType: "TASK", entityId: taskId, durationMinutes });
   }
 
-  const helpers: PlannerHelpers = { myDay, toggleItem, placeAt, setItemDuration, pushToDate, doToday };
+  const helpers: PlannerHelpers = { myDay, toggleItem, placeAt, resolveStart, setItemDuration, pushToDate, doToday };
 
   const nowMinutes = myDay.isToday ? zonedMinutesOfDay(new Date(nowMs), raw.timeZone) : null;
 
@@ -169,6 +202,7 @@ type PlannerHelpers = {
   myDay: MyDayVM;
   toggleItem: (kind: MyDayKind, entityId: string, isCompleted: boolean) => void;
   placeAt: (payload: DragPayload, minutes: number) => void;
+  resolveStart: (payload: DragPayload, desiredMinutes: number) => number;
   setItemDuration: (item: { kind: MyDayKind; entityId: string; planBlockId: string | null }, minutes: number | null) => void;
   pushToDate: (item: { kind: MyDayKind; entityId: string; planBlockId: string | null; timeValue?: string }, dateKey: string) => void;
   doToday: (taskId: string, durationMinutes: number | null) => void;
@@ -181,7 +215,7 @@ function defaultCategory(options: CategoryOption[]): string {
 }
 
 function Suggestions() {
-  const { raw, data, actions } = useTaskbook();
+  const { raw, data, actions, nowMs } = useTaskbook();
   const router = useRouter();
   const [refreshing, setRefreshing] = useState(false);
   const [noteDraft, setNoteDraft] = useState("");
@@ -198,6 +232,15 @@ function Suggestions() {
     }
   }
 
+  // A suggestion whose date has passed is prep for something that already happened — hide it
+  // rather than waiting for the next generation run to sweep it out of the table. Undated ideas
+  // (the occasional "novel" one) have no moment to miss, so they stay.
+  const today = zonedYMD(new Date(nowMs), raw.timeZone);
+  const todayKey = `${today.year}-${pad2(today.month0 + 1)}-${pad2(today.day)}`;
+  const visible = raw.suggestions.filter(
+    (s) => !s.suggestedDate || new Date(s.suggestedDate).toISOString().slice(0, 10) >= todayKey
+  );
+
   return (
     <div className="mt-5">
       <div className="flex items-center justify-between">
@@ -212,10 +255,10 @@ function Suggestions() {
         </button>
       </div>
 
-      {raw.suggestions.length === 0 && (
+      {visible.length === 0 && (
         <div className="py-2 text-[13px] italic text-(--ink-soft)">No suggestions right now.</div>
       )}
-      {raw.suggestions.map((s) => (
+      {visible.map((s) => (
         <SuggestionCard key={s.id} suggestion={s} category={defaultCategory(data.categoryOptions)} actions={actions} />
       ))}
 
@@ -364,7 +407,14 @@ function TrayRow({ item, helpers }: { item: MyDayTrayItemVM; helpers: PlannerHel
   const [placeOpen, setPlaceOpen] = useState(false);
   const [pushOpen, setPushOpen] = useState(false);
   const canPush = item.kind === "task" || item.kind === "project" || item.planBlockId != null;
-  const payload: DragPayload = { kind: item.kind, entityId: item.entityId, planBlockId: item.planBlockId, durationMinutes: item.durationMinutes };
+  const payload: DragPayload = {
+    kind: item.kind,
+    entityId: item.entityId,
+    planBlockId: item.planBlockId,
+    durationMinutes: item.durationMinutes,
+    layoutMinutes: item.durationMinutes ?? DEFAULT_DROP_MINUTES,
+    blockKey: null,
+  };
 
   return (
     <div
@@ -468,7 +518,9 @@ function TrayRow({ item, helpers }: { item: MyDayTrayItemVM; helpers: PlannerHel
 
 function Timeline({ myDay, nowMinutes, helpers }: { myDay: MyDayVM; nowMinutes: number | null; helpers: PlannerHelpers }) {
   const areaRef = useRef<HTMLDivElement>(null);
-  const [ghostMinutes, setGhostMinutes] = useState<number | null>(null);
+  // The landing preview: where the pointer is vs. where the item will actually settle once it has
+  // dodged whatever is already booked. `nudged` drives the "moved clear of…" hint.
+  const [ghost, setGhost] = useState<{ start: number; minutes: number; nudged: boolean } | null>(null);
   const [openBlockKey, setOpenBlockKey] = useState<string | null>(null);
 
   const startMin = myDay.startHour * 60;
@@ -509,12 +561,14 @@ function Timeline({ myDay, nowMinutes, helpers }: { myDay: MyDayVM; nowMinutes: 
         onDragOver={(e) => {
           if (!draggingItem) return;
           e.preventDefault();
-          setGhostMinutes(minutesFromPointer(e.clientY));
+          const desired = minutesFromPointer(e.clientY);
+          const start = helpers.resolveStart(draggingItem, desired);
+          setGhost({ start, minutes: draggingItem.layoutMinutes, nudged: start !== desired });
         }}
-        onDragLeave={() => setGhostMinutes(null)}
+        onDragLeave={() => setGhost(null)}
         onDrop={(e) => {
           e.preventDefault();
-          setGhostMinutes(null);
+          setGhost(null);
           if (!draggingItem) return;
           helpers.placeAt(draggingItem, minutesFromPointer(e.clientY));
           draggingItem = null;
@@ -547,13 +601,23 @@ function Timeline({ myDay, nowMinutes, helpers }: { myDay: MyDayVM; nowMinutes: 
           />
         ))}
 
-        {ghostMinutes != null && (
+        {ghost != null && (
           <div
-            className="pointer-events-none absolute left-0 right-0 z-20 border-t-2 border-dashed"
-            style={{ top: ((ghostMinutes - startMin) / 60) * HOUR_PX, borderColor: "var(--accent-text)" }}
+            className="pointer-events-none absolute left-0 right-0 z-20 rounded-lg border-2 border-dashed"
+            style={{
+              top: ((ghost.start - startMin) / 60) * HOUR_PX,
+              height: Math.max((ghost.minutes / 60) * HOUR_PX, MIN_BLOCK_PX),
+              borderColor: "var(--accent-text)",
+              background: "var(--accent-wash)",
+              opacity: 0.7,
+            }}
           >
-            <span className="absolute -top-5 left-0 rounded px-1 text-[11px]" style={{ color: "var(--accent-text)", background: "var(--card)" }}>
-              {formatHourLabel(Math.floor(ghostMinutes / 60))} {ghostMinutes % 60 ? `:${pad2(ghostMinutes % 60)}` : ""}
+            <span
+              className="absolute -top-5 left-0 rounded px-1 text-[11px] whitespace-nowrap"
+              style={{ color: "var(--accent-text)", background: "var(--card)" }}
+            >
+              {formatClockShort(ghost.start)}
+              {ghost.nudged ? " · moved to the next free slot" : ""}
             </span>
           </div>
         )}
@@ -605,7 +669,8 @@ function TimelineBlock({
   const { actions } = useTaskbook();
   const style = KIND_STYLE[block.kind];
   const top = ((block.startMinutes - startMin) / 60) * HOUR_PX;
-  const height = Math.max((block.durationMinutes / 60) * HOUR_PX, MIN_BLOCK_PX);
+  // layoutMinutes (not durationMinutes) is what the deriver reserved for this block.
+  const height = Math.max((block.layoutMinutes / 60) * HOUR_PX, MIN_BLOCK_PX) - 2;
   const laneWidth = 100 / block.cols;
   const isEvent = block.kind === "event";
   const isTemplate = block.kind === "template";
@@ -614,6 +679,8 @@ function TimelineBlock({
     entityId: block.entityId,
     planBlockId: block.planBlockId,
     durationMinutes: block.hasExplicitDuration ? block.durationMinutes : null,
+    layoutMinutes: block.layoutMinutes,
+    blockKey: block.key,
   };
 
   return (
@@ -853,7 +920,14 @@ function Lookahead({ items, helpers }: { items: MyDayLookaheadVM[]; helpers: Pla
           className="flex items-center gap-3 border-b border-(--border-soft) py-2.5"
           draggable
           onDragStart={() => {
-            draggingItem = { kind: "task", entityId: t.taskId, planBlockId: null, durationMinutes: t.durationMinutes };
+            draggingItem = {
+              kind: "task",
+              entityId: t.taskId,
+              planBlockId: null,
+              durationMinutes: t.durationMinutes,
+              layoutMinutes: t.durationMinutes ?? DEFAULT_DROP_MINUTES,
+              blockKey: null,
+            };
           }}
           onDragEnd={() => {
             draggingItem = null;

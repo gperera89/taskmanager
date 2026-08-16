@@ -651,6 +651,10 @@ const MY_DAY_START_HOUR = 5;
 const MY_DAY_END_HOUR = 21;
 const DEFAULT_BLOCK_MINUTES = 30;
 const MIN_EVENT_LAYOUT_MINUTES = 15;
+// Keep in sync with MIN_BLOCK_PX / HOUR_PX in MyDayPlanner: the smallest block the timeline can
+// draw is ~25 minutes tall, so anything shorter still occupies that much space and must be laid
+// out (lanes, stretching) as if it did — otherwise short blocks silently overprint each other.
+const MIN_BLOCK_LAYOUT_MINUTES = 25;
 
 function parseHHMM(value: string | null | undefined): number | null {
   if (!value) return null;
@@ -676,7 +680,7 @@ function formatClockRange(startMinutes: number, durationMinutes: number): string
 // cluster each block takes the first lane whose previous occupant has ended. Mutates col/cols.
 function assignOverlapLanes(blocks: MyDayBlockVM[]): void {
   const sorted = [...blocks].sort(
-    (a, b) => a.startMinutes - b.startMinutes || b.durationMinutes - a.durationMinutes
+    (a, b) => a.startMinutes - b.startMinutes || b.layoutMinutes - a.layoutMinutes
   );
   let cluster: MyDayBlockVM[] = [];
   let clusterEnd = -1;
@@ -689,7 +693,7 @@ function assignOverlapLanes(blocks: MyDayBlockVM[]): void {
         lane = laneEnds.length;
         laneEnds.push(0);
       }
-      laneEnds[lane] = b.startMinutes + b.durationMinutes;
+      laneEnds[lane] = b.startMinutes + b.layoutMinutes;
       b.col = lane;
     }
     for (const b of cluster) b.cols = laneEnds.length;
@@ -699,7 +703,7 @@ function assignOverlapLanes(blocks: MyDayBlockVM[]): void {
   for (const b of sorted) {
     if (cluster.length && b.startMinutes >= clusterEnd) flush();
     cluster.push(b);
-    clusterEnd = Math.max(clusterEnd, b.startMinutes + b.durationMinutes);
+    clusterEnd = Math.max(clusterEnd, b.startMinutes + b.layoutMinutes);
   }
   flush();
 }
@@ -774,10 +778,11 @@ export function deriveMyDay(
   };
 
   const makeBlock = (
-    partial: Omit<MyDayBlockVM, "timeLabel" | "col" | "cols" | "durationMinutes"> & { durationMinutes: number }
+    partial: Omit<MyDayBlockVM, "timeLabel" | "layoutMinutes" | "col" | "cols" | "durationMinutes"> & { durationMinutes: number }
   ): MyDayBlockVM => ({
     ...partial,
     timeLabel: formatClockRange(partial.startMinutes, partial.durationMinutes),
+    layoutMinutes: Math.max(partial.durationMinutes, MIN_BLOCK_LAYOUT_MINUTES),
     col: 0,
     cols: 1,
   });
@@ -1097,9 +1102,11 @@ export function deriveMyDay(
   const isPast = viewedUtcMidnight < todayUtcMidnight;
   const nowMinutes = zonedMinutesOfDay(now, raw.timeZone);
 
+  // Obstacles use the on-screen extent, not the raw duration: a 10-minute block still occupies a
+  // ~25-minute-tall slot, so packing anything into the remainder would overlap it visually.
   const fixedObstacles: Obstacle[] = timeline.map((b) => ({
     startMinutes: b.startMinutes,
-    endMinutes: b.startMinutes + b.durationMinutes,
+    endMinutes: b.startMinutes + b.layoutMinutes,
   }));
 
   if (isWorkday) {
@@ -1129,7 +1136,7 @@ export function deriveMyDay(
     const order = templateBlock("order-lunch", "Order lunch", orderStart, template.lunch.orderDurationMinutes);
     timeline.push(snack, lunch, order);
     for (const b of [snack, lunch, order]) {
-      fixedObstacles.push({ startMinutes: b.startMinutes, endMinutes: b.startMinutes + b.durationMinutes });
+      fixedObstacles.push({ startMinutes: b.startMinutes, endMinutes: b.startMinutes + b.layoutMinutes });
     }
   }
 
@@ -1155,7 +1162,7 @@ export function deriveMyDay(
   );
   const flexItems: FlexItem[] = pool.map((f) => ({
     key: f.tray.key,
-    durationMinutes: f.tray.durationMinutes!,
+    durationMinutes: Math.max(f.tray.durationMinutes!, MIN_BLOCK_LAYOUT_MINUTES),
     scope: f.scope,
   }));
   const { placed, overflow } = packFlexible(flexItems, templateZones, fixedObstacles, isToday ? nowMinutes : 0);
@@ -1219,7 +1226,7 @@ export function deriveMyDay(
   let endHour = MY_DAY_END_HOUR;
   for (const b of timeline) {
     startHour = Math.min(startHour, Math.floor(b.startMinutes / 60));
-    endHour = Math.max(endHour, Math.ceil((b.startMinutes + b.durationMinutes) / 60));
+    endHour = Math.max(endHour, Math.ceil((b.startMinutes + b.layoutMinutes) / 60));
   }
   startHour = Math.max(0, startHour);
   endHour = Math.min(24, endHour);
