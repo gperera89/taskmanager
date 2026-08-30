@@ -47,6 +47,7 @@ import type {
   RoutineItemVM,
   TaskGroupVM,
   TaskItemVM,
+  TaskUrgency,
   UpcomingItemVM,
   VoiceCaptureVM,
 } from "@/components/taskbook/types";
@@ -181,6 +182,12 @@ function toTaskVM(t: RawTask, projectNameById: Map<string, string>, now: Date): 
   // convention as the due-bucket logic).
   const pausedUntil = t.pausedUntil ? new Date(t.pausedUntil) : null;
   const pauseActive = pausedUntil != null && daysUntil(pausedUntil, now) > 0;
+  // Urgency reads off the same effective due date the bucketing below uses, so a task inside an
+  // active break is judged by its resume date and doesn't sit there glowing overdue.
+  const effectiveDue = pauseActive ? pausedUntil : due;
+  const dueBucket = bucketForDue(effectiveDue, now);
+  const urgency: TaskUrgency =
+    t.isCompleted || dueBucket === "none" ? "none" : dueBucket === "overdue" ? "overdue" : dueBucket === "today" ? "today" : "none";
   return {
     id: t.id,
     title: t.title,
@@ -190,6 +197,7 @@ function toTaskVM(t: RawTask, projectNameById: Map<string, string>, now: Date): 
     dueDateValue: toDateInputValue(due),
     dueTimeValue: toTimeInputValue(due),
     dueLabel,
+    urgency,
     projectId: t.projectId,
     projectName: t.projectId ? projectNameById.get(t.projectId) ?? null : null,
     subtasksDone: t.subtasks.filter((s) => s.isCompleted).length,

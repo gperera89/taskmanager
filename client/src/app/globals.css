@@ -41,6 +41,7 @@
   --info: #557694;
   --danger: #8a4040;
   --danger-surface: #f0e4dc;
+  --warn: #96671f; /* due-today urgency; warm ochre, sits between ink and danger */
 
   /* Washes (translucent chip/button fills) */
   --overlay: rgba(42, 38, 34, 0.35);
@@ -49,6 +50,10 @@
   --accent-ring: rgba(23, 57, 155, 0.45);
   --info-wash: rgba(85, 118, 148, 0.1);
   --info-wash-soft: rgba(85, 118, 148, 0.08);
+  /* Urgency washes: the tint behind an overdue / due-today task row. Deliberately faint —
+     the coloured rail down the row's left edge is what carries the signal. */
+  --danger-wash: rgba(138, 64, 64, 0.07);
+  --warn-wash: rgba(150, 103, 31, 0.08);
   --muted-wash: rgba(138, 128, 105, 0.13);
 
   /* Toasts (inverted panel) */
@@ -94,6 +99,7 @@
     --info: #8fb3d1;
     --danger: #e09393;
     --danger-surface: #3a2a26;
+    --warn: #d9a95f;
 
     --overlay: rgba(0, 0, 0, 0.55);
     --accent-wash: rgba(157, 177, 242, 0.12);
@@ -101,6 +107,8 @@
     --accent-ring: rgba(157, 177, 242, 0.5);
     --info-wash: rgba(143, 179, 209, 0.14);
     --info-wash-soft: rgba(143, 179, 209, 0.1);
+    --danger-wash: rgba(224, 147, 147, 0.1);
+    --warn-wash: rgba(217, 169, 95, 0.1);
     --muted-wash: rgba(168, 158, 135, 0.14);
 
     --toast-bg: #ece5d4;

@@ -10,6 +10,11 @@ export type CalendarEvent = {
   source: string;
 };
 
+// How loudly a task's row should read: "overdue" and "today" get a colour-coded rail/chip so
+// they stand out from the undated pile at a glance (see TasksView's TaskRow). Anything further
+// out — and anything already completed — stays neutral.
+export type TaskUrgency = "overdue" | "today" | "none";
+
 export type TaskItemVM = {
   id: string;
   title: string;
@@ -19,6 +24,7 @@ export type TaskItemVM = {
   dueDateValue: string; // yyyy-mm-dd for the edit form's <input type="date">, "" if none
   dueTimeValue: string; // HH:MM for the edit form's <input type="time">, "" if no time set
   dueLabel: string | null; // e.g. "Fri 3 Jul" or "Fri 3 Jul · 6:00 PM" when a time is set
+  urgency: TaskUrgency; // colour-coding bucket for the row; "none" once completed or not due yet
   projectId: string | null;
   projectName: string | null;
   subtasksDone: number;

@@ -296,10 +296,26 @@ export function TaskRow({
     if (repeatChangedRef.current) actions.setTaskRepeat(task.id, repeatDraftRef.current);
   }
 
+  // Urgency colour-coding: an overdue task gets a danger-coloured rail down its left edge and a
+  // faint wash behind the row; a task due today gets the same in the warmer warn colour. Subtle
+  // on purpose — enough to pick out of a long list without turning the page into a traffic light.
+  const urgentInk = task.urgency === "overdue" ? "var(--danger)" : task.urgency === "today" ? "var(--warn)" : null;
+  const urgentWash = task.urgency === "overdue" ? "var(--danger-wash)" : "var(--warn-wash)";
+
   return (
     <div
       className="group flex items-start gap-3.5 border-b py-3.5 px-0.5"
-      style={{ borderBottomColor: dragOver ? "var(--accent-text)" : "var(--border-soft)", borderBottomWidth: dragOver ? 2 : 1 }}
+      style={{
+        borderBottomColor: dragOver ? "var(--accent-text)" : "var(--border-soft)",
+        borderBottomWidth: dragOver ? 2 : 1,
+        ...(urgentInk
+          ? {
+              borderLeft: `3px solid ${urgentInk}`,
+              paddingLeft: 9,
+              background: urgentWash,
+            }
+          : null),
+      }}
       draggable={Boolean(reorderIds)}
       onDragStart={(e) => {
         draggingTaskId = task.id;
@@ -434,9 +450,10 @@ export function TaskRow({
             onClick={() => (dueOpen ? setDueOpen(false) : openDue())}
             className={chipSelectClass}
             style={{
-              color: task.dueLabel ? "var(--info)" : "var(--ink-faint)",
-              background: task.dueLabel ? "var(--info-wash)" : "transparent",
+              color: urgentInk ?? (task.dueLabel ? "var(--info)" : "var(--ink-faint)"),
+              background: urgentInk ? urgentWash : task.dueLabel ? "var(--info-wash)" : "transparent",
               border: task.dueLabel ? "none" : "1px dashed var(--border-strong)",
+              fontWeight: urgentInk ? 500 : undefined,
             }}
           >
             {task.dueLabel ?? "Set date"}
