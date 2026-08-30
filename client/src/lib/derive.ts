@@ -7,7 +7,7 @@
 // needs resurrecting).
 
 import type { Task, Project, Habit, HabitCompletion, Routine, Category, VoiceCapture, DayPlanBlock, AiSuggestion, AiNote, Countdown } from "@prisma/client";
-import { countdownYears, formatDuration, habitDateKey, habitStatus, nextCountdownOccurrenceMs, taskOrderCompare, isRoutineTickedNow, MS_PER_DAY } from "@/lib/shared";
+import { countdownYears, formatDuration, habitDateKey, habitStatus, nextCountdownOccurrenceMs, taskOrderCompare, isRoutineTickedNow, routineDueAtMs, zonedFaceMs, MS_PER_DAY, ROUTINE_SOON_WINDOW_MS } from "@/lib/shared";
 export { combineDueDateTime, isRoutineTickedNow } from "@/lib/shared";
 import {
   bucketForDue,
@@ -375,6 +375,7 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
   // taskbookDates.ts is client-safe, unlike that server-only file).
   const zonedNowDate = zonedNow(nowMs, raw.timeZone);
   const zonedToday = Date.UTC(zonedNowDate.getUTCFullYear(), zonedNowDate.getUTCMonth(), zonedNowDate.getUTCDate());
+  const nowFaceMs = zonedFaceMs(nowMs, raw.timeZone);
   const routineVMs: RoutineItemVM[] = raw.routines.map((r) => {
     const rule: TaskRepeatRule = {
       frequency: r.frequency,
@@ -387,6 +388,11 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
     };
     const nextDate = nextRoutineOccurrence(rule, zonedNowDate, r.pausedUntil ? new Date(r.pausedUntil) : null);
     const diffDays = Math.round((nextDate.getTime() - zonedToday) / MS_PER_DAY);
+    // "Later" folds away everything that isn't in front of the user: already ticked off, or not
+    // due for more than the lookahead window. An unticked routine whose time has passed has a
+    // due-at in the past, so it stays up top until it's dealt with.
+    const isTicked = isRoutineTickedNow(r, nowMs, raw.timeZone);
+    const dueAtMs = routineDueAtMs(r, nowMs, raw.timeZone);
     return {
       id: r.id,
       title: r.title,
@@ -401,15 +407,16 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
       durationMinutes: r.durationMinutes,
       durationLabel: r.durationMinutes != null ? formatDuration(r.durationMinutes) : null,
       isActive: r.isActive,
-      isTicked: isRoutineTickedNow(r, nowMs, raw.timeZone),
+      isTicked,
+      isLater: isTicked || dueAtMs - nowFaceMs > ROUTINE_SOON_WINDOW_MS,
       scheduleLabel: scheduleLabel(r),
       pausedUntil: toDateInputValue(r.pausedUntil),
       nextNotificationLabel: diffDays === 1 ? "tomorrow" : formatShortDate(calendarDateFromDue(nextDate)),
-      nextOccurrenceMs: nextDate.getTime(),
+      dueAtMs,
       subroutines: r.subroutines.map((s) => ({ id: s.id, title: s.title })),
     };
   });
-  const routineList = [...routineVMs].sort((a, b) => a.nextOccurrenceMs - b.nextOccurrenceMs);
+  const routineList = [...routineVMs].sort((a, b) => a.dueAtMs - b.dueAtMs);
   const routineTotalCount = routineVMs.length;
 
   // Habits — completions grouped per habit into tz-local YYYY-MM-DD day-keys, then status,

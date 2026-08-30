@@ -5,7 +5,7 @@ import { useModalActions } from "./ModalContext";
 import { useTaskbook } from "./store";
 import { DateTimePickerPanel } from "./DateTimePicker";
 import SearchBar from "./SearchBar";
-import { CheckSquare, Chip, RowDeleteButton, StrikeSweep } from "./shared";
+import { CheckSquare, Chip, labelClass, RowDeleteButton, StrikeSweep, useCompletionHold } from "./shared";
 import type { RoutineItemVM } from "./types";
 
 export default function RoutinesView({
@@ -21,6 +21,16 @@ export default function RoutinesView({
 }) {
   const q = query.trim().toLowerCase();
   const filtered = q ? routines.filter((r) => r.title.toLowerCase().includes(q)) : routines;
+  // Up top: only what's actually in front of the user — unticked and due inside the lookahead
+  // window (see ROUTINE_SOON_WINDOW_MS). Everything else, including anything just ticked off,
+  // folds into "Later". A search looks through both halves, so it force-opens the section.
+  // A just-ticked routine is held in place for the strike-through animation before it drops
+  // into "Later" (same trick as TasksView's completed rows).
+  const { isHeld, hold } = useCompletionHold();
+  const soon = filtered.filter((r) => !r.isLater || isHeld(r.id));
+  const later = filtered.filter((r) => r.isLater && !isHeld(r.id));
+  const [showLater, setShowLater] = useState(false);
+  const laterOpen = showLater || q.length > 0;
 
   return (
     <div>
@@ -38,15 +48,41 @@ export default function RoutinesView({
       )}
 
       <div className="max-w-[680px]">
-        {filtered.map((r) => (
-          <RoutineRow key={r.id} routine={r} />
+        {soon.map((r) => (
+          <RoutineRow key={r.id} routine={r} onCompleting={hold} />
         ))}
+
+        {!q && soon.length === 0 && later.length > 0 && (
+          <p className="py-8 text-[15px] italic text-(--ink-soft)">Nothing due in the next while.</p>
+        )}
+
+        {later.length > 0 && (
+          <div>
+            <button
+              type="button"
+              onClick={() => setShowLater((v) => !v)}
+              className={`${labelClass} flex cursor-pointer items-center gap-1.5`}
+              style={{ margin: "20px 0 4px" }}
+            >
+              <svg
+                width="9"
+                height="9"
+                viewBox="0 -960 960 960"
+                style={{ transform: laterOpen ? "rotate(90deg)" : "none", transition: "transform .15s" }}
+              >
+                <path d="M504-480 320-664l56-56 240 240-240 240-56-56 184-184Z" style={{ fill: "var(--ink-soft)" }} />
+              </svg>
+              Later ({later.length})
+            </button>
+            {laterOpen && later.map((r) => <RoutineRow key={r.id} routine={r} />)}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-function RoutineRow({ routine }: { routine: RoutineItemVM }) {
+function RoutineRow({ routine, onCompleting }: { routine: RoutineItemVM; onCompleting?: (id: string) => void }) {
   const { openEdit } = useModalActions();
   const { actions } = useTaskbook();
   const [addingStep, setAddingStep] = useState(false);
@@ -54,8 +90,8 @@ function RoutineRow({ routine }: { routine: RoutineItemVM }) {
   const [completing, setCompleting] = useState(false);
   // Purely local scratch state so the user can tick off steps through the day — steps always
   // complete together in the database (see completeRoutineCluster), so there's nothing per-step
-  // to persist. Cleared whenever the routine itself un-ticks (manual toggle or the hourly
-  // auto-reset), ready for the next occurrence.
+  // to persist. Cleared whenever the routine itself un-ticks (manual toggle, or its next
+  // occurrence coming round), ready for the next occurrence.
   const [stepChecks, setStepChecks] = useState<Record<string, boolean>>({});
 
   // Close the pause calendar on any pointerdown outside it (buttons don't reliably take focus on
@@ -80,6 +116,7 @@ function RoutineRow({ routine }: { routine: RoutineItemVM }) {
       return;
     }
     setCompleting(true);
+    onCompleting?.(routine.id);
     actions.tickRoutine(routine.id);
     window.setTimeout(() => setCompleting(false), 460);
   }

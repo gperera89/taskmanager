@@ -4,7 +4,7 @@
 
 import type { Habit, Routine } from "@prisma/client";
 import { zonedNow } from "@/lib/taskbookDates";
-import { nextRoutineOccurrence, type TaskRepeatRule } from "@/lib/taskRecurrence";
+import { isRoutineDueToday, nextRoutineOccurrence, type TaskRepeatRule } from "@/lib/taskRecurrence";
 
 export const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -69,9 +69,8 @@ function minutesOfDay(hhmm: string): number {
   return m ? Number(m[1]) * 60 + Number(m[2]) : 0;
 }
 
-export function routineTickResetMs(routine: RoutineTickShape, timeZone: string): number | null {
-  if (!routine.lastCompletedAt) return null;
-  const rule: TaskRepeatRule = {
+function routineRule(routine: RoutineTickShape): TaskRepeatRule {
+  return {
     frequency: routine.frequency,
     interval: routine.interval,
     daysOfWeek: routine.daysOfWeek,
@@ -80,21 +79,55 @@ export function routineTickResetMs(routine: RoutineTickShape, timeZone: string):
     monthlyOrdinal: routine.monthlyOrdinal,
     monthlyWeekday: routine.monthlyWeekday,
   };
+}
+
+// An instant as a face-value ms in the configured timezone: the wall clock there, flattened to
+// the UTC-midnight-plus-minutes encoding the rest of the scheduling code compares in.
+export function zonedFaceMs(atMs: number, timeZone: string): number {
+  const local = zonedNow(atMs, timeZone);
+  return (
+    Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate()) +
+    (local.getUTCHours() * 60 + local.getUTCMinutes()) * 60_000
+  );
+}
+
+export function routineTickResetMs(routine: RoutineTickShape, timeZone: string): number | null {
+  if (!routine.lastCompletedAt) return null;
   const tickedAt = zonedNow(new Date(routine.lastCompletedAt).getTime(), timeZone);
   const pausedUntil = routine.pausedUntil ? new Date(routine.pausedUntil) : null;
-  const nextDate = nextRoutineOccurrence(rule, tickedAt, pausedUntil);
+  const nextDate = nextRoutineOccurrence(routineRule(routine), tickedAt, pausedUntil);
   return nextDate.getTime() + minutesOfDay(routine.reminderTime) * 60_000;
 }
 
 export function isRoutineTickedNow(routine: RoutineTickShape, nowMs: number, timeZone: string): boolean {
   const resetMs = routineTickResetMs(routine, timeZone);
   if (resetMs === null) return false;
-  const local = zonedNow(nowMs, timeZone);
-  const nowFaceMs =
-    Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate()) +
-    (local.getUTCHours() * 60 + local.getUTCMinutes()) * 60_000;
-  return nowFaceMs < resetMs;
+  return zonedFaceMs(nowMs, timeZone) < resetMs;
 }
+
+// The occurrence a routine is currently waiting on, as a face-value ms (comparable to
+// zonedFaceMs(now)). A ticked routine is waiting on the occurrence that will un-tick it. An
+// unticked one is waiting on TODAY's occurrence whenever today is a scheduled day — even if its
+// reminder time has already gone by, since an unticked routine stays pending rather than rolling
+// forward — and otherwise on the next scheduled date.
+export function routineDueAtMs(routine: RoutineTickShape, nowMs: number, timeZone: string): number {
+  const ticked = routineTickResetMs(routine, timeZone);
+  if (ticked !== null && zonedFaceMs(nowMs, timeZone) < ticked) return ticked;
+
+  const local = zonedNow(nowMs, timeZone);
+  const pausedUntil = routine.pausedUntil ? new Date(routine.pausedUntil) : null;
+  const today = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate());
+  const pausedOut = pausedUntil != null && today < utcCalendarDay(pausedUntil);
+  const rule = routineRule(routine);
+  const date =
+    !pausedOut && isRoutineDueToday(rule, local) ? today : nextRoutineOccurrence(rule, local, pausedUntil).getTime();
+  return date + minutesOfDay(routine.reminderTime) * 60_000;
+}
+
+// How far ahead the Routines list counts as "coming up". Anything due further out than this —
+// and anything already ticked — folds away under the "Later" toggle, so the list shows what's
+// actually in front of the user rather than all thirteen routines at once.
+export const ROUTINE_SOON_WINDOW_MS = 16 * 60 * 60 * 1000;
 
 // --- Habit scheduling / completion math -------------------------------------------------------
 //
