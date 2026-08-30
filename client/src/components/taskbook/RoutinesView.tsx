@@ -73,8 +73,8 @@ function RoutineRow({ routine }: { routine: RoutineItemVM }) {
 
   function handleToggle() {
     if (routine.isTicked) {
-      // Un-tick (e.g. the cron auto-ticked it on notify but it wasn't actually done) — the
-      // old behavior re-ticked, which made a ticked routine impossible to take back.
+      // Un-tick (ticked by mistake, or from the notification's "Done" button) — the old
+      // behavior re-ticked, which made a ticked routine impossible to take back.
       actions.untickRoutine(routine.id);
       setStepChecks({});
       return;
@@ -118,9 +118,8 @@ function RoutineRow({ routine }: { routine: RoutineItemVM }) {
               </div>
             )}
           </div>
-          {routine.isTicked && !routine.scheduleLabel && (
-            <div className="mt-0.5 text-xs italic text-(--ink-faint)">auto-resets within the hour</div>
-          )}
+          {/* A tick now holds until the routine is next due (the "Next:" line below says when),
+              so the old "auto-resets within the hour" note would be a lie. */}
           <div className="relative mt-1 flex items-center gap-2.5" onClick={(e) => e.stopPropagation()}>
             <button type="button" onClick={() => setEditingPause((v) => !v)} className="cursor-pointer text-xs text-(--ink-muted)">
               Next: {routine.nextNotificationLabel}

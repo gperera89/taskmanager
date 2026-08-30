@@ -506,7 +506,7 @@ export async function tickRoutine(id: string) {
   await completeRoutineCluster(id);
 }
 
-// Un-ticks a cluster (e.g. one the notification cron auto-ticked but wasn't actually done).
+// Un-ticks a cluster (ticked by mistake, or from the notification's "Done" button).
 export async function untickRoutine(id: string) {
   await requireSession();
   await untickRoutineCluster(id);

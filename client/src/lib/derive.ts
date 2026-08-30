@@ -7,8 +7,8 @@
 // needs resurrecting).
 
 import type { Task, Project, Habit, HabitCompletion, Routine, Category, VoiceCapture, DayPlanBlock, AiSuggestion, AiNote, Countdown } from "@prisma/client";
-import { countdownYears, formatDuration, habitDateKey, habitStatus, nextCountdownOccurrenceMs, taskOrderCompare, MS_PER_DAY, ROUTINE_TICK_EXPIRY_MS } from "@/lib/shared";
-export { combineDueDateTime, ROUTINE_TICK_EXPIRY_MS } from "@/lib/shared";
+import { countdownYears, formatDuration, habitDateKey, habitStatus, nextCountdownOccurrenceMs, taskOrderCompare, isRoutineTickedNow, MS_PER_DAY } from "@/lib/shared";
+export { combineDueDateTime, isRoutineTickedNow } from "@/lib/shared";
 import {
   bucketForDue,
   buildMonthCells,
@@ -112,11 +112,6 @@ function categoryScopeMap(categories: Category[]): Map<string, Mode | "both"> {
 function eventMatchesMode(source: string, mode: Mode): boolean {
   if (mode === "all") return true;
   return mode === "work" ? source === "Outlook" : source === "Gmail";
-}
-
-export function isRoutineTickedNow(routine: Pick<Routine, "lastCompletedAt">, nowMs: number): boolean {
-  if (!routine.lastCompletedAt) return false;
-  return nowMs - new Date(routine.lastCompletedAt).getTime() < ROUTINE_TICK_EXPIRY_MS;
 }
 
 // --- Formatting helpers (ported from page.tsx) ---
@@ -398,7 +393,7 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
       durationMinutes: r.durationMinutes,
       durationLabel: r.durationMinutes != null ? formatDuration(r.durationMinutes) : null,
       isActive: r.isActive,
-      isTicked: isRoutineTickedNow(r, nowMs),
+      isTicked: isRoutineTickedNow(r, nowMs, raw.timeZone),
       scheduleLabel: scheduleLabel(r),
       pausedUntil: toDateInputValue(r.pausedUntil),
       nextNotificationLabel: diffDays === 1 ? "tomorrow" : formatShortDate(calendarDateFromDue(nextDate)),
@@ -846,7 +841,7 @@ export function deriveMyDay(
       const r = routineById.get(b.entityId);
       if (!r) continue;
       title = r.title;
-      isCompleted = isToday && isRoutineTickedNow(r, nowMs);
+      isCompleted = isToday && isRoutineTickedNow(r, nowMs, raw.timeZone);
       entityDuration = r.durationMinutes;
       kind = "routine";
     } else {
@@ -1008,7 +1003,7 @@ export function deriveMyDay(
         startMinutes,
         durationMinutes: r.durationMinutes ?? DEFAULT_BLOCK_MINUTES,
         hasExplicitDuration: r.durationMinutes != null,
-        isCompleted: isToday && isRoutineTickedNow(r, nowMs),
+        isCompleted: isToday && isRoutineTickedNow(r, nowMs, raw.timeZone),
         pinned: true,
         source: null,
         category: null,

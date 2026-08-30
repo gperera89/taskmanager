@@ -2,11 +2,11 @@
 // components/taskbook/store.tsx (client). These used to be duplicated per-file with a
 // "keep in sync" comment; this is now the single copy.
 
-import type { Habit } from "@prisma/client";
+import type { Habit, Routine } from "@prisma/client";
 import { zonedNow } from "@/lib/taskbookDates";
+import { nextRoutineOccurrence, type TaskRepeatRule } from "@/lib/taskRecurrence";
 
 export const MS_PER_DAY = 24 * 60 * 60 * 1000;
-export const ROUTINE_TICK_EXPIRY_MS = 60 * 60 * 1000;
 
 // Due dates are stored as UTC midnight of the chosen calendar date, with a clock time layered
 // on top at face value — not a real timezone conversion, just the literal HH:MM the user
@@ -35,6 +35,66 @@ export const NO_REPEAT = {
   repeatMonthlyWeekday: null,
   repeatUntil: null,
 };
+
+// --- Routine tick lifetime ---------------------------------------------------------------------
+//
+// A ticked routine stays ticked until its NEXT scheduled occurrence comes round — nothing else
+// clears it. (It used to expire on a one-hour timer, which quietly un-ticked a routine the user
+// had genuinely finished, and the notification cron used to tick routines off by itself. Both
+// are gone: a routine now lingers uncompleted until the user ticks it, and a tick lingers until
+// the routine is due again.)
+//
+// The reset instant is the routine's reminderTime on the first scheduled date strictly after the
+// tick's calendar date, so ticking any time on Monday — early, late, before or after the reminder
+// — keeps a daily morning routine ticked all of Monday and un-ticks it at Tuesday's reminder.
+// All comparisons run on the configured timezone's wall clock (zonedNow's face-value UTC Dates),
+// matching how the cron and the rest of the scheduling code read dates.
+
+export type RoutineTickShape = Pick<
+  Routine,
+  | "lastCompletedAt"
+  | "reminderTime"
+  | "frequency"
+  | "interval"
+  | "daysOfWeek"
+  | "monthlyMode"
+  | "dayOfMonth"
+  | "monthlyOrdinal"
+  | "monthlyWeekday"
+  | "pausedUntil"
+> & { lastCompletedAt: Date | string | null; pausedUntil: Date | string | null };
+
+function minutesOfDay(hhmm: string): number {
+  const m = /^(\d{2}):(\d{2})$/.exec(hhmm);
+  return m ? Number(m[1]) * 60 + Number(m[2]) : 0;
+}
+
+export function routineTickResetMs(routine: RoutineTickShape, timeZone: string): number | null {
+  if (!routine.lastCompletedAt) return null;
+  const rule: TaskRepeatRule = {
+    frequency: routine.frequency,
+    interval: routine.interval,
+    daysOfWeek: routine.daysOfWeek,
+    monthlyMode: routine.monthlyMode,
+    dayOfMonth: routine.dayOfMonth,
+    monthlyOrdinal: routine.monthlyOrdinal,
+    monthlyWeekday: routine.monthlyWeekday,
+  };
+  const tickedAt = zonedNow(new Date(routine.lastCompletedAt).getTime(), timeZone);
+  const pausedUntil = routine.pausedUntil ? new Date(routine.pausedUntil) : null;
+  const nextDate = nextRoutineOccurrence(rule, tickedAt, pausedUntil);
+  return nextDate.getTime() + minutesOfDay(routine.reminderTime) * 60_000;
+}
+
+export function isRoutineTickedNow(routine: RoutineTickShape, nowMs: number, timeZone: string): boolean {
+  const resetMs = routineTickResetMs(routine, timeZone);
+  if (resetMs === null) return false;
+  const local = zonedNow(nowMs, timeZone);
+  const nowFaceMs =
+    Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate()) +
+    (local.getUTCHours() * 60 + local.getUTCMinutes()) * 60_000;
+  return nowFaceMs < resetMs;
+}
 
 // --- Habit scheduling / completion math -------------------------------------------------------
 //

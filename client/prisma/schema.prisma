@@ -335,7 +335,8 @@ model Routine {
   // How long this routine is expected to take, in minutes (null = unset).
   durationMinutes Int?
   isActive     Boolean          @default(true)
-  // When it was last ticked; ticking auto-expires after 1 hour and resets on the next scheduled occurrence.
+  // When it was last ticked. The tick holds until the next scheduled occurrence's reminder time
+  // comes round (lib/shared.ts's isRoutineTickedNow) — nothing else expires it.
   lastCompletedAt DateTime?
   // Set once a push notification has gone out for today's scheduled occurrence, so the cron
   // doesn't resend until the calendar date rolls over. Only meaningful on top-level routines

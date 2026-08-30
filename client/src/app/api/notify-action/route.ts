@@ -1,6 +1,6 @@
-import { snoozeTask, untickRoutineCluster } from "@/lib/api";
+import { completeRoutineCluster, snoozeTask, untickRoutineCluster } from "@/lib/api";
 
-// Target of the action buttons on ntfy notifications ("Not done" on an auto-ticked routine,
+// Target of the action buttons on ntfy notifications ("Done" on a due routine,
 // "Snooze 1 day" on a due task). Authenticated with the cron secret — the button's request is
 // fired by the ntfy app, which has no session cookie. Exempted from session auth in proxy.ts.
 export async function POST(request: Request) {
@@ -16,6 +16,10 @@ export async function POST(request: Request) {
   if (!id) return Response.json({ error: "Missing id" }, { status: 400 });
 
   try {
+    if (kind === "complete-routine") {
+      await completeRoutineCluster(id);
+      return Response.json({ ok: true });
+    }
     if (kind === "untick-routine") {
       await untickRoutineCluster(id);
       return Response.json({ ok: true });

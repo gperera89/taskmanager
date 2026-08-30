@@ -12,9 +12,8 @@ import {
 } from "@/lib/shared";
 
 export type { Task, Project, Habit, HabitCompletion, Routine, Category, CategoryScope, CompletionLog, HabitScheduleType, RoutineFrequency, RoutineMonthlyMode, CapturedKind, CaptureSource } from "@prisma/client";
-export { ROUTINE_TICK_EXPIRY_MS } from "@/lib/shared";
-import { ROUTINE_TICK_EXPIRY_MS } from "@/lib/shared";
-import type { CapturedKind, CaptureSource, CategoryScope, Habit, HabitScheduleType, Routine, RoutineFrequency, RoutineMonthlyMode } from "@prisma/client";
+export { isRoutineTickedNow } from "@/lib/shared";
+import type { CapturedKind, CaptureSource, CategoryScope, Habit, HabitScheduleType, RoutineFrequency, RoutineMonthlyMode } from "@prisma/client";
 
 const HABIT_SCHEDULE_TYPES: HabitScheduleType[] = ["WEEKLY_DAYS", "WEEKLY_COUNT", "MONTHLY_COUNT"];
 const ROUTINE_FREQUENCIES: RoutineFrequency[] = ["DAILY", "WEEKLY", "MONTHLY"];
@@ -617,8 +616,8 @@ export function updateRoutine(
 
 // Ticks a whole cluster "done" now — the routine passed in (parent or, defensively, a child)
 // plus every sibling under the same parent, so "Wake Up Routine" and its sub-routines
-// complete together in one action. The tick is transient: isRoutineTickedNow() below reports
-// it as unticked again after ROUTINE_TICK_EXPIRY_MS, ready for its next scheduled occurrence.
+// complete together in one action. The tick holds until the cluster's next scheduled
+// occurrence arrives (shared.ts's isRoutineTickedNow) — nothing expires it in the meantime.
 // Also stamps notifiedAt so the cron won't re-notify for the same day's occurrence.
 export function completeRoutineCluster(id: string, auto = false) {
   return notFoundAsError("Routine not found", async () => {
@@ -630,14 +629,15 @@ export function completeRoutineCluster(id: string, auto = false) {
       where: { OR: [{ id: rootId }, { parentId: rootId }] },
       data: { lastCompletedAt: now, notifiedAt: now },
     });
-    // One history row per cluster tick; auto=true means the notification cron ticked it.
+    // One history row per cluster tick. `auto` is kept for the rows the notification cron
+    // wrote back when it ticked routines off by itself; nothing sets it any more.
     await logCompletion("ROUTINE", rootId, root.title, auto);
     return routine;
   });
 }
 
-// Reinstates a routine cluster the cron auto-ticked but the user didn't actually do ("Not
-// done" action button on the notification). Keeps notifiedAt so it won't re-notify today.
+// Clears a routine cluster's tick ("Not done" action button on the notification, or an undo
+// in the UI). Keeps notifiedAt so it won't re-notify today.
 export function untickRoutineCluster(id: string) {
   return notFoundAsError("Routine not found", async () => {
     const routine = await prisma.routine.findUniqueOrThrow({ where: { id } });
@@ -649,11 +649,6 @@ export function untickRoutineCluster(id: string) {
     await retractLatestCompletion("ROUTINE", rootId);
     return routine;
   });
-}
-
-export function isRoutineTickedNow(routine: Pick<Routine, "lastCompletedAt">): boolean {
-  if (!routine.lastCompletedAt) return false;
-  return Date.now() - routine.lastCompletedAt.getTime() < ROUTINE_TICK_EXPIRY_MS;
 }
 
 // Deleting a parent cascades to its sub-routines (see schema's onDelete: Cascade); deleting a
@@ -1264,6 +1259,13 @@ export function markTaskNotified(id: string, at: Date) {
 
 export function markProjectNotified(id: string, at: Date) {
   return prisma.project.update({ where: { id }, data: { notifiedAt: at } });
+}
+
+// Stamps a routine cluster's reminder as sent for today. Only the top-level row carries
+// notifiedAt (sub-routines fire inside their parent's single grouped notification), so this is
+// one write — the cron path must stay at ~one operation per due routine.
+export function markRoutineNotified(id: string, at: Date) {
+  return prisma.routine.update({ where: { id }, data: { notifiedAt: at } });
 }
 
 // --- Page-load snapshot ---------------------------------------------------------------------

@@ -1,10 +1,9 @@
 import "server-only";
 import {
-  completeRoutineCluster,
   getCronSnapshot,
-  isRoutineTickedNow,
   markCountdownNotified,
   markProjectNotified,
+  markRoutineNotified,
   markTaskNotified,
   sweepDayPlanBlocks,
   sweepDismissedCalendarEvents,
@@ -12,15 +11,15 @@ import {
   type CronRoutine,
   type CronCountdown,
 } from "@/lib/api";
-import { countdownYears, nextCountdownOccurrenceMs, MS_PER_DAY } from "@/lib/shared";
+import { countdownYears, isRoutineTickedNow, nextCountdownOccurrenceMs, MS_PER_DAY } from "@/lib/shared";
 import { isRoutineDueToday } from "@/lib/taskRecurrence";
 import { calendarDateFromDue, dueInstant, formatShortDate, pad2, zonedNow } from "@/lib/taskbookDates";
 
 // --- Delivery layer -------------------------------------------------------------------------
 //
 // Single channel: ntfy (https://ntfy.sh) — a real push app on iOS/Android/desktop with
-// reliable APNs/FCM delivery and a persistent per-topic history, so a notification survives
-// as a record even after the app auto-ticks the routine it announced. Configure with:
+// reliable APNs/FCM delivery and a persistent per-topic history, so a reminder survives as a
+// record even after it scrolls off the lock screen. Configure with:
 //   NTFY_TOPIC   (required to enable; treat as a secret — anyone who knows it can read/send)
 //   NTFY_SERVER  (optional, defaults to https://ntfy.sh — set for a self-hosted instance)
 //   NTFY_TOKEN   (optional, for reserved topics)
@@ -101,17 +100,17 @@ const MAX_LEAD_MS = 24 * 60 * 60 * 1000;
 const MAX_TZ_OFFSET_MS = 14 * 60 * 60 * 1000;
 
 // Finds every routine cluster (a top-level routine plus its sub-routines) whose schedule and
-// reminder time have arrived today and hasn't fired yet, sends ONE notification per cluster
-// naming every sub-routine, and AUTO-TICKS the cluster: the routine completes itself the
-// moment it's announced, while the notification persists in ntfy's history as the record.
-// The notification carries a "Not done" action button that un-ticks it for routines the user
-// didn't actually do (see /api/notify-action).
+// reminder time have arrived today and hasn't fired yet, and sends ONE notification per cluster
+// naming every sub-routine. The cluster is NOT ticked off here — announcing a routine is not
+// doing it. It stays uncompleted until the user ticks it (in the app, or via the "Done" action
+// button on the notification — see /api/notify-action), or until its next scheduled occurrence
+// comes round and resets it (shared.ts's isRoutineTickedNow).
 async function notifyDueRoutines(routines: CronRoutine[], now: Date, timeZone: string): Promise<{ notified: number }> {
   const local = zonedNow(now.getTime(), timeZone);
   const nowHHMM = `${pad2(local.getUTCHours())}:${pad2(local.getUTCMinutes())}`;
 
   const due = routines.filter((r) => {
-    if (isRoutineTickedNow(r)) return false;
+    if (isRoutineTickedNow(r, now.getTime(), timeZone)) return false;
     if (r.notifiedAt && zonedDateKey(r.notifiedAt, timeZone) === zonedDateKey(now, timeZone)) return false;
     if (nowHHMM < r.reminderTime) return false;
     // Skip every occurrence strictly before a "paused until" date (e.g. a holiday break);
@@ -126,17 +125,17 @@ async function notifyDueRoutines(routines: CronRoutine[], now: Date, timeZone: s
 
   await Promise.all(
     due.map(async (r) => {
-      const body = r.subroutineTitles.length ? r.subroutineTitles.join(" · ") : "Ticked off automatically";
+      const body = r.subroutineTitles.length ? r.subroutineTitles.join(" · ") : "Time to do it";
       await deliver({
         title: r.title,
         body,
         url: "/",
         tag: `routine-${r.id}`,
-        actions: [{ label: "Not done", path: `/api/notify-action?kind=untick-routine&id=${r.id}` }],
+        actions: [{ label: "Done", path: `/api/notify-action?kind=complete-routine&id=${r.id}` }],
       });
-      // Auto-tick: stamps lastCompletedAt + notifiedAt on the whole cluster and writes the
-      // CompletionLog row flagged auto=true.
-      await completeRoutineCluster(r.id, true);
+      // Mark the reminder as sent (one write) so it doesn't repeat on the next cron tick. The
+      // routine itself stays uncompleted until it's actually ticked.
+      await markRoutineNotified(r.id, now);
     })
   );
 
