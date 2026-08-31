@@ -194,14 +194,14 @@ function RoutineRow({ routine, onCompleting }: { routine: RoutineItemVM; onCompl
       </div>
 
       {/* Steps are ticked off one-handed on a phone, so the whole row is the target: a 20px box
-          with 10px of invisible slop around it, and the title itself toggles too. */}
+          carrying CheckSquare's usual invisible slop, and the title itself toggles too. */}
       {routine.subroutines.length > 0 && (
         <ul className="ml-8.5 mt-2 flex flex-col">
           {routine.subroutines.map((s) => {
             const checked = isStepChecked(s.id);
             return (
               <li key={s.id} className="group/step flex items-center gap-2.5 py-1.5">
-                <CheckSquare action={() => toggleStep(s.id)} checked={checked} size={20} hitSlop={10} />
+                <CheckSquare action={() => toggleStep(s.id)} checked={checked} size={20} />
                 <span
                   onClick={() => toggleStep(s.id)}
                   className="flex-1 cursor-pointer text-[15px] leading-5"

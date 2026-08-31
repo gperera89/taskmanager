@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useModalActions } from "./ModalContext";
 import { useTaskbook } from "./store";
 import SearchBar from "./SearchBar";
-import { RowDeleteButton } from "./shared";
+import { RowDeleteButton, slopFor } from "./shared";
 import type { HabitCardVM } from "./types";
 
 // From James Clear's Atomic Habits — rotated in the space the "up next" card used to occupy
@@ -139,6 +139,10 @@ function HabitFlameButton({ habit }: { habit: HabitCardVM }) {
       ? "animate-[flame-flicker_1.8s_ease-in-out_infinite]"
       : "";
 
+  // The flame gets the same touch target as every checkbox in the app even though it draws an
+  // icon rather than a box: padding grows the tappable area, the negative margin keeps it put.
+  const slop = slopFor(24);
+
   return (
     <button
       type="button"
@@ -146,7 +150,8 @@ function HabitFlameButton({ habit }: { habit: HabitCardVM }) {
       disabled={habit.isDoneToday}
       title={habit.isDoneToday ? "Done today" : "Mark done today"}
       aria-label={habit.isDoneToday ? "Habit completed today" : "Mark habit done today"}
-      className={`flex flex-none items-center justify-center rounded-full p-1 transition-transform ${
+      style={{ padding: slop, margin: -slop }}
+      className={`flex flex-none items-center justify-center rounded-full transition-transform ${
         habit.isDoneToday ? "cursor-default" : "cursor-pointer hover:scale-110"
       }`}
     >

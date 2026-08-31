@@ -301,6 +301,9 @@ export function TaskRow({
   // on purpose — enough to pick out of a long list without turning the page into a traffic light.
   const urgentInk = task.urgency === "overdue" ? "var(--danger)" : task.urgency === "today" ? "var(--warn)" : null;
   const urgentWash = task.urgency === "overdue" ? "var(--danger-wash)" : "var(--warn-wash)";
+  // The wash bleeds off the rail and is gone by two-thirds across, rather than ending on a hard
+  // vertical edge at the column's width — the tint reads as spill from the rail, not a block.
+  const urgentFade = `linear-gradient(90deg, ${urgentWash} 0%, transparent 66%)`;
 
   return (
     <div
@@ -312,7 +315,7 @@ export function TaskRow({
           ? {
               borderLeft: `3px solid ${urgentInk}`,
               paddingLeft: 9,
-              background: urgentWash,
+              background: urgentFade,
             }
           : null),
       }}
@@ -741,12 +744,13 @@ export function TaskRow({
         </div>
 
         {subtasksOpen && (
-          <ul className="mt-1.5 flex flex-col gap-1.5 pl-1">
+          <ul className="mt-1.5 flex flex-col pl-1">
             {task.subtasks.map((s) => (
-              <li key={s.id} className="group/sub flex items-center gap-2">
-                <CheckSquare action={() => actions.toggleTask(s.id, s.isCompleted)} checked={s.isCompleted} size={16} />
+              <li key={s.id} className="group/sub flex items-center gap-2.5 py-1.5">
+                <CheckSquare action={() => actions.toggleTask(s.id, s.isCompleted)} checked={s.isCompleted} size={20} />
                 <span
-                  className="flex-1 text-[13px]"
+                  onClick={() => actions.toggleTask(s.id, s.isCompleted)}
+                  className="flex-1 cursor-pointer text-[15px] leading-5"
                   style={{ color: s.isCompleted ? "var(--ink-strike)" : "var(--ink-muted)", textDecoration: s.isCompleted ? "line-through" : "none" }}
                 >
                   {s.title}

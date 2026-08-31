@@ -234,12 +234,22 @@ export function Chip({ children, variant = "default" }: { children: React.ReactN
   );
 }
 
+/** Every tappable control in the app aims for this square, whatever it draws inside it — a 16px
+    checkbox and a 24px flame should be equally easy to hit with a thumb. (Apple asks for 44; 40
+    is what fits these row heights without the slop of one row reaching into the next.) */
+export const TOUCH_TARGET = 40;
+
+/** The invisible padding that grows a `size` box out to TOUCH_TARGET. */
+export function slopFor(size: number): number {
+  return Math.max(0, (TOUCH_TARGET - size) / 2);
+}
+
 export function CheckSquare({
   action,
   checked,
   size = 22,
   completing = false,
-  hitSlop = 0,
+  hitSlop = slopFor(size),
 }: {
   action: () => void;
   checked: boolean;
@@ -248,7 +258,8 @@ export function CheckSquare({
   completing?: boolean;
   /** Invisible padding around the box, widening the touch target without moving anything: the
       matching negative margin cancels it out, so the drawn square keeps its place in the row.
-      Small boxes need it — a 16px square is well under the ~44px a fingertip actually lands on. */
+      Defaults to whatever brings this box up to TOUCH_TARGET, so every checkbox in the app is
+      the same thing to hit even where they're drawn at different sizes. */
   hitSlop?: number;
 }) {
   const showTick = checked || completing;

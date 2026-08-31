@@ -19,6 +19,14 @@ const pinyon = Pinyon_Script({
 export const metadata: Metadata = {
   title: "Cura - Gayan Perera",
   description: "Tasks, projects, routines and habits in one place.",
+  // Home-screen install behaviour on iOS. `title` is what sits under the icon — without it iOS
+  // uses the full <title>, which is too long and gets ellipsised. `statusBarStyle` lets the
+  // paper background run up behind the clock instead of leaving a white band.
+  appleWebApp: {
+    capable: true,
+    title: "Cura",
+    statusBarStyle: "default",
+  },
 };
 
 // Lock the viewport at 100% so mobile browsers don't auto-zoom when a text field is focused
