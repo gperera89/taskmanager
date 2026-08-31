@@ -430,9 +430,13 @@ export function useCompletionHold() {
   return { isHeld: (id: string) => held.has(id), hold };
 }
 
-/** Reveal-on-hover is a pointer-only affordance: on a touch device there is no hover, so the
-    button sat at `opacity-0` while still being tappable — an invisible delete target next to the
-    row. On `(hover: none)` inputs it's always visible instead, like the "Add description" hint. */
+/** Reveal-on-hover is a pointer-only affordance: on a touch device there is no hover, so a
+    control left at `opacity-0` is invisible — and, worse, still tappable, which next to a delete
+    means an invisible delete target beside the row. Every reveal-on-hover control in the app
+    pairs its `group-hover` with this, so on `(hover: none)` inputs it simply stays visible, like
+    the "Add description" hint does. Use the `/name` variants inline where the group is named. */
+export const REVEAL_ON_HOVER = "opacity-0 transition-opacity group-hover:opacity-100 [@media(hover:none)]:opacity-100";
+
 export function RowDeleteButton({ action }: { action: () => void }) {
   return (
     <button
@@ -440,7 +444,7 @@ export function RowDeleteButton({ action }: { action: () => void }) {
       onClick={action}
       title="Delete"
       aria-label="Delete"
-      className="cursor-pointer text-[13px] text-(--ink-faint) opacity-0 transition-opacity hover:text-(--danger) group-hover:opacity-100 [@media(hover:none)]:opacity-100"
+      className={`cursor-pointer text-[13px] text-(--ink-faint) hover:text-(--danger) ${REVEAL_ON_HOVER}`}
     >
       Delete
     </button>

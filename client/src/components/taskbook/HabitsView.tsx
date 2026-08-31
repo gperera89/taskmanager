@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useModalActions } from "./ModalContext";
 import { useTaskbook } from "./store";
 import SearchBar from "./SearchBar";
-import { RowDeleteButton, slopFor } from "./shared";
+import { REVEAL_ON_HOVER, RowDeleteButton, slopFor } from "./shared";
 import type { HabitCardVM } from "./types";
 
 // From James Clear's Atomic Habits — rotated in the space the "up next" card used to occupy
@@ -92,7 +92,7 @@ function HabitRow({ habit }: { habit: HabitCardVM }) {
           onClick={() => openEdit({ mode: "edit", kind: "habit", item: habit })}
           title="Edit habit"
           aria-label="Edit habit"
-          className="flex flex-none cursor-pointer items-center justify-center rounded-full p-1 text-(--ink-soft) opacity-0 transition-opacity hover:text-(--ink) group-hover:opacity-100"
+          className={`flex flex-none cursor-pointer items-center justify-center rounded-full p-1 text-(--ink-soft) hover:text-(--ink) ${REVEAL_ON_HOVER}`}
         >
           <PencilIcon />
         </button>

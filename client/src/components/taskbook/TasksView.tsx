@@ -8,6 +8,7 @@ import type { TaskRepeatInput } from "./store";
 import {
   AutoGrowTextarea,
   CheckSquare,
+  REVEAL_ON_HOVER,
   RowDeleteButton,
   SELECT_CARET_INFO,
   SELECT_CARET_MUTED,
@@ -736,7 +737,7 @@ export function TaskRow({
                 setSubtasksOpen(true);
                 setAddingSubtask(true);
               }}
-              className="cursor-pointer text-xs text-(--ink-faint) opacity-0 transition-opacity hover:text-(--info) group-hover:opacity-100"
+              className={`cursor-pointer text-xs text-(--ink-faint) hover:text-(--info) ${REVEAL_ON_HOVER}`}
             >
               + Subtask
             </button>

@@ -13,7 +13,7 @@ import { DURATION_OPTIONS, formatDuration, parseDurationInput } from "@/lib/shar
 import { nearestFreeStart, type Obstacle } from "@/lib/scheduler";
 import { pad2, zonedMinutesOfDay, zonedYMD } from "@/lib/taskbookDates";
 import { useTaskbook } from "./store";
-import { CheckSquare, SELECT_CARET_MUTED, selectCaretStyle, labelClass } from "./shared";
+import { CheckSquare, REVEAL_ON_HOVER, SELECT_CARET_MUTED, selectCaretStyle, labelClass } from "./shared";
 import type { CategoryOption, MyDayBlockVM, MyDayKind, MyDayLookaheadVM, MyDayTrayItemVM, MyDayVM } from "./types";
 
 const HOUR_PX = 64;
@@ -178,7 +178,7 @@ export default function MyDayPlanner({ myDay }: { myDay: MyDayVM }) {
                 type="button"
                 onClick={() => actions.dismissEvent(e.id)}
                 aria-label={`Dismiss ${e.title}`}
-                className="cursor-pointer text-(--ink-faint) opacity-0 transition-opacity hover:text-(--danger) group-hover:opacity-100"
+                className={`cursor-pointer text-(--ink-faint) hover:text-(--danger) ${REVEAL_ON_HOVER}`}
               >
                 ×
               </button>

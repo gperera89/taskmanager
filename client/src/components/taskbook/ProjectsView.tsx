@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { todayInputValue } from "@/lib/taskbookDates";
 import { useTaskbook } from "./store";
 import { parseTaskForm } from "./formParse";
-import { AutoGrowTextarea, Chip, labelClass, useCompletionHold } from "./shared";
+import { AutoGrowTextarea, Chip, labelClass, REVEAL_ON_HOVER, useCompletionHold } from "./shared";
 import { DateTimePickerPanel, formatPickerLabel } from "./DateTimePicker";
 import SearchBar from "./SearchBar";
 import { TaskRow } from "./TasksView";
@@ -65,8 +65,8 @@ function ProjectActionsMenu({ project }: { project: ProjectCardVM }) {
         title="Project options"
         aria-label={`Options for ${project.name}`}
         onClick={() => setOpen((v) => !v)}
-        className={`flex cursor-pointer items-center justify-center text-(--ink-soft) transition-opacity hover:text-(--info) ${
-          open ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+        className={`flex cursor-pointer items-center justify-center text-(--ink-soft) hover:text-(--info) ${
+          open ? "opacity-100" : REVEAL_ON_HOVER
         }`}
       >
         {/* Material Symbols "more_vert" */}

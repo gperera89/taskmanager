@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { formatUtcOffset, getTimeZoneOffsetMs, OTHER_TIME_ZONES, SUPPORTED_TIME_ZONES } from "@/lib/taskbookDates";
 import CategoryManager from "./CategoryManager";
-import { SelectField } from "./shared";
+import { REVEAL_ON_HOVER, SelectField } from "./shared";
 import { useTaskbook } from "./store";
 import type { CategoryOption } from "./types";
 
@@ -113,7 +113,7 @@ function AiNotesManager() {
             type="button"
             onClick={() => actions.removeAiNote(n.id)}
             aria-label="Delete note"
-            className="cursor-pointer text-[12px] text-(--ink-faint) opacity-0 transition-opacity hover:text-(--danger) group-hover:opacity-100"
+            className={`cursor-pointer text-[12px] text-(--ink-faint) hover:text-(--danger) ${REVEAL_ON_HOVER}`}
           >
             Delete
           </button>
