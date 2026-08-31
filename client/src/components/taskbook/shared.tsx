@@ -239,12 +239,17 @@ export function CheckSquare({
   checked,
   size = 22,
   completing = false,
+  hitSlop = 0,
 }: {
   action: () => void;
   checked: boolean;
   size?: number;
   /** Mid-flight on the transition to checked — plays the pen-drawn tick animation. */
   completing?: boolean;
+  /** Invisible padding around the box, widening the touch target without moving anything: the
+      matching negative margin cancels it out, so the drawn square keeps its place in the row.
+      Small boxes need it — a 16px square is well under the ~44px a fingertip actually lands on. */
+  hitSlop?: number;
 }) {
   const showTick = checked || completing;
   return (
@@ -252,15 +257,19 @@ export function CheckSquare({
       type="button"
       onClick={action}
       aria-label={checked ? "Mark incomplete" : "Mark complete"}
-      className="flex flex-none cursor-pointer items-center justify-center rounded"
-      style={{
-        width: size,
-        height: size,
-        border: `1.5px solid ${showTick ? "var(--accent-text)" : "var(--ink-faint)"}`,
-        background: showTick ? "var(--accent-wash)" : "transparent",
-        transition: "border-color .15s, background .15s",
-      }}
+      className="flex flex-none cursor-pointer items-center justify-center"
+      style={{ padding: hitSlop, margin: -hitSlop }}
     >
+      <span
+        className="flex items-center justify-center rounded"
+        style={{
+          width: size,
+          height: size,
+          border: `1.5px solid ${showTick ? "var(--accent-text)" : "var(--ink-faint)"}`,
+          background: showTick ? "var(--accent-wash)" : "transparent",
+          transition: "border-color .15s, background .15s",
+        }}
+      >
       {showTick && (
         <svg width={size * 0.64} height={size * 0.64} viewBox="0 0 24 24" fill="none">
           <path
@@ -275,6 +284,7 @@ export function CheckSquare({
           />
         </svg>
       )}
+      </span>
     </button>
   );
 }

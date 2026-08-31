@@ -193,15 +193,18 @@ function RoutineRow({ routine, onCompleting }: { routine: RoutineItemVM; onCompl
         <RowDeleteButton action={() => actions.removeRoutine(routine.id)} />
       </div>
 
+      {/* Steps are ticked off one-handed on a phone, so the whole row is the target: a 20px box
+          with 10px of invisible slop around it, and the title itself toggles too. */}
       {routine.subroutines.length > 0 && (
-        <ul className="ml-8.5 mt-2 flex flex-col gap-1.5">
+        <ul className="ml-8.5 mt-2 flex flex-col">
           {routine.subroutines.map((s) => {
             const checked = isStepChecked(s.id);
             return (
-              <li key={s.id} className="group/step flex items-center gap-2">
-                <CheckSquare action={() => toggleStep(s.id)} checked={checked} size={16} />
+              <li key={s.id} className="group/step flex items-center gap-2.5 py-1.5">
+                <CheckSquare action={() => toggleStep(s.id)} checked={checked} size={20} hitSlop={10} />
                 <span
-                  className="flex-1 text-[13px]"
+                  onClick={() => toggleStep(s.id)}
+                  className="flex-1 cursor-pointer text-[15px] leading-5"
                   style={{ color: checked ? "var(--ink-strike)" : "var(--ink-muted)", textDecoration: checked ? "line-through" : "none" }}
                 >
                   {s.title}
@@ -210,7 +213,7 @@ function RoutineRow({ routine, onCompleting }: { routine: RoutineItemVM; onCompl
                   type="button"
                   onClick={() => actions.removeRoutine(s.id)}
                   aria-label="Remove step"
-                  className="cursor-pointer text-xs text-(--ink-faint) opacity-0 transition-opacity hover:text-(--danger) group-hover/step:opacity-100"
+                  className="cursor-pointer text-xs text-(--ink-faint) opacity-0 transition-opacity hover:text-(--danger) group-hover/step:opacity-100 [@media(hover:none)]:opacity-100"
                 >
                   Remove
                 </button>
