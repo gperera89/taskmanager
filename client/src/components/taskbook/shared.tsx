@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { DURATION_OPTIONS } from "@/lib/shared";
 import { ICON_PATH } from "./ModeToggle";
 
@@ -405,29 +405,6 @@ export function CalendarEventMarker({
       </svg>
     </button>
   );
-}
-
-const COMPLETE_HOLD_MS = 550;
-
-/** Keeps a just-completed row visible in an "active" list for a beat after the underlying data
-    flips to completed, so its checkbox/strike animation (~450ms) has time to actually play before
-    the row is filtered out. */
-export function useCompletionHold() {
-  const [held, setHeld] = useState<Set<string>>(new Set());
-
-  const hold = useCallback((id: string) => {
-    setHeld((prev) => new Set(prev).add(id));
-    window.setTimeout(() => {
-      setHeld((prev) => {
-        if (!prev.has(id)) return prev;
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
-    }, COMPLETE_HOLD_MS);
-  }, []);
-
-  return { isHeld: (id: string) => held.has(id), hold };
 }
 
 /** Reveal-on-hover is a pointer-only affordance: on a touch device there is no hover, so a

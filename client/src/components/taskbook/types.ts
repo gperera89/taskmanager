@@ -139,6 +139,7 @@ export type RoutineItemVM = {
   durationLabel: string | null;
   isActive: boolean;
   isTicked: boolean;
+  urgency: TaskUrgency; // colour-coding bucket for the row, same scale as a task's
   isDoneToday: boolean; // ticked off today — stays in the list, struck through, until the day rolls over
   completedAtLabel: string | null; // clock time it was ticked, for the "Done 7:12 AM · Undo" line
   isLater: boolean; // folded away under the "Later" toggle: not due for a while, or ticked on an earlier day

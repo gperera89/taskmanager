@@ -5,6 +5,7 @@ import { useModalActions } from "./ModalContext";
 import { useTaskbook } from "./store";
 import SearchBar from "./SearchBar";
 import { REVEAL_ON_HOVER, RowDeleteButton, slopFor } from "./shared";
+import { AnimatedList } from "./motion";
 import type { HabitCardVM } from "./types";
 
 // From James Clear's Atomic Habits — rotated in the space the "up next" card used to occupy
@@ -43,13 +44,13 @@ export default function HabitsView({
 
       {habits.length === 0 && <p className="py-8 text-[15px] italic text-(--ink-soft)">Nothing here yet.</p>}
 
-      <div className="max-w-[640px]">
+      <AnimatedList className="max-w-[640px]">
         {!q && habits.length > 0 && <HabitsQuoteBanner />}
 
         {filtered.map((h) => (
           <HabitRow key={h.id} habit={h} />
         ))}
-      </div>
+      </AnimatedList>
     </div>
   );
 }
@@ -74,7 +75,10 @@ function HabitRow({ habit }: { habit: HabitCardVM }) {
   const { openEdit, openHeatmap } = useModalActions();
   const { actions } = useTaskbook();
   return (
-    <div className="group flex items-center justify-between gap-3 border-b border-(--border-soft) py-3.5">
+    <div
+      data-flip-id={habit.id}
+      className="group flex items-center justify-between gap-3 border-b border-(--border-soft) py-3.5"
+    >
       <div
         className="min-w-0 flex-1 cursor-pointer"
         onClick={() => openHeatmap(habit.id)}

@@ -5,7 +5,8 @@ import { useModalActions } from "./ModalContext";
 import { useTaskbook } from "./store";
 import { DateTimePickerPanel } from "./DateTimePicker";
 import SearchBar from "./SearchBar";
-import { CheckSquare, Chip, labelClass, RowDeleteButton, StrikeSweep, useCompletionHold } from "./shared";
+import { CheckSquare, Chip, labelClass, RowDeleteButton, StrikeSweep } from "./shared";
+import { AnimatedList, leavingStyle, useCompletionHold } from "./motion";
 import type { RoutineItemVM } from "./types";
 
 export default function RoutinesView({
@@ -27,7 +28,7 @@ export default function RoutinesView({
   // "Later" is only what its name says: not due for a while, or ticked on an earlier day.
   // A search looks through both halves, so it force-opens the section. The hold below still
   // covers the strike-through animation for a routine that does drop into "Later" on tick.
-  const { isHeld, hold } = useCompletionHold();
+  const { isHeld, isLeaving, hold } = useCompletionHold();
   const soon = filtered.filter((r) => !r.isLater || isHeld(r.id));
   const later = filtered.filter((r) => r.isLater && !isHeld(r.id));
   const [showLater, setShowLater] = useState(false);
@@ -48,9 +49,9 @@ export default function RoutinesView({
         <p className="py-8 text-[15px] italic text-(--ink-soft)">No routines match your search.</p>
       )}
 
-      <div className="max-w-[680px]">
+      <AnimatedList className="max-w-[680px]">
         {soon.map((r) => (
-          <RoutineRow key={r.id} routine={r} onCompleting={hold} />
+          <RoutineRow key={r.id} routine={r} onCompleting={hold} leaving={isLeaving(r.id)} />
         ))}
 
         {!q && soon.length === 0 && later.length > 0 && (
@@ -78,12 +79,21 @@ export default function RoutinesView({
             {laterOpen && later.map((r) => <RoutineRow key={r.id} routine={r} />)}
           </div>
         )}
-      </div>
+      </AnimatedList>
     </div>
   );
 }
 
-function RoutineRow({ routine, onCompleting }: { routine: RoutineItemVM; onCompleting?: (id: string) => void }) {
+function RoutineRow({
+  routine,
+  onCompleting,
+  leaving = false,
+}: {
+  routine: RoutineItemVM;
+  onCompleting?: (id: string) => void;
+  /** Mid-fade on its way out of this list — see useCompletionHold. */
+  leaving?: boolean;
+}) {
   const { openEdit } = useModalActions();
   const { actions } = useTaskbook();
   const [addingStep, setAddingStep] = useState(false);
@@ -133,8 +143,23 @@ function RoutineRow({ routine, onCompleting }: { routine: RoutineItemVM; onCompl
     if (routine.subroutines.every((s) => next[s.id])) handleToggle();
   }
 
+  // Urgency colour-coding, identical to TaskRow's: a danger rail and faint wash down the left
+  // edge of an overdue routine, the warmer warn tone for one still to come today.
+  const urgentInk = routine.urgency === "overdue" ? "var(--danger)" : routine.urgency === "today" ? "var(--warn)" : null;
+  const urgentWash = routine.urgency === "overdue" ? "var(--danger-wash)" : "var(--warn-wash)";
+  // Same bleed-off-the-rail gradient TaskRow uses, so an overdue routine and an overdue task
+  // read as the same thing.
+  const urgentFade = `linear-gradient(90deg, ${urgentWash} 0%, transparent 66%)`;
+
   return (
-    <div className="group border-b border-(--border-soft) py-3.5">
+    <div
+      data-flip-id={routine.id}
+      className="group border-b border-(--border-soft) py-3.5"
+      style={{
+        ...(urgentInk ? { borderLeft: `3px solid ${urgentInk}`, paddingLeft: 9, background: urgentFade } : null),
+        ...(leaving ? leavingStyle : null),
+      }}
+    >
       <div className="flex items-start gap-3">
         <CheckSquare action={handleToggle} checked={routine.isTicked} completing={completing} />
         <div className="min-w-0 flex-1 cursor-pointer" onClick={() => openEdit({ mode: "edit", kind: "routine", item: routine })}>
@@ -172,7 +197,12 @@ function RoutineRow({ routine, onCompleting }: { routine: RoutineItemVM; onCompl
                 </button>
               </>
             ) : (
-              <button type="button" onClick={() => setEditingPause((v) => !v)} className="cursor-pointer text-xs text-(--ink-muted)">
+              <button
+                type="button"
+                onClick={() => setEditingPause((v) => !v)}
+                className="cursor-pointer text-xs"
+                style={{ color: urgentInk ?? "var(--ink-muted)", fontWeight: urgentInk ? 500 : undefined }}
+              >
                 {routine.dueLabel}
               </button>
             )}

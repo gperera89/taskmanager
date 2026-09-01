@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import type { FocusEvent } from "react";
 import { DURATION_OPTIONS, REMINDER_LEAD_OPTIONS, parseDurationInput } from "@/lib/shared";
 import { useTaskbook } from "./store";
@@ -15,8 +15,8 @@ import {
   selectCaretStyle,
   StrikeSweep,
   labelClass,
-  useCompletionHold,
 } from "./shared";
+import { AnimatedList, leavingStyle, useCompletionHold } from "./motion";
 import { DateTimePickerPanel } from "./DateTimePicker";
 import RepeatFields from "./RepeatFields";
 import SearchBar from "./SearchBar";
@@ -43,7 +43,7 @@ export default function TasksView({
 }) {
   const [showCompleted, setShowCompleted] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
-  const { isHeld, hold } = useCompletionHold();
+  const { isHeld, isLeaving, hold } = useCompletionHold();
   const q = query.trim().toLowerCase();
 
   const matchesQuery = (t: TaskItemVM) => !q || t.title.toLowerCase().includes(q);
@@ -62,7 +62,9 @@ export default function TasksView({
 
       <SearchBar query={query} onQueryChange={onQueryChange} placeholder="Search tasks…" />
 
-      <div className="max-w-[680px]">
+      {/* One list, not one per group: the group headings carry flip ids alongside the rows, so a
+          task leaving "Today" slides the headings below it up rather than snapping them. */}
+      <AnimatedList className="max-w-[680px]">
         {filtered.length === 0 && completedTasks.length === 0 && (
           <p className="py-8 text-[15px] italic text-(--ink-soft)">
             {q ? "No tasks match your search." : "Nothing here yet."}
@@ -73,8 +75,9 @@ export default function TasksView({
           const visibleTasks = isExpanded ? group.tasks : group.tasks.slice(0, GROUP_PREVIEW_COUNT);
           const hiddenCount = group.tasks.length - visibleTasks.length;
           return (
-            <div key={group.key}>
+            <Fragment key={group.key}>
               <div
+                data-flip-id={`group-${group.key}`}
                 className={labelClass}
                 style={{ margin: "20px 0 4px", display: "flex", alignItems: "center", justifyContent: "space-between" }}
               >
@@ -96,16 +99,18 @@ export default function TasksView({
                   categoryOptions={categoryOptions}
                   projectOptions={projectOptions}
                   onCompleting={hold}
+                  leaving={isLeaving(task.id)}
                   reorderIds={group.tasks.map((t) => t.id)}
                 />
               ))}
-            </div>
+            </Fragment>
           );
         })}
 
         {completedTasks.length > 0 && (
-          <div>
+          <Fragment>
             <button
+              data-flip-id="completed-header"
               type="button"
               onClick={() => setShowCompleted((v) => !v)}
               className={`${labelClass} flex cursor-pointer items-center gap-1.5`}
@@ -125,9 +130,9 @@ export default function TasksView({
               completedTasks.map((task) => (
                 <TaskRow key={task.id} task={task} categoryOptions={categoryOptions} projectOptions={projectOptions} />
               ))}
-          </div>
+          </Fragment>
         )}
-      </div>
+      </AnimatedList>
     </div>
   );
 }
@@ -146,6 +151,7 @@ export function TaskRow({
   categoryOptions,
   projectOptions,
   onCompleting,
+  leaving = false,
   reorderIds,
   sectionOptions,
 }: {
@@ -153,6 +159,8 @@ export function TaskRow({
   categoryOptions: CategoryOption[];
   projectOptions: ProjectOption[];
   onCompleting?: (id: string) => void;
+  /** Mid-fade on its way out of this list — see useCompletionHold. */
+  leaving?: boolean;
   // Ids of every task in this row's display group, in order — enables drag-to-reorder within
   // the group (a due bucket or a project section). Omitted where reordering has no meaning.
   reorderIds?: string[];
@@ -308,6 +316,7 @@ export function TaskRow({
 
   return (
     <div
+      data-flip-id={task.id}
       className="group flex items-start gap-3.5 border-b py-3.5 px-0.5"
       style={{
         borderBottomColor: dragOver ? "var(--accent-text)" : "var(--border-soft)",
@@ -319,6 +328,7 @@ export function TaskRow({
               background: urgentFade,
             }
           : null),
+        ...(leaving ? leavingStyle : null),
       }}
       draggable={Boolean(reorderIds)}
       onDragStart={(e) => {

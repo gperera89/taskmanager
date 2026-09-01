@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { todayInputValue } from "@/lib/taskbookDates";
 import { useTaskbook } from "./store";
 import { parseTaskForm } from "./formParse";
-import { AutoGrowTextarea, Chip, labelClass, REVEAL_ON_HOVER, useCompletionHold } from "./shared";
+import { AutoGrowTextarea, Chip, labelClass, REVEAL_ON_HOVER } from "./shared";
+import { AnimatedList, useCompletionHold } from "./motion";
 import { DateTimePickerPanel, formatPickerLabel } from "./DateTimePicker";
 import SearchBar from "./SearchBar";
 import { TaskRow } from "./TasksView";
@@ -179,11 +180,11 @@ export default function ProjectsView({
         </p>
       )}
 
-      <div className="grid max-w-[940px] grid-cols-1 gap-5.5 lg:grid-cols-2">
+      <AnimatedList className="grid max-w-[940px] grid-cols-1 gap-5.5 lg:grid-cols-2">
         {filtered.map((project) => (
           <ProjectCard key={project.id} project={project} categoryOptions={categoryOptions} projectOptions={projectOptions} />
         ))}
-      </div>
+      </AnimatedList>
     </div>
   );
 }
@@ -198,7 +199,7 @@ function ProjectCard({
   projectOptions: ProjectOption[];
 }) {
   const { actions } = useTaskbook();
-  const { isHeld, hold } = useCompletionHold();
+  const { isHeld, isLeaving, hold } = useCompletionHold();
   const [editingName, setEditingName] = useState(false);
   const [editingDescription, setEditingDescription] = useState(false);
   const [editingDueDate, setEditingDueDate] = useState(false);
@@ -247,7 +248,10 @@ function ProjectCard({
   const visibleCount = visibleSections.reduce((n, s) => n + s.tasks.length, 0);
 
   return (
-    <div className="group rounded-xl border border-(--border-soft) bg-(--card-tint) px-5.5 pb-5 pt-5.5">
+    <div
+      data-flip-id={project.id}
+      className="group rounded-xl border border-(--border-soft) bg-(--card-tint) px-5.5 pb-5 pt-5.5"
+    >
       <div className="flex items-baseline justify-between gap-2">
         {editingName ? (
           <form
@@ -354,7 +358,7 @@ function ProjectCard({
             {section.name && (
               <div className={`${labelClass} mb-1 mt-1`}>{section.name}</div>
             )}
-            <div className="flex flex-col gap-3">
+            <AnimatedList className="flex flex-col gap-3">
               {section.tasks.map((item) => (
                 <TaskRow
                   key={item.id}
@@ -362,11 +366,12 @@ function ProjectCard({
                   categoryOptions={categoryOptions}
                   projectOptions={projectOptions}
                   onCompleting={hold}
+                  leaving={isLeaving(item.id)}
                   reorderIds={section.tasks.map((t) => t.id)}
                   sectionOptions={project.sectionsEnabled ? project.sectionNames : undefined}
                 />
               ))}
-            </div>
+            </AnimatedList>
           </div>
         ))}
         {viewMode === "none" && project.total > 0 && (

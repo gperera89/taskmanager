@@ -397,6 +397,16 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
       : dueAtMs <= nowFaceMs
         ? `Overdue · ${formatFaceTime(dueDate)}`
         : `Due ${dayWord} · ${formatFaceTime(dueDate)}`;
+    // Same colour-coding as a task row (see TaskRow's urgentInk): an overdue routine gets the
+    // danger rail and wash, one still to come today the warmer warn tone. A ticked routine is
+    // never urgent — it's done, whatever the clock says.
+    const urgency: TaskUrgency = isTicked
+      ? "none"
+      : dueAtMs <= nowFaceMs
+        ? "overdue"
+        : dueDiffDays === 0
+          ? "today"
+          : "none";
 
     // A tick used to fold the routine straight into "Later", which conflated "done" with "not
     // due for a while" and made undo a hunt inside a collapsed section. A routine ticked today
@@ -419,6 +429,7 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
       durationLabel: r.durationMinutes != null ? formatDuration(r.durationMinutes) : null,
       isActive: r.isActive,
       isTicked,
+      urgency,
       isDoneToday,
       completedAtLabel: isDoneToday && completedFaceMs !== null ? formatFaceTime(new Date(completedFaceMs)) : null,
       // "Later" folds away what isn't in front of the user: not due for more than the lookahead
