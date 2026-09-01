@@ -432,10 +432,12 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
       urgency,
       isDoneToday,
       completedAtLabel: isDoneToday && completedFaceMs !== null ? formatFaceTime(new Date(completedFaceMs)) : null,
-      // "Later" folds away what isn't in front of the user: not due for more than the lookahead
-      // window, or ticked on an earlier day. An unticked routine whose time has passed has a
-      // due-at in the past, so it stays up top until it's dealt with.
-      isLater: !isDoneToday && (isTicked || dueAtMs - nowFaceMs > ROUTINE_SOON_WINDOW_MS),
+      // "Later" folds away what isn't in front of the user: not due today and further out than
+      // the lookahead window, or already ticked. Everything still owed for the current day stays
+      // up top in time order however late in the day it falls — an evening routine shouldn't be
+      // hidden all morning just for sitting past the window. An unticked routine whose time has
+      // passed has a due-at in the past, so it stays up top until it's dealt with.
+      isLater: !isDoneToday && (isTicked || (dueDiffDays !== 0 && dueAtMs - nowFaceMs > ROUTINE_SOON_WINDOW_MS)),
       scheduleLabel: scheduleLabel(r),
       pausedUntil: toDateInputValue(r.pausedUntil),
       dueLabel,

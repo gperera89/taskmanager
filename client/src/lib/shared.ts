@@ -44,9 +44,12 @@ export const NO_REPEAT = {
 // are gone: a routine now lingers uncompleted until the user ticks it, and a tick lingers until
 // the routine is due again.)
 //
-// The reset instant is the routine's reminderTime on the first scheduled date strictly after the
+// The reset instant is MIDNIGHT at the start of the first scheduled date strictly after the
 // tick's calendar date, so ticking any time on Monday — early, late, before or after the reminder
-// — keeps a daily morning routine ticked all of Monday and un-ticks it at Tuesday's reminder.
+// — keeps a daily morning routine ticked all of Monday and un-ticks it as Tuesday begins. It used
+// to reset at the next occurrence's reminderTime instead, which left yesterday's ticks standing
+// through the small hours: the day's routines still read as done, and getting them back meant
+// undoing each one by hand.
 // All comparisons run on the configured timezone's wall clock (zonedNow's face-value UTC Dates),
 // matching how the cron and the rest of the scheduling code read dates.
 
@@ -96,7 +99,7 @@ export function routineTickResetMs(routine: RoutineTickShape, timeZone: string):
   const tickedAt = zonedNow(new Date(routine.lastCompletedAt).getTime(), timeZone);
   const pausedUntil = routine.pausedUntil ? new Date(routine.pausedUntil) : null;
   const nextDate = nextRoutineOccurrence(routineRule(routine), tickedAt, pausedUntil);
-  return nextDate.getTime() + minutesOfDay(routine.reminderTime) * 60_000;
+  return nextDate.getTime();
 }
 
 export function isRoutineTickedNow(routine: RoutineTickShape, nowMs: number, timeZone: string): boolean {
@@ -111,8 +114,13 @@ export function isRoutineTickedNow(routine: RoutineTickShape, nowMs: number, tim
 // reminder time has already gone by, since an unticked routine stays pending rather than rolling
 // forward — and otherwise on the next scheduled date.
 export function routineDueAtMs(routine: RoutineTickShape, nowMs: number, timeZone: string): number {
+  // A ticked routine is waiting on the occurrence that un-ticks it — that occurrence's own
+  // reminder time, not the midnight the tick expires at (routineTickResetMs), so the row reads
+  // "Next: tomorrow" against the same clock time an unticked row would show.
   const ticked = routineTickResetMs(routine, timeZone);
-  if (ticked !== null && zonedFaceMs(nowMs, timeZone) < ticked) return ticked;
+  if (ticked !== null && zonedFaceMs(nowMs, timeZone) < ticked) {
+    return ticked + minutesOfDay(routine.reminderTime) * 60_000;
+  }
 
   const local = zonedNow(nowMs, timeZone);
   const pausedUntil = routine.pausedUntil ? new Date(routine.pausedUntil) : null;
