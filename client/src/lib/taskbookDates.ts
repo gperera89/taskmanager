@@ -65,6 +65,13 @@ export function formatDueLabel(due: Date): string {
   return `${dateLabel} · ${TIME_FORMAT.format(due)}`;
 }
 
+// The clock time of a face-value date — one whose UTC getters are read as wall-clock fields
+// (routine reminder times, due times). Unlike formatDueLabel this never suppresses midnight,
+// since a routine always has a real reminder time even when it reads 00:00.
+export function formatFaceTime(d: Date): string {
+  return TIME_FORMAT.format(d);
+}
+
 // --- Configurable timezone (replaces the old hardcoded "Perth" +8h assumption) ---
 //
 // Due/reminder clock times are entered as a face value (e.g. typing "18:00" stores 18:00 UTC,

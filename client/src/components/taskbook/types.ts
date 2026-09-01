@@ -139,10 +139,12 @@ export type RoutineItemVM = {
   durationLabel: string | null;
   isActive: boolean;
   isTicked: boolean;
-  isLater: boolean; // folded away under the "Later" toggle: ticked, or not due for a while yet
+  isDoneToday: boolean; // ticked off today — stays in the list, struck through, until the day rolls over
+  completedAtLabel: string | null; // clock time it was ticked, for the "Done 7:12 AM · Undo" line
+  isLater: boolean; // folded away under the "Later" toggle: not due for a while, or ticked on an earlier day
   scheduleLabel: string;
   pausedUntil: string; // yyyy-mm-dd for the date-input, "" if not paused
-  nextNotificationLabel: string; // e.g. "tomorrow" or "Mon 14 Jul"
+  dueLabel: string; // the occurrence it's waiting on, e.g. "Due today · 7:00 AM" or "Next: tomorrow"
   dueAtMs: number; // the occurrence it's waiting on; sort key for the chronological list
   // Grouped under this routine so they fire as one clustered notification and tick off
   // together, e.g. "Wake Up Routine" -> "Make coffee", "Brush teeth", "Shave".

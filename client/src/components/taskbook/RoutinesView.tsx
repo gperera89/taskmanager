@@ -21,11 +21,12 @@ export default function RoutinesView({
 }) {
   const q = query.trim().toLowerCase();
   const filtered = q ? routines.filter((r) => r.title.toLowerCase().includes(q)) : routines;
-  // Up top: only what's actually in front of the user — unticked and due inside the lookahead
-  // window (see ROUTINE_SOON_WINDOW_MS). Everything else, including anything just ticked off,
-  // folds into "Later". A search looks through both halves, so it force-opens the section.
-  // A just-ticked routine is held in place for the strike-through animation before it drops
-  // into "Later" (same trick as TasksView's completed rows).
+  // Up top: what's actually in front of the user — due inside the lookahead window (see
+  // ROUTINE_SOON_WINDOW_MS), plus anything ticked off earlier today, which stays visible and
+  // struck through until the day rolls over so undoing it is one tap where the eye already is.
+  // "Later" is only what its name says: not due for a while, or ticked on an earlier day.
+  // A search looks through both halves, so it force-opens the section. The hold below still
+  // covers the strike-through animation for a routine that does drop into "Later" on tick.
   const { isHeld, hold } = useCompletionHold();
   const soon = filtered.filter((r) => !r.isLater || isHeld(r.id));
   const later = filtered.filter((r) => r.isLater && !isHeld(r.id));
@@ -155,12 +156,26 @@ function RoutineRow({ routine, onCompleting }: { routine: RoutineItemVM; onCompl
               </div>
             )}
           </div>
-          {/* A tick now holds until the routine is next due (the "Next:" line below says when),
-              so the old "auto-resets within the hour" note would be a lie. */}
+          {/* A tick holds until the routine is next due, so the date line says which occurrence
+              the row is waiting on — today's while it's still outstanding, the next one once it's
+              ticked. A routine ticked today shows when it was done, with undo right there. */}
           <div className="relative mt-1 flex items-center gap-2.5" onClick={(e) => e.stopPropagation()}>
-            <button type="button" onClick={() => setEditingPause((v) => !v)} className="cursor-pointer text-xs text-(--ink-muted)">
-              Next: {routine.nextNotificationLabel}
-            </button>
+            {routine.isDoneToday ? (
+              <>
+                <span className="text-xs text-(--ink-faint)">Done {routine.completedAtLabel}</span>
+                <button
+                  type="button"
+                  onClick={handleToggle}
+                  className="cursor-pointer text-xs text-(--ink-faint) hover:text-(--accent-text)"
+                >
+                  Undo
+                </button>
+              </>
+            ) : (
+              <button type="button" onClick={() => setEditingPause((v) => !v)} className="cursor-pointer text-xs text-(--ink-muted)">
+                {routine.dueLabel}
+              </button>
+            )}
             {editingPause && (
               <div
                 ref={pausePanelRef}

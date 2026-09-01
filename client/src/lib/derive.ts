@@ -16,6 +16,7 @@ import {
   daysUntil,
   formatDueLabel,
   formatEventTime,
+  formatFaceTime,
   formatFullDate,
   formatShortDate,
   pad2,
@@ -27,7 +28,7 @@ import {
   type DueBucket,
   type MonthCell,
 } from "@/lib/taskbookDates";
-import { describeTaskRepeat, isRoutineDueToday, nextRoutineOccurrence, type TaskRepeatRule } from "@/lib/taskRecurrence";
+import { describeTaskRepeat, isRoutineDueToday, type TaskRepeatRule } from "@/lib/taskRecurrence";
 import { DEFAULT_DAY_TEMPLATE } from "@/lib/dayTemplate";
 import { packFlexible, placeLunch, type FlexItem, type Obstacle } from "@/lib/scheduler";
 import type {
@@ -369,30 +370,40 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
   });
   const activeProjectCount = visibleProjects.filter((p) => !p.isCompleted).length;
 
-  // Routines. "Next notification" always looks strictly past today (see nextRoutineOccurrence's
-  // comment) and is computed against the configured timezone's wall-clock "now", matching the
-  // notification cron's own convention (notifications.ts's zonedNow, imported here since
-  // taskbookDates.ts is client-safe, unlike that server-only file).
+  // Routines. Everything below is computed against the configured timezone's wall-clock "now",
+  // matching the notification cron's own convention (notifications.ts's zonedNow, imported here
+  // since taskbookDates.ts is client-safe, unlike that server-only file).
   const zonedNowDate = zonedNow(nowMs, raw.timeZone);
   const zonedToday = Date.UTC(zonedNowDate.getUTCFullYear(), zonedNowDate.getUTCMonth(), zonedNowDate.getUTCDate());
   const nowFaceMs = zonedFaceMs(nowMs, raw.timeZone);
   const routineVMs: RoutineItemVM[] = raw.routines.map((r) => {
-    const rule: TaskRepeatRule = {
-      frequency: r.frequency,
-      interval: r.interval,
-      daysOfWeek: r.daysOfWeek,
-      monthlyMode: r.monthlyMode,
-      dayOfMonth: r.dayOfMonth,
-      monthlyOrdinal: r.monthlyOrdinal,
-      monthlyWeekday: r.monthlyWeekday,
-    };
-    const nextDate = nextRoutineOccurrence(rule, zonedNowDate, r.pausedUntil ? new Date(r.pausedUntil) : null);
-    const diffDays = Math.round((nextDate.getTime() - zonedToday) / MS_PER_DAY);
-    // "Later" folds away everything that isn't in front of the user: already ticked off, or not
-    // due for more than the lookahead window. An unticked routine whose time has passed has a
-    // due-at in the past, so it stays up top until it's dealt with.
     const isTicked = isRoutineTickedNow(r, nowMs, raw.timeZone);
     const dueAtMs = routineDueAtMs(r, nowMs, raw.timeZone);
+
+    // The row's date line describes the occurrence it is actually waiting on, which is exactly
+    // what routineDueAtMs returns: today's occurrence while it's unticked and today is a
+    // scheduled day, the un-tick reset once it's ticked. This used to be built from
+    // nextRoutineOccurrence, which deliberately starts its search *after* today — so a routine
+    // due right now read "Next: tomorrow".
+    const dueDate = new Date(dueAtMs);
+    const dueDayMs = Date.UTC(dueDate.getUTCFullYear(), dueDate.getUTCMonth(), dueDate.getUTCDate());
+    const dueDiffDays = Math.round((dueDayMs - zonedToday) / MS_PER_DAY);
+    const dayWord =
+      dueDiffDays === 0 ? "today" : dueDiffDays === 1 ? "tomorrow" : formatShortDate(calendarDateFromDue(dueDate));
+    // Ticked rows look forward; unticked ones state what's owed, and say so plainly once the
+    // reminder time has gone by.
+    const dueLabel = isTicked
+      ? `Next: ${dayWord}`
+      : dueAtMs <= nowFaceMs
+        ? `Overdue · ${formatFaceTime(dueDate)}`
+        : `Due ${dayWord} · ${formatFaceTime(dueDate)}`;
+
+    // A tick used to fold the routine straight into "Later", which conflated "done" with "not
+    // due for a while" and made undo a hunt inside a collapsed section. A routine ticked today
+    // now holds its place in the list, struck through, until the local day rolls over; "Later"
+    // is left meaning only what its name says.
+    const completedFaceMs = r.lastCompletedAt ? zonedFaceMs(new Date(r.lastCompletedAt).getTime(), raw.timeZone) : null;
+    const isDoneToday = isTicked && completedFaceMs !== null && Math.floor(completedFaceMs / MS_PER_DAY) * MS_PER_DAY === zonedToday;
     return {
       id: r.id,
       title: r.title,
@@ -408,15 +419,24 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
       durationLabel: r.durationMinutes != null ? formatDuration(r.durationMinutes) : null,
       isActive: r.isActive,
       isTicked,
-      isLater: isTicked || dueAtMs - nowFaceMs > ROUTINE_SOON_WINDOW_MS,
+      isDoneToday,
+      completedAtLabel: isDoneToday && completedFaceMs !== null ? formatFaceTime(new Date(completedFaceMs)) : null,
+      // "Later" folds away what isn't in front of the user: not due for more than the lookahead
+      // window, or ticked on an earlier day. An unticked routine whose time has passed has a
+      // due-at in the past, so it stays up top until it's dealt with.
+      isLater: !isDoneToday && (isTicked || dueAtMs - nowFaceMs > ROUTINE_SOON_WINDOW_MS),
       scheduleLabel: scheduleLabel(r),
       pausedUntil: toDateInputValue(r.pausedUntil),
-      nextNotificationLabel: diffDays === 1 ? "tomorrow" : formatShortDate(calendarDateFromDue(nextDate)),
+      dueLabel,
       dueAtMs,
       subroutines: r.subroutines.map((s) => ({ id: s.id, title: s.title })),
     };
   });
-  const routineList = [...routineVMs].sort((a, b) => a.dueAtMs - b.dueAtMs);
+  // Chronological, with anything already ticked off today sunk to the bottom of the list so the
+  // outstanding work stays at the top where the eye lands.
+  const routineList = [...routineVMs].sort(
+    (a, b) => Number(a.isDoneToday) - Number(b.isDoneToday) || a.dueAtMs - b.dueAtMs
+  );
   const routineTotalCount = routineVMs.length;
 
   // Habits — completions grouped per habit into tz-local YYYY-MM-DD day-keys, then status,
