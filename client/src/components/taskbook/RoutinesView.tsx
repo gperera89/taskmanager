@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useModalActions } from "./ModalContext";
 import { useTaskbook } from "./store";
 import { DateTimePickerPanel } from "./DateTimePicker";
@@ -49,18 +49,24 @@ export default function RoutinesView({
         <p className="py-8 text-[15px] italic text-(--ink-soft)">No routines match your search.</p>
       )}
 
+      {/* One list, not a list plus a "Later" box: the heading and the empty-state line carry flip
+          ids alongside the rows, so a routine sinking out of view slides everything below it up
+          rather than letting the "Later" heading snap into the gap. */}
       <AnimatedList className="max-w-[680px]">
         {soon.map((r) => (
           <RoutineRow key={r.id} routine={r} onCompleting={hold} leaving={isLeaving(r.id)} />
         ))}
 
         {!q && soon.length === 0 && later.length > 0 && (
-          <p className="py-8 text-[15px] italic text-(--ink-soft)">Nothing due in the next while.</p>
+          <p data-flip-id="soon-empty" className="py-8 text-[15px] italic text-(--ink-soft)">
+            Nothing due in the next while.
+          </p>
         )}
 
         {later.length > 0 && (
-          <div>
+          <Fragment>
             <button
+              data-flip-id="later-header"
               type="button"
               onClick={() => setShowLater((v) => !v)}
               className={`${labelClass} flex cursor-pointer items-center gap-1.5`}
@@ -77,7 +83,7 @@ export default function RoutinesView({
               Later ({later.length})
             </button>
             {laterOpen && later.map((r) => <RoutineRow key={r.id} routine={r} />)}
-          </div>
+          </Fragment>
         )}
       </AnimatedList>
     </div>

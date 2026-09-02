@@ -24,6 +24,11 @@ export const EASE = "cubic-bezier(.2,.7,.3,1)";
     clamp keeps the direction legible and the speed constant-ish however far the row actually
     travelled. */
 export const MAX_TRAVEL_PX = 320;
+/** A list also glides its own height, so the box around a list (a project card) closes over the
+    gap instead of snapping shut. Only for changes around a row or two, though: a big re-layout
+    (expanding a whole project) leaves its already-laid-out contents overlapping whatever sits
+    below the list for the length of the animation, which looks far worse than resizing at once. */
+export const MAX_HEIGHT_CHANGE_PX = 240;
 
 function prefersReducedMotion(): boolean {
   return typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -59,6 +64,8 @@ export function AnimatedList({
   const ref = useRef<HTMLDivElement>(null);
   const previous = useRef<Map<string, { x: number; y: number }>>(new Map());
   const running = useRef<Map<string, Animation>>(new Map());
+  const previousHeight = useRef<number | null>(null);
+  const runningHeight = useRef<Animation | null>(null);
   const isFirstRender = useRef(true);
 
   // No dependency array on purpose: the list has to re-measure after *every* commit, since the
@@ -75,6 +82,30 @@ export function AnimatedList({
     const rows = Array.from(container.querySelectorAll<HTMLElement>("[data-flip-id]")).filter(
       (row) => row.closest("[data-flip-list]") === container
     );
+
+    // The list's own height, animated for the same reason the rows are: a project card that
+    // loses a task used to snap shut around the gap. Only innermost lists do this — a real height
+    // is layout, so an outer list measuring itself while an inner one is mid-animation would read
+    // the animated height as the natural one and replay the difference on its next commit.
+    // Cancel our own first, for the same reason.
+    if (!container.querySelector("[data-flip-list]")) {
+      runningHeight.current?.cancel();
+      runningHeight.current = null;
+      const fromHeight = previousHeight.current;
+      const toHeight = container.getBoundingClientRect().height;
+      previousHeight.current = toHeight;
+      const change = fromHeight === null ? 0 : Math.abs(fromHeight - toHeight);
+      if (!first && fromHeight !== null && change >= 2 && change <= MAX_HEIGHT_CHANGE_PX) {
+        const heightAnimation = container.animate(
+          [{ height: `${fromHeight}px` }, { height: `${toHeight}px` }],
+          { duration: MOVE_MS, easing: EASE }
+        );
+        runningHeight.current = heightAnimation;
+        heightAnimation.finished.then(() => {
+          if (runningHeight.current === heightAnimation) runningHeight.current = null;
+        }, () => {});
+      }
+    }
 
     // Positions are measured *relative to this list*, not the viewport, so a list nested inside
     // an animating row (a project card's tasks while the card itself is sliding) sees only its

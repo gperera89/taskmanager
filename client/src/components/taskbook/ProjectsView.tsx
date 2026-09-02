@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { todayInputValue } from "@/lib/taskbookDates";
 import { useTaskbook } from "./store";
 import { parseTaskForm } from "./formParse";
@@ -352,36 +352,47 @@ function ProjectCard({
       <div className="my-2.5 mb-4 h-1 overflow-hidden rounded-full bg-(--border-soft)">
         <div className="h-full rounded-full bg-(--accent)" style={{ width: `${project.progressPct}%` }} />
       </div>
-      <div className="flex flex-col gap-3">
+      {/* One list for the whole card body, not one per section: the section headings, the
+          empty-state lines and the "+ Add task" row all carry flip ids alongside the task rows,
+          so ticking a task off slides everything below it up instead of snapping the card shut
+          around the gap. */}
+      <AnimatedList className="flex flex-col gap-3">
         {visibleSections.map((section) => (
-          <div key={section.name ?? "__none__"}>
+          <Fragment key={section.name ?? "__none__"}>
             {section.name && (
-              <div className={`${labelClass} mb-1 mt-1`}>{section.name}</div>
+              // -mb-2 cancels most of the list's gap-3 so the heading still sits tight against
+              // its own first row, the way it did when each section was its own block.
+              <div data-flip-id={`section-${section.name}`} className={`${labelClass} -mb-2 mt-1`}>
+                {section.name}
+              </div>
             )}
-            <AnimatedList className="flex flex-col gap-3">
-              {section.tasks.map((item) => (
-                <TaskRow
-                  key={item.id}
-                  task={item}
-                  categoryOptions={categoryOptions}
-                  projectOptions={projectOptions}
-                  onCompleting={hold}
-                  leaving={isLeaving(item.id)}
-                  reorderIds={section.tasks.map((t) => t.id)}
-                  sectionOptions={project.sectionsEnabled ? project.sectionNames : undefined}
-                />
-              ))}
-            </AnimatedList>
-          </div>
+            {section.tasks.map((item) => (
+              <TaskRow
+                key={item.id}
+                task={item}
+                categoryOptions={categoryOptions}
+                projectOptions={projectOptions}
+                onCompleting={hold}
+                leaving={isLeaving(item.id)}
+                reorderIds={section.tasks.map((t) => t.id)}
+                sectionOptions={project.sectionsEnabled ? project.sectionNames : undefined}
+              />
+            ))}
+          </Fragment>
         ))}
         {viewMode === "none" && project.total > 0 && (
-          <div className="pl-8 text-[13px] italic text-(--ink-soft)">{project.total} tasks hidden</div>
+          <div data-flip-id="hidden-note" className="pl-8 text-[13px] italic text-(--ink-soft)">
+            {project.total} tasks hidden
+          </div>
         )}
         {viewMode === "unchecked" && visibleCount === 0 && project.total > 0 && (
-          <div className="pl-8 text-[13px] italic text-(--ink-soft)">All tasks complete</div>
+          <div data-flip-id="all-complete" className="pl-8 text-[13px] italic text-(--ink-soft)">
+            All tasks complete
+          </div>
         )}
         {addingTask ? (
           <form
+            data-flip-id="add-task"
             ref={addTaskFormRef}
             onSubmit={(e) => {
               e.preventDefault();
@@ -440,6 +451,7 @@ function ProjectCard({
           </form>
         ) : (
           <div
+            data-flip-id="add-task"
             className={`${labelClass} cursor-pointer`}
             onClick={() => {
               setNewTaskDueDate(todayInputValue());
@@ -451,7 +463,7 @@ function ProjectCard({
             + Add task
           </div>
         )}
-      </div>
+      </AnimatedList>
     </div>
   );
 }
