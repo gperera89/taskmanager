@@ -20,6 +20,7 @@ import { useRouter } from "next/navigation";
 import type { AiNote, CapturedKind, Countdown, DayPlanBlock, HabitCompletion, HabitScheduleType, Routine, RoutineFrequency, RoutineMonthlyMode } from "@prisma/client";
 import * as serverActions from "@/app/actions";
 import { deriveEntities, type RawState, type RawTask } from "@/lib/derive";
+import { formatLongDate } from "@/lib/taskbookDates";
 import {
   combineDueDateTime,
   habitDateKey,
@@ -59,6 +60,26 @@ const UNDO_MS = 6000;
 // Focus/visibility refreshes are useful but arrive in pairs (both events fire) — collapse
 // anything within this window into one server round trip.
 const REFRESH_DEBOUNCE_MS = 5000;
+
+// A full refresh is a whole server render (every row re-queried, re-serialized, re-derived and
+// re-seeded into the store), and most opens don't need one: nothing has changed since the last
+// visit. /api/state-version answers that question with a 32-byte fingerprint of the same rows
+// (see STATE_FINGERPRINT_SQL in lib/api.ts), so an unchanged database costs one tiny request
+// instead of the whole render. If it can't be reached, nothing is refreshed either — a failed
+// version check means the refresh would have failed too.
+type StateVersionResponse = { version: string; lastCronAtMs: number | null };
+
+async function fetchStateVersion(): Promise<StateVersionResponse | null> {
+  try {
+    const res = await fetch("/api/state-version", { cache: "no-store", credentials: "same-origin" });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { v?: unknown; lastCronAtMs?: unknown };
+    if (typeof body.v !== "string" || !body.v) return null;
+    return { version: body.v, lastCronAtMs: typeof body.lastCronAtMs === "number" ? body.lastCronAtMs : null };
+  } catch {
+    return null;
+  }
+}
 
 function isMode(v: string | null): v is Mode {
   return v === "work" || v === "home" || v === "all";
@@ -468,17 +489,27 @@ const REGISTRY: Record<string, RegistryEntry> = {
 // local clock and is kept for diagnostics only: comparing it against `nowMs` would pit this
 // browser's clock against Vercel's, and a device running even slightly fast would then prefer
 // its own stale snapshot over fresh server data on every load.
-type Snapshot = { raw: RawState; calendarEvents: CalendarEvent[]; savedAt: number; renderedAt?: number };
+type Snapshot = {
+  raw: RawState;
+  calendarEvents: CalendarEvent[];
+  savedAt: number;
+  renderedAt?: number;
+  // The server fingerprint this snapshot's rows came from, so a cached-shell start can ask
+  // "has anything changed since?" without pulling a full render first.
+  stateVersion?: string;
+};
 
 export function StoreProvider({
   initialRaw,
   serverData,
   nowMs,
+  stateVersion,
   children,
 }: {
   initialRaw: RawState;
   serverData: ServerCalendarData;
   nowMs: number;
+  stateVersion: string;
   children: React.ReactNode;
 }) {
   const router = useRouter();
@@ -497,6 +528,15 @@ export function StoreProvider({
   }, [raw]);
   const [offline, setOffline] = useState(false);
   const [pendingOps, setPendingOps] = useState(0);
+  // Server fingerprint of the rows currently on screen — see maybeRefresh below. Held in a ref
+  // (not state) because only the refresh logic reads it, and it must never trigger a re-render.
+  const stateVersionRef = useRef(stateVersion);
+  useEffect(() => {
+    stateVersionRef.current = stateVersion;
+  }, [stateVersion]);
+  // The cron heartbeat, refreshed by version checks that skip the full render (null until one
+  // reports in — until then the server render's own value stands).
+  const [cronAtMs, setCronAtMs] = useState<number | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   // Live clock: re-derives buckets/labels once a minute so a tab left open overnight rolls
@@ -511,6 +551,19 @@ export function StoreProvider({
     const timer = window.setInterval(() => setLiveNowMs(Date.now()), 60_000);
     return () => window.clearInterval(timer);
   }, []);
+
+  // The header's date, recomputed on the device. It used to come only from the server render, so
+  // it aged with the page: a cached shell opened the next morning (or a tab left open past
+  // midnight) showed yesterday. Now that a refresh is skipped whenever nothing changed, the label
+  // can't depend on one happening. Seeded from the server value so the first client render still
+  // matches the HTML, then re-checked on every minute tick.
+  const [todayLabel, setTodayLabel] = useState(serverData.todayLabel);
+  useEffect(() => {
+    const label = formatLongDate(new Date());
+    // The updater returns `prev` unchanged on every tick but one a day, so this is a no-op render.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setTodayLabel((prev) => (prev === label ? prev : label));
+  }, [liveNowMs, serverData.todayLabel]);
 
   // Defaults to "all" on both server and first client render (localStorage isn't available
   // during SSR) to avoid a hydration mismatch, then syncs to the stored value right after mount.
@@ -594,6 +647,27 @@ export function StoreProvider({
     refreshAtRef.current = Date.now();
     router.refresh();
   }, [router]);
+
+  // Refresh only if the database has actually changed since the render (or IndexedDB snapshot)
+  // currently on screen. This is what stops every app open costing a full server render: the
+  // common case — nothing touched Cura since you last looked — now ends at a 32-byte response.
+  // A failed check refreshes nothing: it means the network is down, and a full render would
+  // only have failed more slowly.
+  const maybeRefresh = useCallback(async () => {
+    const result = await fetchStateVersion();
+    if (!result) return;
+    // The heartbeat is excluded from the fingerprint (it moves every minute), so carry it across
+    // by hand — otherwise skipping the refresh would age it into a false "reminders may not be
+    // firing" warning.
+    setCronAtMs(result.lastCronAtMs);
+    if (result.version === stateVersionRef.current) {
+      // Nothing to pull. Count it as a reconcile for debounce purposes so the paired
+      // focus/visibilitychange events don't fire a second check straight after this one.
+      refreshAtRef.current = Date.now();
+      return;
+    }
+    refreshNow();
+  }, [refreshNow]);
 
   // Manual calendar pull. Deliberately NOT routed through the optimistic outbox: there's nothing
   // to patch locally, it's a read that has to hit the network, so it awaits the server and then
@@ -824,6 +898,10 @@ export function StoreProvider({
             countdowns: snapshot.raw.countdowns ?? [],
           });
           if (snapshot.calendarEvents?.length) setEvents(snapshot.calendarEvents);
+          // The rows on screen are now the snapshot's, so the version to compare against is the
+          // snapshot's too — the cached shell's own fingerprint is from whenever it was cached,
+          // which can be older still.
+          if (snapshot.stateVersion) stateVersionRef.current = snapshot.stateVersion;
         }
         if (offlineNow) setOffline(true);
         if (queued > 0) void flushRef.current();
@@ -832,7 +910,9 @@ export function StoreProvider({
         // is on its way to replace it. Pull server truth now. Skipped when ops are queued: a
         // server render would clobber their optimistic rows, and the post-drain refresh in
         // `flush` covers that case instead.
-        if (shellIsStale && queued === 0 && !offlineNow) refreshNow();
+        // ...but only if it would bring anything back. On a phone that is opened and closed all
+        // day, the answer is usually no, and the version check settles it in one small request.
+        if (shellIsStale && queued === 0 && !offlineNow) void maybeRefresh();
       } catch (err) {
         console.error("[store] snapshot hydration failed:", err);
       }
@@ -854,10 +934,11 @@ export function StoreProvider({
         calendarEvents: events,
         savedAt: Date.now(),
         renderedAt: nowMs,
+        stateVersion,
       } satisfies Snapshot).catch(() => {});
     }, 500);
     return () => window.clearTimeout(timer);
-  }, [raw, events, nowMs, calendarSettled]);
+  }, [raw, events, nowMs, stateVersion, calendarSettled]);
 
   // Reconcile with the server when the tab regains focus (covers optimistic drift, other
   // devices, and voice captures landing while away). Debounced: focus + visibilitychange fire
@@ -871,7 +952,7 @@ export function StoreProvider({
       void outboxCount()
         .catch(() => 0)
         .then((queued) => {
-          if (queued === 0) refreshNow();
+          if (queued === 0) void maybeRefresh();
         });
     };
     const onOnline = () => {
@@ -890,7 +971,7 @@ export function StoreProvider({
       window.removeEventListener("online", onOnline);
       window.removeEventListener("offline", onOffline);
     };
-  }, [refreshNow]);
+  }, [maybeRefresh]);
 
   // --- Undoable deletes -----------------------------------------------------------------------
 
@@ -1761,8 +1842,19 @@ export function StoreProvider({
   }, [enqueue, deleteWithUndo, pushToast, refreshNow]);
 
   const data = useMemo<TaskbookData>(
-    () => ({ ...serverData, calendarErrors, ...deriveEntities(raw, liveNowMs, mode) }),
-    [serverData, calendarErrors, raw, liveNowMs, mode]
+    () => ({
+      ...serverData,
+      todayLabel,
+      // Whichever heartbeat is newer: the last full render's, or the one a version check brought
+      // back without rendering.
+      lastCronAtMs:
+        cronAtMs !== null && serverData.lastCronAtMs !== null
+          ? Math.max(cronAtMs, serverData.lastCronAtMs)
+          : (cronAtMs ?? serverData.lastCronAtMs),
+      calendarErrors,
+      ...deriveEntities(raw, liveNowMs, mode),
+    }),
+    [serverData, todayLabel, cronAtMs, calendarErrors, raw, liveNowMs, mode]
   );
 
   return (

@@ -1306,6 +1306,48 @@ function reviveDates<T>(value: T): T {
   return value;
 }
 
+// --- Change fingerprint ---------------------------------------------------------------------
+//
+// An md5 of every row the page snapshot reads, computed *inside* Postgres so the rows themselves
+// never cross the wire — the whole check is one operation returning 32 bytes. The client keeps
+// the fingerprint next to its IndexedDB snapshot and asks /api/state-version on open/focus:
+// when it matches, a full server render would hand back exactly what is already on screen, so
+// the refresh is skipped entirely (see store.tsx). When it differs, the normal refresh runs.
+//
+// `lastCronAt` is excluded deliberately: the notification cron restamps it every minute, so
+// including it would make the fingerprint differ on every single check. Everything else is
+// hashed whole-row via `to_jsonb`, so new *columns* are covered automatically — a new *table*
+// is the one thing that needs adding here by hand.
+const STATE_FINGERPRINT_SQL = Prisma.sql`md5(concat_ws('|',
+  (SELECT md5(coalesce(string_agg(to_jsonb(t)::text, ',' ORDER BY t."id"), '')) FROM "Task" t),
+  (SELECT md5(coalesce(string_agg(to_jsonb(p)::text, ',' ORDER BY p."id"), '')) FROM "Project" p),
+  (SELECT md5(coalesce(string_agg(to_jsonb(h)::text, ',' ORDER BY h."id"), '')) FROM "Habit" h),
+  (SELECT md5(coalesce(string_agg(to_jsonb(hc)::text, ',' ORDER BY hc."id"), '')) FROM "HabitCompletion" hc),
+  (SELECT md5(coalesce(string_agg(to_jsonb(r)::text, ',' ORDER BY r."id"), '')) FROM "Routine" r),
+  (SELECT md5(coalesce(string_agg(to_jsonb(c)::text, ',' ORDER BY c."id"), '')) FROM "Category" c),
+  (SELECT md5(coalesce(string_agg(to_jsonb(cd)::text, ',' ORDER BY cd."id"), '')) FROM "Countdown" cd),
+  (SELECT md5(coalesce(string_agg(to_jsonb(v)::text, ',' ORDER BY v."id"), '')) FROM "VoiceCapture" v),
+  (SELECT md5(coalesce(string_agg(to_jsonb(d)::text, ',' ORDER BY d."id"), '')) FROM "DayPlanBlock" d),
+  (SELECT md5(coalesce(string_agg(to_jsonb(g)::text, ',' ORDER BY g."id"), '')) FROM "AiSuggestion" g),
+  (SELECT md5(coalesce(string_agg(to_jsonb(n)::text, ',' ORDER BY n."id"), '')) FROM "AiNote" n),
+  (SELECT md5(coalesce(string_agg(to_jsonb(e)::text, ',' ORDER BY e."id"), '')) FROM "DismissedCalendarEvent" e),
+  (SELECT md5((to_jsonb(a) - 'lastCronAt')::text) FROM "AppSettings" a WHERE a."id" = ${APP_SETTINGS_ID})
+))`;
+
+// The fingerprint on its own — what /api/state-version answers with. `lastCronAt` rides along
+// because it's the one field deliberately left out of the fingerprint: the client still needs
+// the current heartbeat (the "reminders may not be firing" banner reads it), and a version check
+// that skipped the refresh would otherwise leave the page showing an ever-older cron time.
+export async function getStateVersion(): Promise<{ version: string; lastCronAtMs: number | null }> {
+  const rows = await prisma.$queryRaw<{ v: string; lastCronAtMs: number | null }[]>`
+    SELECT ${STATE_FINGERPRINT_SQL} AS "v",
+           (SELECT extract(epoch from a."lastCronAt" AT TIME ZONE 'UTC')::float8 * 1000
+              FROM "AppSettings" a WHERE a."id" = ${APP_SETTINGS_ID}) AS "lastCronAtMs"
+  `;
+  const row = rows[0];
+  return { version: row?.v ?? "", lastCronAtMs: row?.lastCronAtMs ?? null };
+}
+
 export type PageSnapshot = {
   tasks: Awaited<ReturnType<typeof getTasks>>;
   projects: Awaited<ReturnType<typeof getProjects>>;
@@ -1321,6 +1363,9 @@ export type PageSnapshot = {
   dismissedEventIds: string[];
   timeZone: string;
   lastCronAt: Date | null;
+  // Fingerprint of everything above (see STATE_FINGERPRINT_SQL) — lets the client tell whether
+  // a later refresh would actually bring anything new.
+  stateVersion: string;
 };
 
 // Describes the row as it looks *after* `reviveDates` (which is typed as shape-preserving), so
@@ -1375,7 +1420,8 @@ export async function getPageSnapshot(): Promise<PageSnapshot> {
       (SELECT coalesce(jsonb_agg(jsonb_build_object('eventId', e."eventId")), '[]'::jsonb)
          FROM "DismissedCalendarEvent" e
       ) AS "dismissedEventIds",
-      (SELECT to_jsonb(a) FROM "AppSettings" a WHERE a."id" = ${APP_SETTINGS_ID}) AS "settings"
+      (SELECT to_jsonb(a) FROM "AppSettings" a WHERE a."id" = ${APP_SETTINGS_ID}) AS "settings",
+      ${STATE_FINGERPRINT_SQL} AS "stateVersion"
   `;
 
   const row = reviveDates(rows[0]);
@@ -1400,5 +1446,6 @@ export async function getPageSnapshot(): Promise<PageSnapshot> {
     dismissedEventIds: row.dismissedEventIds.map((d) => d.eventId),
     timeZone: settings.timeZone,
     lastCronAt: settings.lastCronAt,
+    stateVersion: row.stateVersion,
   };
 }

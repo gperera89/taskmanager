@@ -89,7 +89,13 @@ an earlier `revalidatePath`-per-action design that had an ~8s click-to-update la
   matching server action in the background; creates insert a `tmp-…` id and swap in the real one
   when the action resolves. On any write error, or when the tab regains focus/visibility, it
   `router.refresh()`s to reconcile with server truth (this also picks up voice captures and other
-  devices' edits, at the cost of those not appearing until a focus event).
+  devices' edits, at the cost of those not appearing until a focus event). That reconcile is
+  gated on a change check: `GET /api/state-version` returns an md5 of every row the page reads
+  (`STATE_FINGERPRINT_SQL` in `api.ts`, computed inside Postgres — one operation, 32 bytes back),
+  and the refresh is skipped entirely when it matches the fingerprint the current rows came from.
+  `AppSettings.lastCronAt` is excluded from the hash (it moves every minute) and rides along in
+  the response instead. Anything the page shows that a skipped refresh would leave stale must
+  therefore be computed client-side — that's why the header's date label is.
 - `src/components/taskbook/formParse.ts` — client-side `FormData` → typed input parsers mirroring
   the ones in `app/actions.ts`, so forms keep plain `name=` attributes but feed the optimistic store.
 - `src/app/page.tsx` fetches raw rows server-side and computes only the calendar rail (month

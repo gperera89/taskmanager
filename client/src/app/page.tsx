@@ -51,7 +51,7 @@ export default async function Home() {
   };
 
   return (
-    <StoreProvider initialRaw={raw} serverData={serverData} nowMs={nowMs}>
+    <StoreProvider initialRaw={raw} serverData={serverData} nowMs={nowMs} stateVersion={snapshot.stateVersion}>
       <TaskbookApp />
     </StoreProvider>
   );
