@@ -89,13 +89,13 @@ export default function Header({
   const [chatPanelOpen, setChatPanelOpen] = useState(false);
   const chatRef = useRef<HTMLDivElement>(null);
 
-  // Mobile only: the Add button opens a dropdown (Add item / Chat / Voice); picking a
-  // tool opens a full-screen modal hosting it. `mobileTool` is which tool the modal shows —
-  // kept separate from the desktop `barMode` so the two surfaces don't fight over one piece of
-  // state. Desktop keeps its inline chat/mic bar and never touches these.
-  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  // Mobile only: chat and voice are their own buttons on the header row (the desktop's inline
+  // chat/mic bar is hidden below the lg breakpoint), and tapping one opens a full-screen modal
+  // hosting that tool. `mobileTool` is which tool the modal shows — kept separate from the
+  // desktop `barMode` so the two surfaces don't fight over one piece of state. They lived behind
+  // a dropdown on the Add button for a while, which buried the app's fastest way to capture
+  // something two taps deep; they're back on the row itself.
   const [mobileTool, setMobileTool] = useState<BarMode | null>(null);
-  const addMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     // One-time DOM query for the portal target rendered by layout.tsx, which exists before
@@ -126,21 +126,9 @@ export default function Header({
     return () => document.removeEventListener("pointerdown", handlePointerDown);
   }, [chatPanelOpen]);
 
-  useEffect(() => {
-    if (!addMenuOpen) return;
-    function handlePointerDown(e: PointerEvent) {
-      if (addMenuRef.current && !addMenuRef.current.contains(e.target as Node)) {
-        setAddMenuOpen(false);
-      }
-    }
-    document.addEventListener("pointerdown", handlePointerDown);
-    return () => document.removeEventListener("pointerdown", handlePointerDown);
-  }, [addMenuOpen]);
-
   // Open a tool in the mobile modal. Voice starts recording straight away, matching the desktop
   // mic tab's behavior.
   function openMobileTool(tool: BarMode) {
-    setAddMenuOpen(false);
     setMobileTool(tool);
     if (tool === "mic" && !listening && !processing) void toggleListening();
   }
@@ -357,39 +345,30 @@ export default function Header({
   );
 
   return (
-    <div className="flex flex-none items-center justify-between border-b border-(--border) px-8 py-4">
-      <div className="relative flex items-center gap-3" ref={addMenuRef}>
+    <div className="flex flex-none items-center justify-between border-b border-(--border) px-4 py-4 sm:px-8">
+      <div className="relative flex items-center gap-2 sm:gap-3">
         <button
           type="button"
           onClick={() => {
             setShowNotif(false);
-            // Desktop keeps the direct "open Add form" behavior; mobile opens the tool menu,
-            // since search/chat/voice have no inline bar to live in below the lg breakpoint.
-            if (isMobile) {
-              setAddMenuOpen((v) => !v);
-            } else {
-              openAdd();
-            }
+            openAdd();
           }}
-          aria-haspopup={isMobile ? "menu" : undefined}
-          aria-expanded={isMobile ? addMenuOpen : undefined}
           className="flex items-center gap-2 rounded-full bg-(--accent) py-2 pl-3 pr-3.5 text-(--on-accent) cursor-pointer"
         >
           <svg width="16" height="16" viewBox="0 -960 960 960">
             <path d={ADD_ICON_PATH} style={{ fill: "var(--on-accent)" }} />
           </svg>
-          <span className="text-sm">Add</span>
+          <span className="whitespace-nowrap text-sm">Add</span>
         </button>
 
         <button
           type="button"
           onClick={() => {
             setShowNotif(false);
-            setAddMenuOpen(false);
             onOpenMyDay();
           }}
           title="Today's schedule"
-          className="flex cursor-pointer items-center gap-2 rounded-full border border-(--border-strong) py-2 pl-3 pr-3.5 text-(--ink)"
+          className="flex flex-none cursor-pointer items-center gap-2 whitespace-nowrap rounded-full border border-(--border-strong) py-2 pl-3 pr-3.5 text-(--ink)"
         >
           <svg width="16" height="16" viewBox="0 -960 960 960">
             <path d={MY_DAY_ICON_PATH} style={{ fill: "var(--ink-muted)" }} />
@@ -403,7 +382,6 @@ export default function Header({
           type="button"
           onClick={() => {
             setShowNotif(false);
-            setAddMenuOpen(false);
             syncNow();
           }}
           disabled={syncing}
@@ -416,34 +394,43 @@ export default function Header({
           </svg>
         </button>
 
-        {isMobile && addMenuOpen && (
-          <div
-            role="menu"
-            className="absolute left-0 top-[46px] z-30 w-52 overflow-hidden rounded-xl border border-(--border) bg-(--card) py-1 shadow-[0_16px_40px_rgba(70,55,30,.22)]"
-          >
-            <MobileMenuItem
-              iconPath={ADD_ICON_PATH}
-              label="Add item"
+        {/* The mobile stand-ins for the desktop bar's chat and mic tabs. Both need the network,
+            so they go flat while the store says we're offline rather than opening onto a tool
+            that can't do anything. */}
+        {isMobile && (
+          <>
+            <button
+              type="button"
               onClick={() => {
-                setAddMenuOpen(false);
-                openAdd();
+                setShowNotif(false);
+                openMobileTool("chat");
               }}
-            />
-            <MobileMenuItem
-              iconPath={BAR_ICON_PATH.chat}
-              label="Chat"
               disabled={offline}
-              hint={offline ? "Needs a connection" : undefined}
-              onClick={() => openMobileTool("chat")}
-            />
-            <MobileMenuItem
-              iconPath={BAR_ICON_PATH.mic}
-              label="Voice"
-              disabled={offline}
-              hint={offline ? "Needs a connection" : undefined}
-              onClick={() => openMobileTool("mic")}
-            />
-          </div>
+              title={offline ? "Chat needs a connection" : "Chat"}
+              aria-label="Chat"
+              className="flex h-9 w-9 flex-none cursor-pointer items-center justify-center rounded-full border border-(--border-strong) disabled:cursor-default disabled:opacity-40"
+            >
+              <svg width="16" height="16" viewBox="0 -960 960 960">
+                <path d={BAR_ICON_PATH.chat} style={{ fill: "var(--ink-muted)" }} />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setShowNotif(false);
+                openMobileTool("mic");
+              }}
+              disabled={offline || processing}
+              title={offline ? "Voice needs a connection" : "Speak to add"}
+              aria-label="Speak to add"
+              className="flex h-9 w-9 flex-none cursor-pointer items-center justify-center rounded-full border border-(--border-strong) disabled:cursor-default disabled:opacity-40"
+              style={{ animation: listening ? "mic-pulse 1.6s ease-in-out infinite" : undefined }}
+            >
+              <svg width="16" height="16" viewBox="0 -960 960 960">
+                <path d={BAR_ICON_PATH.mic} style={{ fill: "var(--ink-muted)" }} />
+              </svg>
+            </button>
+          </>
         )}
       </div>
 
@@ -766,36 +753,6 @@ export default function Header({
           document.body
         )}
     </div>
-  );
-}
-
-function MobileMenuItem({
-  iconPath,
-  label,
-  hint,
-  disabled,
-  onClick,
-}: {
-  iconPath: string;
-  label: string;
-  hint?: string;
-  disabled?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="menuitem"
-      disabled={disabled}
-      onClick={onClick}
-      className="flex w-full items-center gap-3 px-4 py-2.5 text-left disabled:cursor-not-allowed disabled:opacity-50"
-    >
-      <svg width="16" height="16" viewBox="0 -960 960 960" className="flex-none">
-        <path d={iconPath} style={{ fill: "var(--ink-soft)" }} />
-      </svg>
-      <span className="flex-1 text-sm text-(--ink)">{label}</span>
-      {hint && <span className="text-[11px] italic text-(--ink-faint)">{hint}</span>}
-    </button>
   );
 }
 

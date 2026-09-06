@@ -61,6 +61,15 @@ const UNDO_MS = 6000;
 // anything within this window into one server round trip.
 const REFRESH_DEBOUNCE_MS = 5000;
 
+// How often a *visible* tab asks whether anything has changed. Cura sits open for hours on the
+// desktop, where the only reconcile trigger was a focus event — so an edit made on the phone, or
+// a voice capture, sat unseen until the window was clicked away from and back. This is the same
+// cheap fingerprint check as on open, so a quiet database costs one small request per tick and
+// changes no state at all. Budget: one operation per tick, ~20/hour of screen time — set against
+// the ~43k/month the notification cron already spends, that's small, but it is the reason this
+// is minutes rather than seconds, and why a hidden tab never ticks.
+const VERSION_POLL_MS = 3 * 60_000;
+
 // A full refresh is a whole server render (every row re-queried, re-serialized, re-derived and
 // re-seeded into the store), and most opens don't need one: nothing has changed since the last
 // visit. /api/state-version answers that question with a 32-byte fingerprint of the same rows
@@ -971,6 +980,24 @@ export function StoreProvider({
       window.removeEventListener("online", onOnline);
       window.removeEventListener("offline", onOffline);
     };
+  }, [maybeRefresh]);
+
+  // Poll for other devices' changes while the tab is actually being looked at. Deliberately
+  // *only* while visible: a backgrounded tab has no one to show a change to, and the focus
+  // handler above already covers coming back to it.
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      if (Date.now() - refreshAtRef.current < REFRESH_DEBOUNCE_MS) return;
+      void outboxCount()
+        .catch(() => 0)
+        .then((queued) => {
+          // Queued ops mean local rows the server doesn't have yet — reconciling now would
+          // clobber them, exactly as in the focus handler.
+          if (queued === 0) void maybeRefresh();
+        });
+    }, VERSION_POLL_MS);
+    return () => window.clearInterval(timer);
   }, [maybeRefresh]);
 
   // --- Undoable deletes -----------------------------------------------------------------------
