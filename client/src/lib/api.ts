@@ -407,6 +407,8 @@ export function sweepPastCountdowns(now: Date) {
 
 export const getHabits = () => prisma.habit.findMany();
 
+export const getHabit = (id: string) => prisma.habit.findUnique({ where: { id } });
+
 // All habit completions within the last `days` (a year by default). Single-user app, so this is
 // a small set — loaded into the client store and used for status, progress, and the heatmap.
 export function getHabitCompletions(days = 366) {

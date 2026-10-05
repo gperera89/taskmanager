@@ -142,6 +142,13 @@ notification panel; dismissing or editing it deletes the row). This route accept
 Google session *or* an `X-Shortcut-Secret` header, since the iPhone Shortcut integration can't hold
 a login cookie.
 
+### Habit log (Stoic journal)
+`/api/habit-log/<habitId>` (`src/app/api/habit-log/[id]/route.ts`): POST ticks a habit via `completeHabit`, GET only checks the link.
+The Stoic journal (stoic.cura-gp.app, a separate private repo) calls it from the browser after an
+entry is saved, so it authenticates with `Authorization: Bearer $HABIT_LOG_SECRET` and answers CORS
+only for `HABIT_LOG_ORIGINS` (comma-separated, default `https://stoic.cura-gp.app`). Keep it
+content-free: the journal's privacy model allows Cura to learn "journaled today", nothing more.
+
 ### Calendar sync
 `src/lib/calendar.ts` (`server-only`) is a read-only sync from ICS feed URLs
 (`GMAIL_CALENDAR_ICS_URL`/`OUTLOOK_CALENDAR_ICS_URL`), cached 5 minutes via `unstable_cache`

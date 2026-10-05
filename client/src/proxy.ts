@@ -17,6 +17,7 @@ export const config = {
 	// api/notify-action is hit by ntfy notification action buttons carrying the cron secret.
 	// api/email-inbound is the Postmark inbound webhook, authenticated by a secret in the URL path
 	// (see api/email-inbound/[secret]/route.ts) plus a sender allowlist.
+	// api/habit-log takes a bearer secret from the Stoic journal (see api/habit-log/[id]/route.ts).
 	// sw.js must load without a session so the service worker can register/update on any device.
-	matcher: ["/((?!api/auth|api/cron|api/voice-capture|api/mcp|api/notify-action|api/email-inbound|_next/static|_next/image|favicon.ico|icon.png|apple-icon.png|sw.js|manifest.webmanifest).*)"],
+	matcher: ["/((?!api/auth|api/cron|api/voice-capture|api/mcp|api/notify-action|api/email-inbound|api/habit-log|_next/static|_next/image|favicon.ico|icon.png|apple-icon.png|sw.js|manifest.webmanifest).*)"],
 };
