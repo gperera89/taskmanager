@@ -6,7 +6,7 @@ import { useTaskbook } from "./store";
 import { parseTaskForm } from "./formParse";
 import { AutoGrowTextarea, Chip, labelClass, REVEAL_ON_HOVER } from "./shared";
 import { AnimatedList, useCompletionHold } from "./motion";
-import { DateTimePickerPanel, formatPickerLabel } from "./DateTimePicker";
+import { DateTimePickerPanel, PickerPopover, formatPickerLabel } from "./DateTimePicker";
 import SearchBar from "./SearchBar";
 import { TaskRow } from "./TasksView";
 import type { CategoryOption, ProjectCardVM, ProjectOption } from "./types";
@@ -429,13 +429,20 @@ function ProjectCard({
               </button>
             </div>
             {newTaskDueOpen && (
-              <div ref={newTaskDuePanelRef} className="mx-auto w-fit max-w-full rounded-lg border border-(--accent-text) bg-(--card) p-2.5">
-                <DateTimePickerPanel
-                  dateValue={newTaskDueDate}
-                  timeValue={newTaskDueTime}
-                  onChangeDate={setNewTaskDueDate}
-                  onChangeTime={setNewTaskDueTime}
-                />
+              <PickerPopover
+                panelRef={newTaskDuePanelRef}
+                onDone={() => setNewTaskDueOpen(false)}
+                inlineClassName="mx-auto w-fit max-w-full rounded-lg border border-(--accent-text) bg-(--card) p-2.5"
+                render={(large) => (
+                  <DateTimePickerPanel
+                    large={large}
+                    dateValue={newTaskDueDate}
+                    timeValue={newTaskDueTime}
+                    onChangeDate={setNewTaskDueDate}
+                    onChangeTime={setNewTaskDueTime}
+                  />
+                )}
+              >
                 <button
                   type="button"
                   onClick={() => {
@@ -446,7 +453,7 @@ function ProjectCard({
                 >
                   Clear
                 </button>
-              </div>
+              </PickerPopover>
             )}
           </form>
         ) : (

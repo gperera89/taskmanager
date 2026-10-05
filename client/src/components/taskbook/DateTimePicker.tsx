@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { buildMonthCells, pad2 } from "@/lib/taskbookDates";
 
 const WEEKDAY_HEADERS = ["M", "T", "W", "T", "F", "S", "S"];
@@ -64,12 +65,14 @@ export function DateTimePickerPanel({
   onChangeDate,
   onChangeTime,
   dateOnly = false,
+  large = false,
 }: {
   dateValue: string; // yyyy-mm-dd, "" if unset
   timeValue: string; // HH:MM, "" if unset
   onChangeDate: (date: string) => void;
   onChangeTime: (time: string) => void;
   dateOnly?: boolean; // hide the time column — for pickers with no clock component (e.g. routine pause)
+  large?: boolean; // phone layout: calendar stacked over a big hour-per-row time grid (see PickerPopover)
 }) {
   const initial = dateValue ? new Date(`${dateValue}T00:00:00`) : new Date();
   const [viewedYear, setViewedYear] = useState(initial.getFullYear());
@@ -120,6 +123,110 @@ export function DateTimePickerPanel({
     // Only on mount — this mirrors the panel's own lifecycle (it's remounted fresh each time
     // the picker is opened), so re-running on every keystroke/selection would fight the user.
   }, []);
+
+  if (large) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex-none">
+          <div className="mb-2 flex items-center justify-between">
+            <button type="button" onClick={goPrevMonth} aria-label="Previous month" className="cursor-pointer rounded-md p-2.5">
+              <svg width="16" height="16" viewBox="0 -960 960 960">
+                <path d="M400-80 0-480l400-400 71 71-329 329 329 329-71 71Z" style={{ fill: "var(--ink-muted)" }} />
+              </svg>
+            </button>
+            <span className="text-[16px] font-medium text-(--ink)">
+              {MONTH_NAMES[viewedMonth0]} {viewedYear}
+            </span>
+            <button type="button" onClick={goNextMonth} aria-label="Next month" className="cursor-pointer rounded-md p-2.5">
+              <svg width="16" height="16" viewBox="0 -960 960 960">
+                <path d="m321-80-71-71 329-329-329-329 71-71 400 400L321-80Z" style={{ fill: "var(--ink-muted)" }} />
+              </svg>
+            </button>
+          </div>
+          <div className="mb-1 grid grid-cols-7">
+            {WEEKDAY_HEADERS.map((w, i) => (
+              <div key={i} className="text-center text-[11px] uppercase tracking-widest text-(--ink-soft)">
+                {w}
+              </div>
+            ))}
+          </div>
+          <div className="grid grid-cols-7 gap-1">
+            {cells.map((cell) => {
+              const isSelected =
+                !!selectedYMD &&
+                cell.inMonth &&
+                selectedYMD.year === viewedYear &&
+                selectedYMD.month0 === viewedMonth0 &&
+                selectedYMD.day === cell.day;
+              const adjacentDirection = cell.key.startsWith("prev-") ? "prev" : cell.key.startsWith("next-") ? "next" : null;
+              const handleClick = cell.inMonth
+                ? () => selectDay(viewedYear, viewedMonth0, cell.day)
+                : adjacentDirection
+                  ? () => clickAdjacentDay(adjacentDirection, cell.day)
+                  : undefined;
+              return (
+                <button
+                  type="button"
+                  key={cell.key}
+                  onClick={handleClick}
+                  disabled={!handleClick}
+                  className="flex h-10 items-center justify-center rounded-lg text-[16px] select-none"
+                  style={{
+                    color: isSelected ? "var(--on-accent)" : cell.inMonth ? "var(--ink)" : "var(--ink-disabled)",
+                    background: isSelected ? "var(--accent)" : cell.isToday ? "var(--accent-wash)" : "transparent",
+                    cursor: handleClick ? "pointer" : "default",
+                  }}
+                >
+                  {cell.day}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        {!dateOnly && (
+          <div className="mt-3 flex min-h-0 flex-1 flex-col border-t border-(--border-soft) pt-3">
+            <button
+              type="button"
+              onClick={() => onChangeTime("")}
+              className="mb-2 flex-none rounded-lg px-3 py-2 text-left text-[14px] italic"
+              style={{
+                color: !timeValue ? "var(--accent-text)" : "var(--ink-soft)",
+                background: !timeValue ? "var(--accent-wash)" : "transparent",
+              }}
+            >
+              No time
+            </button>
+            {/* One row per hour. The list scrolls on its own (overscroll-contain) — and the popover
+                locks the page behind it — so flicking through times never drags the screen. */}
+            <div
+              ref={timeListRef}
+              className="relative grid min-h-35 max-h-65 flex-1 grid-cols-4 content-start gap-1 overflow-y-auto overscroll-contain"
+            >
+              {TIME_SLOTS.map((t) => {
+                const isActive = t === activeTime;
+                const isSet = isActive && !!timeValue;
+                return (
+                  <button
+                    type="button"
+                    key={t}
+                    ref={isActive ? activeTimeRef : undefined}
+                    onClick={() => onChangeTime(t)}
+                    className="flex h-11 items-center justify-center rounded-lg text-[14px] whitespace-nowrap"
+                    style={{
+                      background: isSet ? "var(--accent)" : isActive ? "var(--accent-wash)" : "transparent",
+                      color: isSet ? "var(--on-accent)" : t.endsWith(":00") ? "var(--ink-strong)" : "var(--ink-muted)",
+                    }}
+                  >
+                    {formatTimeLabel(t)}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     // The columns shrink rather than overflow (`min-w-0` + `flex-1` capped at the desktop width):
@@ -221,5 +328,101 @@ export function DateTimePickerPanel({
       </div>
       )}
     </div>
+  );
+}
+
+function useIsPhoneLayout(): boolean {
+  // Matches TaskbookApp's own mobile split (below the 1024px lg breakpoint). Pickers only mount
+  // after a tap, so reading matchMedia in the initializer never runs during SSR.
+  const [isPhone, setIsPhone] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 1023px)").matches);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 1023px)");
+    const update = () => setIsPhone(mq.matches);
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
+  return isPhone;
+}
+
+/** Container for a DateTimePickerPanel. On desktop it's the familiar inline bordered panel (with
+    `inlineClassName`). On a phone it opens as a centred popup over a dimmed backdrop, with the
+    large panel layout and a Done button, and locks the page scroll behind it.
+
+    `panelRef` lands on the element callers' click-away listeners treat as "inside" — on a phone
+    that's the whole overlay, backdrop included, so a backdrop tap is handled here (`onDone`) rather
+    than by the caller's outside-click logic (which, e.g. in the project add-task row, would also
+    submit the half-typed task). `onDone` should do whatever a click-away does at that call site. */
+export function PickerPopover({
+  panelRef,
+  onDone,
+  title,
+  inlineClassName,
+  render,
+  children,
+}: {
+  panelRef?: RefObject<HTMLDivElement | null>;
+  onDone: () => void;
+  title?: string;
+  inlineClassName: string;
+  render: (large: boolean) => ReactNode; // the DateTimePickerPanel, given the layout to use
+  children?: ReactNode; // extras under the panel (Clear, reminder select…)
+}) {
+  const isPhone = useIsPhoneLayout();
+
+  useEffect(() => {
+    if (!isPhone) return;
+    const html = document.documentElement;
+    const prevHtml = html.style.overflow;
+    const prevBody = document.body.style.overflow;
+    html.style.overflow = "hidden";
+    document.body.style.overflow = "hidden";
+    return () => {
+      html.style.overflow = prevHtml;
+      document.body.style.overflow = prevBody;
+    };
+  }, [isPhone]);
+
+  if (!isPhone) {
+    return (
+      <div ref={panelRef} className={inlineClassName}>
+        {render(false)}
+        {children}
+      </div>
+    );
+  }
+
+  return createPortal(
+    <div
+      ref={panelRef}
+      data-picker-popover
+      className="fixed inset-0 z-50 flex items-center justify-center bg-(--overlay) p-4"
+      style={{ touchAction: "none" }}
+      // React events bubble through portals to the caller's tree — keep a backdrop tap from also
+      // reaching e.g. ItemModal's own click-to-close overlay.
+      onClick={(e) => {
+        e.stopPropagation();
+        if (e.target === e.currentTarget) onDone();
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="flex max-h-full w-full max-w-100 flex-col rounded-2xl border border-(--border-strong) bg-(--card) p-4 shadow-[0_16px_48px_rgba(40,30,15,.28)]"
+      >
+        <div className="mb-2 flex flex-none items-center justify-between gap-3">
+          <span className="text-[12px] uppercase tracking-[0.14em] text-(--ink-muted)">{title ?? "Due"}</span>
+          <button
+            type="button"
+            onClick={onDone}
+            className="cursor-pointer rounded-lg bg-(--accent) px-4 py-2 text-[14px] font-medium text-(--on-accent)"
+          >
+            Done
+          </button>
+        </div>
+        {render(true)}
+        {children && <div className="flex-none text-[14px]">{children}</div>}
+      </div>
+    </div>,
+    document.body,
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import type { FocusEvent } from "react";
 import { DURATION_OPTIONS, REMINDER_LEAD_OPTIONS, parseDurationInput } from "@/lib/shared";
 import { useTaskbook } from "./store";
@@ -17,7 +17,7 @@ import {
   labelClass,
 } from "./shared";
 import { AnimatedList, leavingStyle, useCompletionHold } from "./motion";
-import { DateTimePickerPanel } from "./DateTimePicker";
+import { DateTimePickerPanel, PickerPopover } from "./DateTimePicker";
 import RepeatFields from "./RepeatFields";
 import SearchBar from "./SearchBar";
 import type { CategoryOption, ProjectOption, TaskGroupVM, TaskItemVM } from "./types";
@@ -254,18 +254,22 @@ export function TaskRow({
   // misses plain clicks-away entirely. Watching for a pointerdown outside the panel works
   // regardless of focus behavior.
   const duePanelRef = useRef<HTMLDivElement>(null);
+  // Close + commit the draft — shared by the click-away below and the phone popup's Done/backdrop.
+  const commitDue = useCallback(() => {
+    setDueOpen(false);
+    if (dueDateDraft !== task.dueDateValue || dueTimeDraft !== task.dueTimeValue) {
+      actions.setTaskDue(task.id, dueDateDraft, dueTimeDraft);
+    }
+  }, [dueDateDraft, dueTimeDraft, task.id, task.dueDateValue, task.dueTimeValue, actions]);
   useEffect(() => {
     if (!dueOpen) return;
     function handlePointerDown(e: PointerEvent) {
       if (duePanelRef.current?.contains(e.target as Node)) return;
-      setDueOpen(false);
-      if (dueDateDraft !== task.dueDateValue || dueTimeDraft !== task.dueTimeValue) {
-        actions.setTaskDue(task.id, dueDateDraft, dueTimeDraft);
-      }
+      commitDue();
     }
     document.addEventListener("pointerdown", handlePointerDown);
     return () => document.removeEventListener("pointerdown", handlePointerDown);
-  }, [dueOpen, dueDateDraft, dueTimeDraft, task.id, task.dueDateValue, task.dueTimeValue, actions]);
+  }, [dueOpen, commitDue]);
 
   function clearDue() {
     setDueDateDraft("");
@@ -301,6 +305,8 @@ export function TaskRow({
   function commitRepeatBlur(e: FocusEvent<HTMLDivElement>) {
     const next = e.relatedTarget as Node | null;
     if (next && e.currentTarget.contains(next)) return;
+    // The break row's phone date popup is portalled to <body>, outside this div's DOM.
+    if (next instanceof Element && next.closest("[data-picker-popover]")) return;
     setRepeatOpen(false);
     if (repeatChangedRef.current) actions.setTaskRepeat(task.id, repeatDraftRef.current);
   }
@@ -648,13 +654,20 @@ export function TaskRow({
         </div>
 
         {dueOpen && (
-          <div ref={duePanelRef} className="mt-2 mx-auto w-fit max-w-full rounded-lg border border-(--accent-text) bg-(--card) p-2.5">
-            <DateTimePickerPanel
-              dateValue={dueDateDraft}
-              timeValue={dueTimeDraft}
-              onChangeDate={(d) => updateDueDraft(d, dueTimeDraft)}
-              onChangeTime={(t) => updateDueDraft(dueDateDraft, t)}
-            />
+          <PickerPopover
+            panelRef={duePanelRef}
+            onDone={commitDue}
+            inlineClassName="mt-2 mx-auto w-fit max-w-full rounded-lg border border-(--accent-text) bg-(--card) p-2.5"
+            render={(large) => (
+              <DateTimePickerPanel
+                large={large}
+                dateValue={dueDateDraft}
+                timeValue={dueTimeDraft}
+                onChangeDate={(d) => updateDueDraft(d, dueTimeDraft)}
+                onChangeTime={(t) => updateDueDraft(dueDateDraft, t)}
+              />
+            )}
+          >
             <div className="mt-2 flex items-center justify-between gap-3">
               <select
                 value={task.reminderLeadMinutes ?? ""}
@@ -679,7 +692,7 @@ export function TaskRow({
                 </button>
               )}
             </div>
-          </div>
+          </PickerPopover>
         )}
 
         {repeatOpen && (
@@ -853,18 +866,24 @@ function TaskBreakRow({ task }: { task: TaskItemVM }) {
         )}
       </div>
       {editing && (
-        <div className="mt-2 mx-auto w-fit max-w-full rounded-lg border border-(--accent-text) bg-(--card) p-2.5">
-          <DateTimePickerPanel
-            dateOnly
-            dateValue={task.pausedUntilValue}
-            timeValue=""
-            onChangeDate={(d) => {
-              actions.setTaskPause(task.id, d);
-              setEditing(false);
-            }}
-            onChangeTime={() => {}}
-          />
-        </div>
+        <PickerPopover
+          onDone={() => setEditing(false)}
+          title="Pause until"
+          inlineClassName="mt-2 mx-auto w-fit max-w-full rounded-lg border border-(--accent-text) bg-(--card) p-2.5"
+          render={(large) => (
+            <DateTimePickerPanel
+              dateOnly
+              large={large}
+              dateValue={task.pausedUntilValue}
+              timeValue=""
+              onChangeDate={(d) => {
+                actions.setTaskPause(task.id, d);
+                setEditing(false);
+              }}
+              onChangeTime={() => {}}
+            />
+          )}
+        />
       )}
     </div>
   );

@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { useModalActions } from "./ModalContext";
 import { useTaskbook } from "./store";
-import { DateTimePickerPanel } from "./DateTimePicker";
+import { DateTimePickerPanel, PickerPopover } from "./DateTimePicker";
 import SearchBar from "./SearchBar";
 import { CheckSquare, Chip, labelClass, RowDeleteButton, StrikeSweep } from "./shared";
 import { AnimatedList, leavingStyle, useCompletionHold } from "./motion";
@@ -213,22 +213,28 @@ function RoutineRow({
               </button>
             )}
             {editingPause && (
-              <div
-                ref={pausePanelRef}
-                className="absolute left-0 top-6 z-20 mx-auto w-fit max-w-full rounded-lg border border-(--accent-text) bg-(--card) p-2.5 shadow-[0_8px_24px_rgba(70,55,30,.18)]"
-              >
-                <div className="mb-2 text-[11px] uppercase tracking-[0.14em] text-(--ink-muted)">Pause until</div>
-                <DateTimePickerPanel
-                  dateOnly
-                  dateValue={routine.pausedUntil ?? ""}
-                  timeValue=""
-                  onChangeDate={(d) => {
-                    actions.setRoutinePause(routine.id, d);
-                    setEditingPause(false);
-                  }}
-                  onChangeTime={() => {}}
-                />
-              </div>
+              <PickerPopover
+                panelRef={pausePanelRef}
+                onDone={() => setEditingPause(false)}
+                title="Pause until"
+                inlineClassName="absolute left-0 top-6 z-20 mx-auto w-fit max-w-full rounded-lg border border-(--accent-text) bg-(--card) p-2.5 shadow-[0_8px_24px_rgba(70,55,30,.18)]"
+                render={(large) => (
+                  <>
+                    {!large && <div className="mb-2 text-[11px] uppercase tracking-[0.14em] text-(--ink-muted)">Pause until</div>}
+                    <DateTimePickerPanel
+                      dateOnly
+                      large={large}
+                      dateValue={routine.pausedUntil ?? ""}
+                      timeValue=""
+                      onChangeDate={(d) => {
+                        actions.setRoutinePause(routine.id, d);
+                        setEditingPause(false);
+                      }}
+                      onChangeTime={() => {}}
+                    />
+                  </>
+                )}
+              />
             )}
             {routine.pausedUntil && (
               <button

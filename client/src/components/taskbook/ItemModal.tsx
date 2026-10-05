@@ -16,7 +16,7 @@ import {
   parseTaskForm,
 } from "./formParse";
 import CategoryManager from "./CategoryManager";
-import { DateTimePickerPanel, formatPickerLabel } from "./DateTimePicker";
+import { DateTimePickerPanel, PickerPopover, formatPickerLabel } from "./DateTimePicker";
 import RepeatFields from "./RepeatFields";
 import { AutoGrowTextarea, DurationField, SelectField } from "./shared";
 import type { CategoryOption, CountdownVM, HabitCardVM, HabitScheduleType, ModalState, ProjectCardVM, ProjectOption, RoutineItemVM } from "./types";
@@ -298,8 +298,14 @@ function TaskForm({
         </div>
       )}
       {dueOpen && (
-        <div ref={duePanelRef} className="mx-auto w-fit max-w-full rounded-lg border border-(--accent-text) bg-(--card) p-2.5">
-          <DateTimePickerPanel dateValue={dueDate} timeValue={dueTime} onChangeDate={setDueDate} onChangeTime={setDueTime} />
+        <PickerPopover
+          panelRef={duePanelRef}
+          onDone={() => setDueOpen(false)}
+          inlineClassName="mx-auto w-fit max-w-full rounded-lg border border-(--accent-text) bg-(--card) p-2.5"
+          render={(large) => (
+            <DateTimePickerPanel large={large} dateValue={dueDate} timeValue={dueTime} onChangeDate={setDueDate} onChangeTime={setDueTime} />
+          )}
+        >
           <button
             type="button"
             onClick={() => {
@@ -310,7 +316,7 @@ function TaskForm({
           >
             Clear
           </button>
-        </div>
+        </PickerPopover>
       )}
       <RepeatFields />
       <Actions submitLabel="Add task" />
