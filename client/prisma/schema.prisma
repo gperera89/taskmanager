@@ -83,6 +83,7 @@ model Note {
   project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  tasks     Task[]
 
   @@index([projectId])
 }
@@ -158,10 +159,19 @@ model Task {
   projectId   String?
   project     Project?  @relation(fields: [projectId], references: [id])
 
+  // A task made from a checkbox line in a note (`- [ ] … ^cura-<noteBlockId>`). The pair links the
+  // line and the task both ways — ticking either ticks both (see lib/noteTasks.ts). Deleting the
+  // note leaves its tasks behind as ordinary tasks.
+  noteId      String?
+  note        Note?     @relation(fields: [noteId], references: [id], onDelete: SetNull)
+  noteBlockId String?
+
   // Subtasks: a task can be broken down into child tasks of itself.
   parentId    String?
   parent      Task?     @relation("TaskSubtasks", fields: [parentId], references: [id], onDelete: Cascade)
   subtasks    Task[]    @relation("TaskSubtasks")
+
+  @@index([noteId])
 }
 
 enum CapturedKind {

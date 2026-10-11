@@ -394,9 +394,11 @@ export default function TaskbookApp() {
         />
         <StatusBanners />
 
-        <div className="relative flex min-h-0 flex-1">
+        {/* min-w-0 throughout: this row holds the carousel, whose min-content width is every
+            panel side by side — without it the row grows to fit them and pushes the page wide. */}
+        <div className="relative flex min-h-0 min-w-0 flex-1">
         {isMobile ? (
-          <div className="relative flex min-h-0 flex-1">
+          <div className="relative flex min-h-0 min-w-0 flex-1">
             <div
               ref={scrollRef}
               onScroll={onCarouselScroll}
@@ -418,7 +420,7 @@ export default function TaskbookApp() {
             )}
           </div>
         ) : (
-          <div className="flex min-h-0 flex-1">
+          <div className="flex min-h-0 min-w-0 flex-1">
             <div className="flex-1 overflow-y-auto px-11 py-8 pb-10">
               {viewFor(area)}
               {area === "day" && dayDetail && myDay && (

@@ -24,6 +24,7 @@ import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirro
 import { HighlightStyle, syntaxHighlighting, syntaxTree } from "@codemirror/language";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { tags } from "@lezer/highlight";
+import { diffChanges } from "@/lib/noteTasks";
 
 const highlight = HighlightStyle.define([
   { tag: tags.heading1, fontSize: "1.6em", fontWeight: "600", lineHeight: "1.3" },
@@ -95,6 +96,10 @@ class CheckboxWidget extends WidgetType {
 const remoteChange = Annotation.define<boolean>();
 
 const doneLine = Decoration.mark({ class: "cm-note-done" });
+// The " ^cura-k3x9q2" block id that links a checkbox line to its task — bookkeeping, not
+// writing, so it's hidden here (Obsidian shows it faintly).
+const hiddenBlockId = Decoration.replace({});
+const BLOCK_ID_IN_LINE = /\s?\^cura-[a-z0-9]+(?=\s|$)/g;
 
 // GFM task markers ("[ ]" / "[x]" inside a list item) become checkbox widgets, and a ticked
 // item's text is struck through — Obsidian's live-preview look for the one construct that
@@ -110,10 +115,15 @@ function checkboxDecorations(view: EditorView): DecorationSet {
         const text = view.state.doc.sliceString(node.from, node.to);
         const checked = /\[[xX]\]/.test(text);
         ranges.push(Decoration.replace({ widget: new CheckboxWidget(checked, node.from) }).range(node.from, node.to));
-        if (checked) {
-          const line = view.state.doc.lineAt(node.to);
-          if (line.to > node.to + 1) ranges.push(doneLine.range(node.to + 1, line.to));
+        const line = view.state.doc.lineAt(node.to);
+        const ids: { from: number; to: number }[] = [];
+        for (const m of line.text.matchAll(BLOCK_ID_IN_LINE)) {
+          ids.push({ from: line.from + m.index!, to: line.from + m.index! + m[0].length });
         }
+        // Strike through the text up to the (hidden) block id, not across it.
+        const textEnd = ids.length ? ids[0].from : line.to;
+        if (checked && textEnd > node.to + 1) ranges.push(doneLine.range(node.to + 1, textEnd));
+        for (const id of ids) ranges.push(hiddenBlockId.range(id.from, id.to));
       },
     });
   }
@@ -132,20 +142,31 @@ const checkboxes = ViewPlugin.fromClass(
       }
     }
   },
-  { decorations: (v) => v.decorations }
+  {
+    decorations: (v) => v.decorations,
+    // The caret steps over a hidden block id as one unit instead of wandering inside it.
+    provide: (plugin) => EditorView.atomicRanges.of((view) => view.plugin(plugin)?.decorations ?? Decoration.none),
+  }
 );
+
+// What NotePage can do to a live editor. `apply` runs a transform over the current text and
+// dispatches only the lines that changed (so the caret stays put), returning the new text. It's
+// marked as a remote change: not the user's typing, so it's kept out of undo history and not
+// reported back through onDocChange.
+export type MarkdownEditorHandle = {
+  apply: (transform: (doc: string) => string) => string;
+  focus: () => void;
+};
 
 export default function MarkdownEditor({
   initialDoc,
-  externalDoc,
+  onReady,
   onDocChange,
   placeholder = "Start writing…",
   autoFocus = false,
 }: {
   initialDoc: string;
-  // A doc pushed in from outside (another device's edit). Replaces the editor's content when it
-  // differs — the caller decides when that's safe (see NotePage), this just applies it.
-  externalDoc?: { text: string; seq: number };
+  onReady: (handle: MarkdownEditorHandle | null) => void;
   onDocChange: (text: string) => void;
   placeholder?: string;
   autoFocus?: boolean;
@@ -183,27 +204,26 @@ export default function MarkdownEditor({
     });
     viewRef.current = view;
     if (autoFocus) view.focus();
+    onReady({
+      apply: (transform) => {
+        const current = view.state.doc.toString();
+        const next = transform(current);
+        const changes = diffChanges(current, next);
+        if (changes.length) {
+          view.dispatch({ changes, annotations: [remoteChange.of(true), Transaction.addToHistory.of(false)] });
+        }
+        return next;
+      },
+      focus: () => view.focus(),
+    });
     return () => {
+      onReady(null);
       view.destroy();
       viewRef.current = null;
     };
     // initialDoc/placeholder/autoFocus are mount-time only by design.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  useEffect(() => {
-    const view = viewRef.current;
-    if (!view || !externalDoc) return;
-    const current = view.state.doc.toString();
-    if (current === externalDoc.text) return;
-    const head = Math.min(view.state.selection.main.head, externalDoc.text.length);
-    view.dispatch({
-      changes: { from: 0, to: current.length, insert: externalDoc.text },
-      selection: { anchor: head },
-      // Not the user's typing — keep it out of their undo history.
-      annotations: [remoteChange.of(true), Transaction.addToHistory.of(false)],
-    });
-  }, [externalDoc]);
 
   return <div ref={hostRef} className="min-h-[50vh] font-serif" />;
 }

@@ -144,6 +144,19 @@ save straight after a create without a temp-id swap; `createNote` upserts to sta
 under outbox retries. Body edits are saved on a ~1.2s debounce (one queued write each), and an
 incoming server copy only replaces the editor's text when nothing local is unsaved.
 
+**Checkbox lines are tasks.** `- [ ] text` in a note becomes a task (in the note's project, or
+standalone if Unfiled), linked by an Obsidian block id appended to the line (`^cura-k3x9q2`,
+stored as `Task.noteBlockId`; hidden in Cura's editor). `src/lib/noteTasks.ts` is the shared,
+client-safe logic (parse, assign ids, plan the sync, edit a line by block id). The server is
+authoritative: `saveNoteBody` in `api.ts` creates/renames/ticks tasks from the body, and
+`toggleTaskCompletion`/`updateTask`/`deleteTask` edit the linked line back — so every path that
+touches a task (MCP, notification actions, voice) keeps its note in step. The store mirrors both
+directions optimistically and sends the ids of tasks it created as hints, so client and server
+rows match without a swap. A removed line never deletes its task server-side; the app warns
+(toast with "Keep task") and deletes after the undo window. Edits to an open note made from
+elsewhere in the app reach the editor via `subscribeNoteEdits` rather than raw state, since the
+editor holds unsaved text the store hasn't seen.
+
 ### Voice capture
 `Header.tsx`'s mic button records audio client-side and posts it to
 `/api/voice-capture` (`src/app/api/voice-capture/route.ts`), which transcribes it with Whisper and

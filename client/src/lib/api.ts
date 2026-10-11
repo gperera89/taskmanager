@@ -4,6 +4,15 @@ import { prisma } from "@/lib/db";
 import { nextOccurrence, resolveTaskRepeat, type TaskRepeatRule } from "@/lib/taskRecurrence";
 import { DEFAULT_TIME_ZONE, SUPPORTED_TIME_ZONES } from "@/lib/taskbookDates";
 import {
+  assignBlockIds,
+  defaultNoteTaskCategory,
+  hasCheckboxLines,
+  planNoteTaskSync,
+  removeBlockLine,
+  setBlockChecked,
+  setBlockTitle,
+} from "@/lib/noteTasks";
+import {
   combineDueDateTime,
   habitDateKey,
   MS_PER_DAY,
@@ -151,8 +160,8 @@ export function updateTask(
     pausedUntil: string | null; // "YYYY-MM-DD" — break/holiday; null clears it
   }>
 ) {
-  return notFoundAsError("Task not found", () =>
-    prisma.task.update({
+  return notFoundAsError("Task not found", async () => {
+    const task = await prisma.task.update({
       where: { id },
       data: {
         title: input.title,
@@ -175,8 +184,24 @@ export function updateTask(
           input.pausedUntil === undefined ? undefined : input.pausedUntil ? combineDueDateTime(input.pausedUntil) : null,
         ...(input.repeat === undefined ? {} : repeatToPrismaData(input.repeat)),
       },
-    })
-  );
+    });
+    if (input.title !== undefined) await editTaskNoteLine(task, (body, blockId) => setBlockTitle(body, blockId, task.title));
+    return task;
+  });
+}
+
+// A task made from a note's checkbox line carries its edits back to that line — the other half
+// of the link that saveNoteBody below maintains from the note side. Costs nothing for ordinary
+// tasks; two operations (read + write the note) for linked ones.
+async function editTaskNoteLine(
+  task: { noteId: string | null; noteBlockId: string | null },
+  edit: (body: string, blockId: string) => string
+) {
+  if (!task.noteId || !task.noteBlockId) return;
+  const note = await prisma.note.findUnique({ where: { id: task.noteId }, select: { body: true } });
+  if (!note) return;
+  const next = edit(note.body, task.noteBlockId);
+  if (next !== note.body) await prisma.note.update({ where: { id: task.noteId }, data: { body: next } });
 }
 
 // Rewrites the manual order of a whole group (a due bucket or a project section) in one
@@ -202,13 +227,28 @@ export async function deleteTask(id: string) {
   // Subtasks cascade-delete with their parent (see schema: parent relation onDelete: Cascade).
   const task = await notFoundAsError("Task not found", () => prisma.task.delete({ where: { id } }));
   await deleteDayPlanBlocksFor("TASK", id);
+  await editTaskNoteLine(task, removeBlockLine);
   return task;
+}
+
+// Detaches a task from the note line it came from — the "Keep task" answer when its line is
+// removed from the note. The task carries on as an ordinary task.
+export function unlinkTaskFromNote(id: string) {
+  return notFoundAsError("Task not found", () =>
+    prisma.task.update({ where: { id }, data: { noteId: null, noteBlockId: null } })
+  );
 }
 
 // Completing a repeating task rolls its due date forward to the next occurrence in place
 // (isCompleted stays false) rather than marking it done — mirrors how Routines tick and
 // reset instead of leaving a trail of completed rows. Non-repeating tasks just toggle normally.
 export async function toggleTaskCompletion(id: string, isCompleted: boolean) {
+  const task = await toggleTaskCompletionRow(id, isCompleted);
+  await editTaskNoteLine(task, (body, blockId) => setBlockChecked(body, blockId, task.isCompleted));
+  return task;
+}
+
+async function toggleTaskCompletionRow(id: string, isCompleted: boolean) {
   if (isCompleted) {
     // Un-completing: clear the completion stamp and take back the (recent) history row.
     return notFoundAsError("Task not found", async () => {
@@ -372,17 +412,85 @@ export function createNote(input: { id: string; title: string; projectId?: strin
   });
 }
 
-export function updateNote(id: string, input: Partial<{ title: string; body: string; projectId: string | null }>) {
-  return notFoundAsError("Note not found", () =>
-    prisma.note.update({
+export function updateNote(id: string, input: Partial<{ title: string; projectId: string | null }>) {
+  return notFoundAsError("Note not found", async () => {
+    const note = await prisma.note.update({
       where: { id },
       data: {
         title: input.title === undefined ? undefined : input.title.trim() || NOTE_TITLE_FALLBACK,
-        body: input.body,
         projectId: input.projectId === undefined ? undefined : input.projectId || null,
       },
-    })
-  );
+    });
+    // A note's tasks follow it into (or out of) a project.
+    if (input.projectId !== undefined) {
+      await prisma.task.updateMany({ where: { noteId: id }, data: { projectId: note.projectId } });
+    }
+    return note;
+  });
+}
+
+// What the app tells the server alongside a body it has already synced optimistically, so both
+// sides end up with identical rows: the ids and categories it gave the tasks it created (keyed by
+// block id), and how many tasks were linked to the note beforehand. A save with no hints (the
+// Obsidian bridge) gets ids and categories minted here instead.
+export type NoteSaveHints = {
+  creates?: Record<string, { id: string; category: string }>;
+  linked?: number;
+};
+
+// Saves a note's body and brings its tasks in line with its checkbox lines: new lines become
+// tasks, edited lines rename them, ticked lines complete them. Lines that disappeared are left
+// for the caller — the app asks before deleting (see store.tsx), so the sync never deletes.
+// Returns the body as stored, which can differ from the input: block ids are assigned, and a
+// ticked repeating task that rolled forward to its next date has its box un-ticked again.
+export async function saveNoteBody(id: string, input: string, hints?: NoteSaveHints): Promise<string> {
+  let body = assignBlockIds(input);
+  // The common case — prose with no checkboxes, in a note that never had any — is one write.
+  if (hints?.linked === 0 && !hasCheckboxLines(body)) {
+    await notFoundAsError("Note not found", () => prisma.note.update({ where: { id }, data: { body } }));
+    return body;
+  }
+  return notFoundAsError("Note not found", async () => {
+    const note = await prisma.note.findUniqueOrThrow({
+      where: { id },
+      select: { projectId: true, tasks: { select: { id: true, noteBlockId: true, title: true, isCompleted: true } } },
+    });
+    const plan = planNoteTaskSync(body, note.tasks);
+    const blockOf = new Map(note.tasks.map((t) => [t.id, t.noteBlockId]));
+
+    if (plan.creates.length) {
+      let fallbackCategory: string | null = null;
+      if (plan.creates.some((c) => !hints?.creates?.[c.blockId])) {
+        const [projectTasks, categories] = await Promise.all([
+          note.projectId ? prisma.task.findMany({ where: { projectId: note.projectId }, select: { category: true } }) : [],
+          getCategories(),
+        ]);
+        fallbackCategory = defaultNoteTaskCategory(projectTasks.map((t) => t.category), categories.map((c) => c.name));
+      }
+      const rows = plan.creates.map((c) => ({
+        id: hints?.creates?.[c.blockId]?.id ?? crypto.randomUUID(),
+        title: c.title,
+        category: hints?.creates?.[c.blockId]?.category ?? fallbackCategory ?? "Work",
+        projectId: note.projectId,
+        noteId: id,
+        noteBlockId: c.blockId,
+      }));
+      // skipDuplicates: an outbox retry of a save that did land must not trip on the ids.
+      await prisma.task.createMany({ data: rows, skipDuplicates: true });
+      rows.forEach((row, i) => {
+        blockOf.set(row.id, row.noteBlockId);
+        if (plan.creates[i].checked) plan.toggles.push({ taskId: row.id, isCompleted: false });
+      });
+    }
+    for (const r of plan.renames) await prisma.task.update({ where: { id: r.taskId }, data: { title: r.title } });
+    for (const t of plan.toggles) {
+      const after = await toggleTaskCompletionRow(t.taskId, t.isCompleted);
+      const blockId = blockOf.get(t.taskId);
+      if (blockId && after.isCompleted === t.isCompleted) body = setBlockChecked(body, blockId, after.isCompleted);
+    }
+    await prisma.note.update({ where: { id }, data: { body } });
+    return body;
+  });
 }
 
 export async function deleteNote(id: string) {

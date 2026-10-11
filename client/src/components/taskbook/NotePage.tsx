@@ -10,6 +10,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTaskbook } from "./store";
 import { useModalActions } from "./ModalContext";
 import { ProjectCard } from "./ProjectsView";
+import { TaskRow } from "./TasksView";
+import type { MarkdownEditorHandle } from "./MarkdownEditor";
 import { labelClass, selectCaretStyle, SELECT_CARET_INFO } from "./shared";
 import type { CategoryOption, ProjectCardVM, ProjectOption } from "./types";
 
@@ -41,26 +43,41 @@ export default function NotePage({
   projectOptions: ProjectOption[];
   projectCards: ProjectCardVM[];
 }) {
-  const { raw, actions } = useTaskbook();
+  const { raw, actions, subscribeNoteEdits } = useTaskbook();
   const note = raw.notes.find((n) => n.id === noteId);
   const [panelOpen, setPanelOpen] = useState(false);
 
   // --- Body: local-first, saved on a debounce ---
+  // `savedRef` is the text the store last saw for this note; `draftRef` is what's in the editor.
+  // They differ exactly while there's typing waiting to be saved.
+  const editorRef = useRef<MarkdownEditorHandle | null>(null);
+  const onEditorReady = useCallback((handle: MarkdownEditorHandle | null) => {
+    editorRef.current = handle;
+  }, []);
   const savedRef = useRef(note?.body ?? "");
   const draftRef = useRef(note?.body ?? "");
   const lastLocalEditRef = useRef(0);
   const saveTimerRef = useRef<number | null>(null);
-  const [externalDoc, setExternalDoc] = useState<{ text: string; seq: number } | undefined>(undefined);
+
+  // Runs `transform` over the editor's text (only the changed lines are touched, so the caret
+  // stays put) and keeps the draft in step. Falls back to the draft if the editor isn't up yet.
+  const applyToEditor = useCallback((transform: (doc: string) => string) => {
+    draftRef.current = editorRef.current ? editorRef.current.apply(transform) : transform(draftRef.current);
+  }, []);
 
   const flushSave = useCallback(() => {
     if (saveTimerRef.current) {
       window.clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
     }
-    if (draftRef.current === savedRef.current) return;
-    savedRef.current = draftRef.current;
-    actions.setNoteBody(noteId, draftRef.current);
-  }, [actions, noteId]);
+    const draft = draftRef.current;
+    if (draft === savedRef.current) return;
+    // The store syncs the checkbox lines with their tasks and hands back the body as it should now
+    // read — new checkbox lines tagged with their block ids — for the editor to adopt.
+    const stored = actions.saveNoteBody(noteId, draft);
+    savedRef.current = stored;
+    if (stored !== draft) applyToEditor((doc) => (doc === draft ? stored : doc));
+  }, [actions, noteId, applyToEditor]);
 
   const onDocChange = useCallback(
     (text: string) => {
@@ -86,6 +103,19 @@ export default function NotePage({
     };
   }, [flushSave]);
 
+  // Edits to this note made elsewhere in Cura — a linked task ticked in the side panel, renamed or
+  // deleted — arrive as line transforms. They apply to both the saved text and the live draft, so
+  // unsaved typing elsewhere in the note survives, and a note with nothing unsaved stays clean
+  // (the server makes the same edit itself, so there's nothing to save).
+  useEffect(
+    () =>
+      subscribeNoteEdits(noteId, (transform) => {
+        savedRef.current = transform(savedRef.current);
+        applyToEditor(transform);
+      }),
+    [noteId, subscribeNoteEdits, applyToEditor]
+  );
+
   // Another device's edit landed (via the store's reconcile). Take it only when nothing local is
   // unsaved and the editor has been quiet a moment; otherwise the local text wins and its next
   // save overwrites the server copy (last write wins, same as every other field in Cura).
@@ -95,9 +125,8 @@ export default function NotePage({
     const dirty = draftRef.current !== savedRef.current;
     if (dirty || Date.now() - lastLocalEditRef.current < REMOTE_QUIET_MS) return;
     savedRef.current = serverBody;
-    draftRef.current = serverBody;
-    setExternalDoc((prev) => ({ text: serverBody, seq: (prev?.seq ?? 0) + 1 }));
-  }, [serverBody]);
+    applyToEditor(() => serverBody);
+  }, [serverBody, applyToEditor]);
 
   // --- Title ---
   const [titleDraft, setTitleDraft] = useState(note?.title ?? "");
@@ -154,6 +183,9 @@ export default function NotePage({
             Create project from note
           </button>
         </div>
+      )}
+      {!note.projectId && (
+        <NoteTasks noteId={noteId} categoryOptions={categoryOptions} projectOptions={projectOptions} />
       )}
       {project && <SiblingNotes projectId={project.id} currentId={noteId} />}
     </div>
@@ -235,7 +267,7 @@ export default function NotePage({
               if (e.key === "Enter") {
                 e.preventDefault();
                 // Enter moves on into the body, like Obsidian's inline title.
-                (document.querySelector(".cm-content") as HTMLElement | null)?.focus();
+                editorRef.current?.focus();
               }
             }}
             placeholder="Untitled"
@@ -249,7 +281,7 @@ export default function NotePage({
           <MarkdownEditor
             key={noteId}
             initialDoc={note.body}
-            externalDoc={externalDoc}
+            onReady={onEditorReady}
             onDocChange={onDocChange}
             autoFocus={note.body === "" && note.title !== "Untitled"}
           />
@@ -271,6 +303,38 @@ export default function NotePage({
             <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-(--border-strong)" />
             {panel}
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// An Unfiled note's checkbox lines are standalone tasks — listed in the panel so they can be
+// dated and categorised like any other task.
+function NoteTasks({
+  noteId,
+  categoryOptions,
+  projectOptions,
+}: {
+  noteId: string;
+  categoryOptions: CategoryOption[];
+  projectOptions: ProjectOption[];
+}) {
+  const { raw, data } = useTaskbook();
+  const ids = new Set(raw.tasks.filter((t) => t.noteId === noteId).map((t) => t.id));
+  const tasks = data.taskGroups.flatMap((g) => g.tasks).filter((t) => ids.has(t.id));
+  return (
+    <div>
+      <div className={`${labelClass} mb-2`}>Tasks from this note</div>
+      {tasks.length === 0 ? (
+        <p className="text-[13.5px] italic leading-snug text-(--ink-soft)">
+          Type <span className="not-italic">- [ ]</span> at the start of a line to turn it into a task.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {tasks.map((t) => (
+            <TaskRow key={t.id} task={t} categoryOptions={categoryOptions} projectOptions={projectOptions} />
+          ))}
         </div>
       )}
     </div>
