@@ -66,6 +66,25 @@ model Project {
   // "Remove sections" button on the card). Turning it off clears every task's section value.
   sectionsEnabled Boolean @default(false)
   tasks       Task[]
+  notes       Note[]
+}
+
+// A freeform Markdown note — the Capacities-style thinking space. Optionally attached to a
+// project (shown beside it while editing); unattached notes are "Unfiled". Deleting a project
+// leaves its notes behind as Unfiled rather than taking the writing with it.
+//
+// The id is minted on the client (crypto.randomUUID) so a note can be written to straight after
+// it's created, before the outbox has delivered the create — see store.tsx's addNote.
+model Note {
+  id        String   @id @default(uuid())
+  title     String
+  body      String   @default("")
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId])
 }
 
 // An important date to count down to, shown in the calendar rail ("12 days · Tracey's

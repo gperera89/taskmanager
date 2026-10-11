@@ -11,9 +11,9 @@ import {
   utcCalendarDay,
 } from "@/lib/shared";
 
-export type { Task, Project, Habit, HabitCompletion, Routine, Category, CategoryScope, CompletionLog, HabitScheduleType, RoutineFrequency, RoutineMonthlyMode, CapturedKind, CaptureSource } from "@prisma/client";
+export type { Note, Task, Project, Habit, HabitCompletion, Routine, Category, CategoryScope, CompletionLog, HabitScheduleType, RoutineFrequency, RoutineMonthlyMode, CapturedKind, CaptureSource } from "@prisma/client";
 export { isRoutineTickedNow } from "@/lib/shared";
-import type { CapturedKind, CaptureSource, CategoryScope, Habit, HabitScheduleType, RoutineFrequency, RoutineMonthlyMode } from "@prisma/client";
+import type { CapturedKind, CaptureSource, CategoryScope, Habit, Note, HabitScheduleType, RoutineFrequency, RoutineMonthlyMode } from "@prisma/client";
 
 const HABIT_SCHEDULE_TYPES: HabitScheduleType[] = ["WEEKLY_DAYS", "WEEKLY_COUNT", "MONTHLY_COUNT"];
 const ROUTINE_FREQUENCIES: RoutineFrequency[] = ["DAILY", "WEEKLY", "MONTHLY"];
@@ -355,6 +355,39 @@ export async function deleteProject(id: string) {
   const project = await notFoundAsError("Project not found", () => prisma.project.delete({ where: { id } }));
   await deleteDayPlanBlocksFor("PROJECT", id);
   return project;
+}
+
+// --- Notes (freeform Markdown, optionally attached to a project) ---
+
+const NOTE_TITLE_FALLBACK = "Untitled";
+
+// Upsert rather than create: the id comes from the client, and an outbox retry after a create
+// that did land (but whose response was lost) must not fail on the duplicate key.
+export function createNote(input: { id: string; title: string; projectId?: string | null; body?: string }) {
+  const title = input.title.trim() || NOTE_TITLE_FALLBACK;
+  return prisma.note.upsert({
+    where: { id: input.id },
+    create: { id: input.id, title, projectId: input.projectId || null, body: input.body ?? "" },
+    update: {},
+  });
+}
+
+export function updateNote(id: string, input: Partial<{ title: string; body: string; projectId: string | null }>) {
+  return notFoundAsError("Note not found", () =>
+    prisma.note.update({
+      where: { id },
+      data: {
+        title: input.title === undefined ? undefined : input.title.trim() || NOTE_TITLE_FALLBACK,
+        body: input.body,
+        projectId: input.projectId === undefined ? undefined : input.projectId || null,
+      },
+    })
+  );
+}
+
+export async function deleteNote(id: string) {
+  // deleteMany: a note deleted on another device first is already gone, which is the goal.
+  await prisma.note.deleteMany({ where: { id } });
 }
 
 // --- Countdowns (important-event countdowns shown in the calendar rail) ---
@@ -1323,6 +1356,7 @@ function reviveDates<T>(value: T): T {
 const STATE_FINGERPRINT_SQL = Prisma.sql`md5(concat_ws('|',
   (SELECT md5(coalesce(string_agg(to_jsonb(t)::text, ',' ORDER BY t."id"), '')) FROM "Task" t),
   (SELECT md5(coalesce(string_agg(to_jsonb(p)::text, ',' ORDER BY p."id"), '')) FROM "Project" p),
+  (SELECT md5(coalesce(string_agg(to_jsonb(nt)::text, ',' ORDER BY nt."id"), '')) FROM "Note" nt),
   (SELECT md5(coalesce(string_agg(to_jsonb(h)::text, ',' ORDER BY h."id"), '')) FROM "Habit" h),
   (SELECT md5(coalesce(string_agg(to_jsonb(hc)::text, ',' ORDER BY hc."id"), '')) FROM "HabitCompletion" hc),
   (SELECT md5(coalesce(string_agg(to_jsonb(r)::text, ',' ORDER BY r."id"), '')) FROM "Routine" r),
@@ -1353,6 +1387,7 @@ export async function getStateVersion(): Promise<{ version: string; lastCronAtMs
 export type PageSnapshot = {
   tasks: Awaited<ReturnType<typeof getTasks>>;
   projects: Awaited<ReturnType<typeof getProjects>>;
+  notes: Note[];
   habits: Awaited<ReturnType<typeof getHabits>>;
   habitCompletions: Awaited<ReturnType<typeof getHabitCompletions>>;
   routines: Awaited<ReturnType<typeof getRoutines>>;
@@ -1396,6 +1431,7 @@ export async function getPageSnapshot(): Promise<PageSnapshot> {
               OR t."completedAt" >= to_timestamp(${completedCutoffMs}::float8 / 1000) AT TIME ZONE 'UTC')
       ) AS "tasks",
       (SELECT coalesce(jsonb_agg(to_jsonb(p)), '[]'::jsonb) FROM "Project" p) AS "projects",
+      (SELECT coalesce(jsonb_agg(to_jsonb(nt) ORDER BY nt."updatedAt" DESC), '[]'::jsonb) FROM "Note" nt) AS "notes",
       (SELECT coalesce(jsonb_agg(to_jsonb(h)), '[]'::jsonb) FROM "Habit" h) AS "habits",
       (SELECT coalesce(jsonb_agg(to_jsonb(hc) ORDER BY hc."date" ASC), '[]'::jsonb)
          FROM "HabitCompletion" hc
@@ -1436,6 +1472,7 @@ export async function getPageSnapshot(): Promise<PageSnapshot> {
   return {
     tasks: row.tasks,
     projects: row.projects,
+    notes: row.notes,
     habits: row.habits,
     habitCompletions: row.habitCompletions,
     routines: row.routines,

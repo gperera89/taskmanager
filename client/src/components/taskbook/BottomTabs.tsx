@@ -7,6 +7,7 @@ export default function BottomTabs({
   onSelect,
   tasksRemainingToday,
   activeProjectCount,
+  noteCount,
   routineTotalCount,
   habitAtRiskCount,
   monthLabel,
@@ -15,6 +16,7 @@ export default function BottomTabs({
   onSelect: (area: AreaKey) => void;
   tasksRemainingToday: number;
   activeProjectCount: number;
+  noteCount: number;
   routineTotalCount: number;
   habitAtRiskCount: number;
   monthLabel: string;
@@ -24,6 +26,7 @@ export default function BottomTabs({
   const tabs: { key: AreaKey; name: string; count: string; borderClass: string }[] = [
     { key: "tasks", name: "Tasks", count: `${tasksRemainingToday} today`, borderClass: "border-r border-(--border)" },
     { key: "projects", name: "Projects", count: `${activeProjectCount} active`, borderClass: "border-r border-(--border)" },
+    { key: "notes", name: "Notes", count: `${noteCount}`, borderClass: "border-r border-(--border)" },
     { key: "routines", name: "Routines", count: `${routineTotalCount}`, borderClass: "border-r border-(--border)" },
     { key: "habits", name: "Habits", count: habitAtRiskCount > 0 ? `${habitAtRiskCount} at risk` : "on track", borderClass: "border-r border-(--border) lg:border-r-0" },
     { key: "calendar", name: "Calendar", count: monthLabel, borderClass: "lg:hidden" },
@@ -44,7 +47,8 @@ export default function BottomTabs({
               background: on ? "var(--surface-active)" : "transparent",
             }}
           >
-            <span className="text-[15px]" style={{ color: on ? "var(--accent-text)" : "var(--ink-muted)", fontWeight: on ? 600 : 400 }}>
+            {/* Six tabs share a phone's width — the names step down a size on the narrowest screens. */}
+            <span className="text-[13.5px] min-[420px]:text-[15px]" style={{ color: on ? "var(--accent-text)" : "var(--ink-muted)", fontWeight: on ? 600 : 400 }}>
               {tab.name}
             </span>
             <span className="text-[11px]" style={{ color: on ? "var(--info)" : "var(--ink-faint)" }}>

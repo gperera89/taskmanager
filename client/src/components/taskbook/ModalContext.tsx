@@ -8,6 +8,8 @@ type ModalContextValue = {
   openEdit: (state: Extract<ModalState, { mode: "edit" }>) => void;
   // Opens the completion heatmap for a habit (clicking the habit's title/row).
   openHeatmap: (habitId: string) => void;
+  // Opens a note full-screen in the editor (from the Notes tab or a project card's note list).
+  openNote: (noteId: string) => void;
 };
 
 export const ModalContext = createContext<ModalContextValue | null>(null);

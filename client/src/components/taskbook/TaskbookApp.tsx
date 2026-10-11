@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AreaKey, CapturedKind, ItemKind, ModalState, Mode } from "./types";
 import { deriveCalendarView, deriveMyDay } from "@/lib/derive";
 import { zonedYMD } from "@/lib/taskbookDates";
@@ -11,6 +11,8 @@ import BottomTabs from "./BottomTabs";
 import CalendarRail from "./CalendarRail";
 import TasksView from "./TasksView";
 import ProjectsView from "./ProjectsView";
+import NotesView from "./NotesView";
+import NotePage from "./NotePage";
 import RoutinesView from "./RoutinesView";
 import HabitsView from "./HabitsView";
 import HabitHeatmap from "./HabitHeatmap";
@@ -24,13 +26,14 @@ import Toasts from "./Toasts";
 
 // The order of the portrait/mobile carousel. On desktop the calendar is a side rail
 // instead of a swipeable panel, so it is dropped from the content flow there.
-const CAROUSEL_VIEWS: AreaKey[] = ["tasks", "projects", "routines", "habits", "calendar"];
+const CAROUSEL_VIEWS: AreaKey[] = ["tasks", "projects", "notes", "routines", "habits", "calendar"];
 
 // Which Add-modal tab the current view should default to — so tapping "+ Add" from Projects
 // opens straight to the Project form instead of always defaulting to Task.
 const AREA_TO_KIND: Record<AreaKey, ItemKind> = {
   tasks: "task",
   projects: "project",
+  notes: "task", // unused — "Add" on the Notes tab starts a new note instead (see openAdd)
   routines: "routine",
   habits: "habit",
   calendar: "task",
@@ -44,6 +47,8 @@ const AREA_SHORTCUTS: Record<string, AreaKey> = {
   "3": "routines",
   "4": "habits",
   "5": "calendar",
+  // Notes came later; it takes the next free digit rather than renumbering the Stream Deck keys.
+  "6": "notes",
 };
 
 // Letter keys → home/all/work mode, matching ModeToggle's order.
@@ -61,6 +66,9 @@ export default function TaskbookApp() {
   const [reviewOpen, setReviewOpen] = useState(false);
   // The habit whose completion heatmap is open (by id, so it tracks live optimistic edits).
   const [heatmapHabitId, setHeatmapHabitId] = useState<string | null>(null);
+  // The note open full-screen in the editor, if any — it sits over whichever tab opened it, so
+  // closing it lands back where you were.
+  const [openNoteId, setOpenNoteId] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   // While we programmatically snap the carousel to a tapped tab, ignore the scroll
@@ -106,12 +114,15 @@ export default function TaskbookApp() {
 
   const modalActions = useMemo(
     () => ({
-      openAdd: () => setModal({ mode: "add", initialKind: AREA_TO_KIND[area] }),
+      openAdd: () =>
+        area === "notes" ? setOpenNoteId(actions.addNote({})) : setModal({ mode: "add", initialKind: AREA_TO_KIND[area] }),
       openEdit: (state: Extract<ModalState, { mode: "edit" }>) => setModal(state),
       openHeatmap: (habitId: string) => setHeatmapHabitId(habitId),
+      openNote: (noteId: string) => setOpenNoteId(noteId),
     }),
-    [area]
+    [area, actions]
   );
+  const closeNote = useCallback(() => setOpenNoteId(null), []);
 
   // The shortcut handler is registered once; it reads the active area through a ref so "n"
   // always opens the Add form matching the tab currently in view.
@@ -126,10 +137,11 @@ export default function TaskbookApp() {
   const shortcutRef = useRef<{
     selectTab: (next: AreaKey) => void;
     openMyDay: () => void;
+    newNote: () => void;
     isMobile: boolean;
-  }>({ selectTab: () => {}, openMyDay: () => {}, isMobile: false });
+  }>({ selectTab: () => {}, openMyDay: () => {}, newNote: () => {}, isMobile: false });
   useEffect(() => {
-    shortcutRef.current = { selectTab, openMyDay, isMobile };
+    shortcutRef.current = { selectTab, openMyDay, newNote: () => setOpenNoteId(actions.addNote({})), isMobile };
   });
 
   // Keyboard shortcuts (also driven by a Stream Deck profile sending plain keypresses):
@@ -139,6 +151,10 @@ export default function TaskbookApp() {
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") {
+        // Escape inside the note editor is CodeMirror's (it clears a selection); the note
+        // closes from its Back button.
+        if ((e.target as HTMLElement | null)?.closest?.(".cm-editor")) return;
+        setOpenNoteId(null);
         setModal(null);
         setSettingsOpen(false);
         setLogbookOpen(false);
@@ -152,7 +168,8 @@ export default function TaskbookApp() {
       const api = shortcutRef.current;
       if (e.key === "n") {
         e.preventDefault();
-        setModal({ mode: "add", initialKind: AREA_TO_KIND[areaRef.current] });
+        if (areaRef.current === "notes") api.newNote();
+        else setModal({ mode: "add", initialKind: AREA_TO_KIND[areaRef.current] });
       } else if (e.key === "/") {
         e.preventDefault();
         // The search field is rendered per view (and once per carousel panel on mobile), so
@@ -314,6 +331,8 @@ export default function TaskbookApp() {
             projectOptions={data.projectOptions}
           />
         );
+      case "notes":
+        return <NotesView notes={data.notes} query={query} onQueryChange={setQuery} />;
       case "routines":
         return (
           <RoutinesView
@@ -375,6 +394,7 @@ export default function TaskbookApp() {
         />
         <StatusBanners />
 
+        <div className="relative flex min-h-0 flex-1">
         {isMobile ? (
           <div className="relative flex min-h-0 flex-1">
             <div
@@ -427,10 +447,26 @@ export default function TaskbookApp() {
             />
           </div>
         )}
+        {openNoteId && (
+          <NotePage
+            key={openNoteId}
+            noteId={openNoteId}
+            isMobile={isMobile}
+            onClose={closeNote}
+            categoryOptions={data.categoryOptions}
+            projectOptions={data.projectOptions}
+            projectCards={data.projectCards}
+          />
+        )}
+        </div>
 
         <BottomTabs
           area={area}
-          onSelect={selectTab}
+          onSelect={(next) => {
+            setOpenNoteId(null);
+            selectTab(next);
+          }}
+          noteCount={data.notes.length}
           tasksRemainingToday={data.tasksRemainingToday}
           activeProjectCount={data.activeProjectCount}
           routineTotalCount={data.routineTotalCount}

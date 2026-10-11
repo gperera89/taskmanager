@@ -17,7 +17,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { AiNote, CapturedKind, Countdown, DayPlanBlock, HabitCompletion, HabitScheduleType, Routine, RoutineFrequency, RoutineMonthlyMode } from "@prisma/client";
+import type { AiNote, CapturedKind, Note, Countdown, DayPlanBlock, HabitCompletion, HabitScheduleType, Routine, RoutineFrequency, RoutineMonthlyMode } from "@prisma/client";
 import * as serverActions from "@/app/actions";
 import { deriveEntities, type RawState, type RawTask } from "@/lib/derive";
 import { formatLongDate } from "@/lib/taskbookDates";
@@ -113,6 +113,7 @@ export type ServerCalendarData = Omit<
   | "projectOptions"
   | "categoryOptions"
   | "pendingCaptures"
+  | "notes"
 >;
 
 export type TaskRepeatInput = {
@@ -194,7 +195,9 @@ export type TaskbookActions = {
   setTaskBlock: (id: string, reason: string, untilDate: string) => void; // empty reason clears
   reorderGroup: (orderedIds: string[]) => void;
   // Projects
-  addProject: (input: ProjectInput) => void;
+  // Returns the new project's temp id, so a note can be attached to it straight away (queued ops
+  // that reference the temp id are remapped to the real one when they flush).
+  addProject: (input: ProjectInput) => string;
   editProject: (id: string, input: ProjectInput) => void;
   duplicateProject: (templateId: string, name: string) => void;
   renameProject: (id: string, name: string) => void;
@@ -203,6 +206,13 @@ export type TaskbookActions = {
   toggleProject: (id: string, isCompleted: boolean) => void;
   setProjectSections: (id: string, enabled: boolean) => void;
   removeProject: (id: string) => void;
+  // Notes. addNote returns the new note's id (client-minted, final — no temp-id swap), so the
+  // caller can open the editor on it straight away.
+  addNote: (input: { title?: string; projectId?: string | null }) => string;
+  renameNote: (id: string, title: string) => void;
+  setNoteBody: (id: string, body: string) => void;
+  setNoteProject: (id: string, projectId: string | null) => void;
+  removeNote: (id: string) => void;
   // Countdowns
   addCountdown: (input: CountdownInput) => void;
   editCountdown: (id: string, input: CountdownInput) => void;
@@ -418,7 +428,11 @@ const REGISTRY: Record<string, RegistryEntry> = {
   reorderGroup: { fn: serverActions.reorderTaskGroup },
   addProject: {
     fn: serverActions.addProject,
-    swap: (r, temp, real) => ({ ...r, projects: r.projects.map((p) => (p.id === temp ? { ...p, id: real } : p)) }),
+    swap: (r, temp, real) => ({
+      ...r,
+      projects: r.projects.map((p) => (p.id === temp ? { ...p, id: real } : p)),
+      notes: r.notes.map((n) => (n.projectId === temp ? { ...n, projectId: real } : n)),
+    }),
   },
   editProject: { fn: serverActions.editProject },
   renameProject: { fn: serverActions.renameProject },
@@ -427,6 +441,11 @@ const REGISTRY: Record<string, RegistryEntry> = {
   toggleProject: { fn: serverActions.toggleProject },
   setProjectSections: { fn: serverActions.updateProjectSections },
   removeProject: { fn: serverActions.removeProject },
+  addNote: { fn: serverActions.addNote },
+  renameNote: { fn: serverActions.renameNote },
+  setNoteBody: { fn: serverActions.updateNoteBody },
+  setNoteProject: { fn: serverActions.updateNoteProject },
+  removeNote: { fn: serverActions.removeNote },
   addCountdown: {
     fn: serverActions.addCountdown,
     swap: (r, temp, real) => ({ ...r, countdowns: r.countdowns.map((c) => (c.id === temp ? { ...c, id: real } : c)) }),
@@ -905,6 +924,7 @@ export function StoreProvider({
             suggestions: snapshot.raw.suggestions ?? [],
             aiNotes: snapshot.raw.aiNotes ?? [],
             countdowns: snapshot.raw.countdowns ?? [],
+            notes: snapshot.raw.notes ?? [],
           });
           if (snapshot.calendarEvents?.length) setEvents(snapshot.calendarEvents);
           // The rows on screen are now the snapshot's, so the version to compare against is the
@@ -1276,6 +1296,7 @@ export function StoreProvider({
           [fd],
           id
         );
+        return id;
       },
       editProject: (id, input) => {
         const fd = new FormData();
@@ -1365,11 +1386,63 @@ export function StoreProvider({
       removeProject: (id) => {
         const captured = rawRef.current.projects.find((p) => p.id === id);
         if (!captured) return;
+        // The project's notes stay, as Unfiled (the server's onDelete: SetNull) — but only once
+        // the undo window has closed, so an Undo puts them back under the project untouched.
         deleteWithUndo(
           "Project",
           (r) => ({ ...r, projects: r.projects.filter((p) => p.id !== id) }),
           (r) => ({ ...r, projects: [...r.projects, captured] }),
-          () => enqueue("removeProject", [id])
+          () => {
+            setRaw((r) => ({ ...r, notes: r.notes.map((n) => (n.projectId === id ? { ...n, projectId: null } : n)) }));
+            enqueue("removeProject", [id]);
+          }
+        );
+      },
+
+      // --- Notes ---
+      // Every edit bumps updatedAt locally so the Notes list re-sorts as the server would.
+      addNote: (input) => {
+        const id = crypto.randomUUID();
+        const now = new Date();
+        const row: Note = {
+          id,
+          title: input.title?.trim() || "Untitled",
+          body: "",
+          projectId: input.projectId || null,
+          createdAt: now,
+          updatedAt: now,
+        };
+        mutate((r) => ({ ...r, notes: [row, ...r.notes] }), "addNote", [id, row.title, row.projectId ?? ""]);
+        return id;
+      },
+      renameNote: (id, title) => {
+        const next = title.trim() || "Untitled";
+        mutate(
+          (r) => ({ ...r, notes: r.notes.map((n) => (n.id === id ? { ...n, title: next, updatedAt: new Date() } : n)) }),
+          "renameNote",
+          [id, next]
+        );
+      },
+      setNoteBody: (id, body) =>
+        mutate(
+          (r) => ({ ...r, notes: r.notes.map((n) => (n.id === id ? { ...n, body, updatedAt: new Date() } : n)) }),
+          "setNoteBody",
+          [id, body]
+        ),
+      setNoteProject: (id, projectId) =>
+        mutate(
+          (r) => ({ ...r, notes: r.notes.map((n) => (n.id === id ? { ...n, projectId, updatedAt: new Date() } : n)) }),
+          "setNoteProject",
+          [id, projectId ?? ""]
+        ),
+      removeNote: (id) => {
+        const captured = rawRef.current.notes.find((n) => n.id === id);
+        if (!captured) return;
+        deleteWithUndo(
+          "Note",
+          (r) => ({ ...r, notes: r.notes.filter((n) => n.id !== id) }),
+          (r) => ({ ...r, notes: [captured, ...r.notes] }),
+          () => enqueue("removeNote", [id])
         );
       },
 

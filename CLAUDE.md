@@ -133,6 +133,17 @@ reads as JSON aggregates), with retention sweeps gated to the first run of each 
 that way: don't add per-run queries to the cron path, and prefer batching/piggybacking reads for
 anything that runs on a schedule.
 
+### Notes
+`Note` rows are freeform Markdown, optionally attached to a project (`onDelete: SetNull` — a
+deleted project's notes become Unfiled). The Notes tab (`NotesView.tsx`) lists them; a note opens
+full-screen in `NotePage.tsx` with the project's `ProjectCard` beside it (a bottom sheet on
+phones). The body editor is CodeMirror 6 (`MarkdownEditor.tsx`, loaded via `next/dynamic`) so the
+Markdown round-trips byte-for-byte — this is groundwork for mirroring notes into the Obsidian
+vault's `Projects/` folder. Note ids are minted client-side (`crypto.randomUUID`) so the editor can
+save straight after a create without a temp-id swap; `createNote` upserts to stay idempotent
+under outbox retries. Body edits are saved on a ~1.2s debounce (one queued write each), and an
+incoming server copy only replaces the editor's text when nothing local is unsaved.
+
 ### Voice capture
 `Header.tsx`'s mic button records audio client-side and posts it to
 `/api/voice-capture` (`src/app/api/voice-capture/route.ts`), which transcribes it with Whisper and

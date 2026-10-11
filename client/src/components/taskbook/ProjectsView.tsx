@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { todayInputValue } from "@/lib/taskbookDates";
 import { useTaskbook } from "./store";
+import { useModalActions } from "./ModalContext";
 import { parseTaskForm } from "./formParse";
 import { AutoGrowTextarea, Chip, labelClass, REVEAL_ON_HOVER } from "./shared";
 import { AnimatedList, useCompletionHold } from "./motion";
@@ -189,16 +190,20 @@ export default function ProjectsView({
   );
 }
 
-function ProjectCard({
+export function ProjectCard({
   project,
   categoryOptions,
   projectOptions,
+  hideNotes = false,
 }: {
   project: ProjectCardVM;
   categoryOptions: CategoryOption[];
   projectOptions: ProjectOption[];
+  // The note page's side panel shows this card beside a note — its own notes list moves there.
+  hideNotes?: boolean;
 }) {
   const { actions } = useTaskbook();
+  const { openNote } = useModalActions();
   const { isHeld, isLeaving, hold } = useCompletionHold();
   const [editingName, setEditingName] = useState(false);
   const [editingDescription, setEditingDescription] = useState(false);
@@ -349,6 +354,29 @@ function ProjectCard({
         {project.durationLabel && <Chip>◷ {project.durationLabel}</Chip>}
       </div>
 
+      {!hideNotes && (
+        <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px]">
+          {project.notes.map((note) => (
+            <button
+              key={note.id}
+              type="button"
+              onClick={() => openNote(note.id)}
+              className="flex cursor-pointer items-center gap-1 text-(--info) hover:text-(--accent-text)"
+            >
+              <NoteGlyph />
+              <span className="max-w-[220px] truncate">{note.title}</span>
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => openNote(actions.addNote({ projectId: project.id }))}
+            className={`cursor-pointer text-(--ink-faint) hover:text-(--info) ${project.notes.length ? REVEAL_ON_HOVER : ""}`}
+          >
+            + Note
+          </button>
+        </div>
+      )}
+
       <div className="my-2.5 mb-4 h-1 overflow-hidden rounded-full bg-(--border-soft)">
         <div className="h-full rounded-full bg-(--accent)" style={{ width: `${project.progressPct}%` }} />
       </div>
@@ -472,5 +500,17 @@ function ProjectCard({
         )}
       </AnimatedList>
     </div>
+  );
+}
+
+// Material Symbols "description" — a page with lines, marking a link to a note.
+export function NoteGlyph({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 -960 960 960" className="flex-none" aria-hidden>
+      <path
+        d="M320-240h320v-80H320v80Zm0-160h320v-80H320v80ZM240-80q-33 0-56.5-23.5T160-160v-640q0-33 23.5-56.5T240-880h320l240 240v480q0 33-23.5 56.5T720-80H240Zm280-520v-200H240v640h480v-440H520ZM240-800v200-200 640-640Z"
+        style={{ fill: "currentColor" }}
+      />
+    </svg>
   );
 }

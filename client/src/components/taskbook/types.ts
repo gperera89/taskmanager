@@ -84,6 +84,22 @@ export type ProjectCardVM = {
   sectionsEnabled: boolean; // whether this card offers section headings (the header toggle)
   sections: ProjectSectionVM[]; // the same tasks grouped by section for display
   sectionNames: string[]; // existing section names, for the per-task section picker
+  notes: NoteLinkVM[]; // notes attached to this project, most recently edited first
+};
+
+// A note as it appears in a list (the Notes tab, a project card) — the body itself is read
+// straight from raw state by the editor, so it isn't copied into every view-model.
+export type NoteLinkVM = { id: string; title: string };
+
+export type NoteListItemVM = {
+  id: string;
+  title: string;
+  projectId: string | null;
+  projectName: string | null;
+  projectCompleted: boolean;
+  snippet: string; // first line of prose, Markdown markers stripped
+  searchText: string; // lowercased title + body, for the Notes tab's search
+  updatedLabel: string; // "Today" | "Yesterday" | "12 Oct"
 };
 
 // An important-event countdown row in the calendar rail ("12 days · Tracey's birthday").
@@ -291,9 +307,10 @@ export type TaskbookData = {
   projectOptions: ProjectOption[];
   categoryOptions: CategoryOption[];
   pendingCaptures: VoiceCaptureVM[];
+  notes: NoteListItemVM[]; // most recently edited first
 };
 
-export type AreaKey = "tasks" | "projects" | "routines" | "habits" | "calendar" | "day";
+export type AreaKey = "tasks" | "projects" | "notes" | "routines" | "habits" | "calendar" | "day";
 
 // Global visibility filter (top-right toggle): which calendar(s)/tasks are shown. "work"/
 // "home" match against Task.category (case-insensitively) and the ICS event's `source`
