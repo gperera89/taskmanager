@@ -1076,6 +1076,42 @@ export function StoreProvider({
   // they're deleted. Keyed by task id; the line coming back (undo, paste) cancels the delete.
   const pendingOrphansRef = useRef(new Map<string, { timer: number; toastId: number }>());
 
+  // Every task whose checkbox line has gone from its note — deleted in Cura's editor, or in
+  // Obsidian and synced up through the vault bridge (the server never deletes these itself) —
+  // gets a warning toast and is deleted when it closes, unless "Keep task" is pressed (the task
+  // carries on unlinked) or the line comes back first (an undo, a paste, Obsidian's undo).
+  useEffect(() => {
+    const bodies = new Map(raw.notes.map((n) => [n.id, n.body]));
+    const pending = pendingOrphansRef.current;
+    const orphanIds = new Set<string>();
+    for (const t of raw.tasks) {
+      if (!t.noteId || !t.noteBlockId) continue;
+      const body = bodies.get(t.noteId);
+      if (body === undefined || bodyHasBlock(body, t.noteBlockId)) continue;
+      orphanIds.add(t.id);
+      if (pending.has(t.id)) continue;
+      const taskId = t.id;
+      const timer = window.setTimeout(() => {
+        pending.delete(taskId);
+        setRaw((r) => ({ ...r, tasks: removeTaskById(r.tasks, taskId) }));
+        enqueue("removeTask", [taskId]);
+      }, UNDO_MS);
+      const toastId = pushToast(`"${t.title}" left its note, so its task will be deleted`, "Keep task", () => {
+        window.clearTimeout(timer);
+        pending.delete(taskId);
+        setRaw((r) => ({ ...r, tasks: mapTask(r.tasks, taskId, (x) => ({ ...x, noteId: null, noteBlockId: null })) }));
+        enqueue("unlinkTask", [taskId]);
+      });
+      pending.set(taskId, { timer, toastId });
+    }
+    for (const [taskId, p] of pending) {
+      if (orphanIds.has(taskId)) continue;
+      window.clearTimeout(p.timer);
+      setToasts((ts) => ts.filter((t) => t.id !== p.toastId));
+      pending.delete(taskId);
+    }
+  }, [raw.notes, raw.tasks, enqueue, pushToast]);
+
   // --- Undoable deletes -----------------------------------------------------------------------
 
   // The row leaves the UI immediately; the server delete is enqueued only after the undo
@@ -1547,41 +1583,7 @@ export function StoreProvider({
         }));
         enqueue("setNoteBody", [noteId, body, JSON.stringify({ creates, linked: linked.length })]);
 
-        // A line that's back (undo, a paste) cancels its pending delete.
-        for (const [taskId, pending] of pendingOrphansRef.current) {
-          const row = linked.find((t) => t.id === taskId);
-          if (row?.noteBlockId && bodyHasBlock(body, row.noteBlockId)) {
-            window.clearTimeout(pending.timer);
-            setToasts((ts) => ts.filter((t) => t.id !== pending.toastId));
-            pendingOrphansRef.current.delete(taskId);
-          }
-        }
-        // Lines removed from the note: their tasks are deleted after a warning, with a way out.
-        for (const taskId of plan.orphans) {
-          if (pendingOrphansRef.current.has(taskId)) continue;
-          const row = linked.find((t) => t.id === taskId);
-          if (!row) continue;
-          const timer = window.setTimeout(() => {
-            pendingOrphansRef.current.delete(taskId);
-            const current = rawRef.current;
-            const task = current.tasks.find((t) => t.id === taskId);
-            const owner = current.notes.find((n) => n.id === noteId);
-            if (!task || task.noteId !== noteId) return;
-            if (owner && task.noteBlockId && bodyHasBlock(owner.body, task.noteBlockId)) return;
-            setRaw((r) => ({ ...r, tasks: removeTaskById(r.tasks, taskId) }));
-            enqueue("removeTask", [taskId]);
-          }, UNDO_MS);
-          const toastId = pushToast(`"${row.title}" left the note, so its task will be deleted`, "Keep task", () => {
-            window.clearTimeout(timer);
-            pendingOrphansRef.current.delete(taskId);
-            mutate(
-              (r) => ({ ...r, tasks: mapTask(r.tasks, taskId, (t) => ({ ...t, noteId: null, noteBlockId: null })) }),
-              "unlinkTask",
-              [taskId]
-            );
-          });
-          pendingOrphansRef.current.set(taskId, { timer, toastId });
-        }
+        // Lines that disappeared are picked up by the orphan watcher below the actions.
         return body;
       },
       setNoteProject: (id, projectId) =>

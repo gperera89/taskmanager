@@ -498,6 +498,80 @@ export async function deleteNote(id: string) {
   await prisma.note.deleteMany({ where: { id } });
 }
 
+// --- Obsidian vault bridge (api/vault-sync) ---
+//
+// The Cura Bridge plugin (obsidian-plugin/) mirrors notes into the vault's Projects/ folder. Cura
+// is the source of truth; the plugin polls the version below, pulls the snapshot when it moves,
+// and pushes edits made in Obsidian back through vaultSaveNote, which refuses (409) a save based
+// on a version that has since changed in Cura so the plugin can keep both copies.
+
+const VAULT_VERSION_SQL = Prisma.sql`md5(concat_ws('|',
+  (SELECT md5(coalesce(string_agg(to_jsonb(n)::text, ',' ORDER BY n."id"), '')) FROM "Note" n),
+  (SELECT md5(coalesce(string_agg(concat_ws(':', p."id", p."name", p."isCompleted", p."dueDate"), ',' ORDER BY p."id"), '')) FROM "Project" p)
+))`;
+
+export type VaultNote = { id: string; title: string; body: string; projectId: string | null; updatedAt: string };
+export type VaultProject = { id: string; name: string; dueDate: string | null; isCompleted: boolean };
+
+export async function getVaultVersion(): Promise<string> {
+  const rows = await prisma.$queryRaw<{ v: string }[]>`SELECT ${VAULT_VERSION_SQL} AS "v"`;
+  return rows[0]?.v ?? "";
+}
+
+// Everything the plugin needs in one operation. Projects come along whether or not they have notes,
+// so a note moved into a project folder in Obsidian can be matched to its project.
+export async function getVaultSnapshot(): Promise<{ version: string; notes: VaultNote[]; projects: VaultProject[] }> {
+  const rows = await prisma.$queryRaw<{ version: string; notes: VaultNote[]; projects: VaultProject[] }[]>`
+    SELECT
+      ${VAULT_VERSION_SQL} AS "version",
+      (SELECT coalesce(jsonb_agg(jsonb_build_object(
+         'id', n."id", 'title', n."title", 'body', n."body", 'projectId', n."projectId",
+         'updatedAt', to_char(n."updatedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')) ORDER BY n."createdAt"), '[]'::jsonb)
+       FROM "Note" n) AS "notes",
+      (SELECT coalesce(jsonb_agg(jsonb_build_object(
+         'id', p."id", 'name', p."name", 'isCompleted', p."isCompleted",
+         'dueDate', to_char(p."dueDate", 'YYYY-MM-DD'))), '[]'::jsonb)
+       FROM "Project" p) AS "projects"
+  `;
+  return rows[0];
+}
+
+function toVaultNote(n: { id: string; title: string; body: string; projectId: string | null; updatedAt: Date }): VaultNote {
+  return { id: n.id, title: n.title, body: n.body, projectId: n.projectId, updatedAt: n.updatedAt.toISOString() };
+}
+
+export type VaultSaveResult = { status: "ok" | "conflict" | "missing"; note?: VaultNote };
+
+// An edit made in Obsidian. `baseUpdatedAt` is the version the plugin last synced; if the note has
+// changed in Cura since, nothing is written and the current note comes back as a conflict.
+// `title`/`projectId` are only sent when the file was renamed or moved between folders.
+export async function vaultSaveNote(input: {
+  id: string;
+  body: string;
+  baseUpdatedAt: string;
+  title?: string;
+  projectId?: string | null;
+}): Promise<VaultSaveResult> {
+  const current = await prisma.note.findUnique({ where: { id: input.id } });
+  if (!current) return { status: "missing" };
+  if (current.updatedAt.toISOString() !== input.baseUpdatedAt) return { status: "conflict", note: toVaultNote(current) };
+  if (input.title !== undefined || input.projectId !== undefined) {
+    await updateNote(input.id, { title: input.title, projectId: input.projectId });
+  }
+  // No hints: the server mints ids and categories for any new checkbox lines. Lines removed in
+  // Obsidian leave their tasks linked; the app notices and asks before deleting them.
+  await saveNoteBody(input.id, input.body);
+  const saved = await prisma.note.findUniqueOrThrow({ where: { id: input.id } });
+  return { status: "ok", note: toVaultNote(saved) };
+}
+
+// A note started in Obsidian (a new file in _Unfiled or a project folder). The id is the plugin's.
+export async function vaultCreateNote(input: { id: string; title: string; body: string; projectId: string | null }) {
+  await createNote({ id: input.id, title: input.title, projectId: input.projectId });
+  if (input.body) await saveNoteBody(input.id, input.body);
+  return toVaultNote(await prisma.note.findUniqueOrThrow({ where: { id: input.id } }));
+}
+
 // --- Countdowns (important-event countdowns shown in the calendar rail) ---
 
 export const getCountdowns = () => prisma.countdown.findMany({ orderBy: { createdAt: "asc" } });
