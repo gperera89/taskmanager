@@ -1,0 +1,9 @@
+{
+	"id": "cura-bridge",
+	"name": "Cura bridge",
+	"version": "1.0.0",
+	"minAppVersion": "1.5.0",
+	"description": "Keeps Cura's notes in Projects/ (and completed projects' notes in Archives/), syncing edits both ways.",
+	"author": "Gayan Perera",
+	"isDesktopOnly": true
+}

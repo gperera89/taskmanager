@@ -6,7 +6,7 @@
 // would have (this used to exclude the calendar rail; see git history if that distinction ever
 // needs resurrecting).
 
-import type { Task, Project, Habit, HabitCompletion, Routine, Category, VoiceCapture, DayPlanBlock, AiSuggestion, AiNote, Countdown } from "@prisma/client";
+import type { Note, Task, Project, Habit, HabitCompletion, Routine, Category, VoiceCapture, DayPlanBlock, AiSuggestion, AiNote, Countdown } from "@prisma/client";
 import { countdownYears, formatDuration, habitDateKey, habitStatus, nextCountdownOccurrenceMs, taskOrderCompare, isRoutineTickedNow, routineDueAtMs, zonedFaceMs, MS_PER_DAY, ROUTINE_SOON_WINDOW_MS } from "@/lib/shared";
 export { combineDueDateTime, isRoutineTickedNow } from "@/lib/shared";
 import {
@@ -43,6 +43,8 @@ import type {
   MyDayTrayItemVM,
   MyDayVM,
   MyDayZoneVM,
+  NoteLinkVM,
+  NoteListItemVM,
   ProjectCardVM,
   ProjectOption,
   RoutineItemVM,
@@ -61,6 +63,7 @@ export type RawRoutine = Routine & { subroutines: Routine[] };
 export type RawState = {
   tasks: RawTask[]; // top-level tasks only, each with its subtasks nested (mirrors getTasks)
   projects: Project[];
+  notes: Note[]; // every note, most recently edited first (mirrors getPageSnapshot)
   habits: Habit[];
   habitCompletions: HabitCompletion[]; // up to a year back; feeds habit status + the heatmap
   routines: RawRoutine[]; // top-level routines only, each with its subroutines nested
@@ -90,6 +93,7 @@ export type DerivedEntities = {
   projectOptions: ProjectOption[];
   categoryOptions: CategoryOption[];
   pendingCaptures: VoiceCaptureVM[];
+  notes: NoteListItemVM[];
 };
 
 // Mode filtering: each Category row carries a scope (WORK/HOME/NONE). A task shows in a
@@ -320,6 +324,17 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
     if (mode === "all") return true;
     return (tasksByProject.get(p.id) ?? []).some((t) => taskMatchesMode(t.category, mode, scopeByName));
   });
+  // Notes, newest edit first. Not mode-filtered: a note has no category to match on.
+  const notesByRecency = [...(raw.notes ?? [])].sort(
+    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+  );
+  const notesByProject = new Map<string, NoteLinkVM[]>();
+  for (const n of notesByRecency) {
+    if (!n.projectId) continue;
+    if (!notesByProject.has(n.projectId)) notesByProject.set(n.projectId, []);
+    notesByProject.get(n.projectId)!.push({ id: n.id, title: n.title });
+  }
+
   const projectCards: ProjectCardVM[] = visibleProjects.map((p) => {
     const items = (tasksByProject.get(p.id) ?? []).filter((t) => taskMatchesMode(t.category, mode, scopeByName));
     const done = items.filter((t) => t.isCompleted).length;
@@ -366,6 +381,7 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
       sectionsEnabled: p.sectionsEnabled,
       sections,
       sectionNames: sectionOrder.filter((s): s is string => s !== null),
+      notes: notesByProject.get(p.id) ?? [],
     };
   });
   const activeProjectCount = visibleProjects.filter((p) => !p.isCompleted).length;
@@ -543,6 +559,58 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
     projectOptions: raw.projects.map((p) => ({ id: p.id, name: p.name })),
     categoryOptions: raw.categories.map((c) => ({ id: c.id, name: c.name, scope: c.scope })),
     pendingCaptures,
+    notes: notesByRecency.map((n) => toNoteListItemVM(n, raw.projects, nowMs, raw.timeZone)),
+  };
+}
+
+// --- Notes ---
+
+// The first line of actual prose in a note, for the list preview: skips blank lines, the
+// frontmatter block (vault-synced notes carry one) and bare rules, and strips the leading
+// Markdown markers (headings, list bullets, checkboxes, quotes) and inline emphasis.
+export function noteSnippet(body: string, max = 140): string {
+  const lines = body.split("\n");
+  let i = 0;
+  if (lines[0]?.trim() === "---") {
+    const end = lines.findIndex((l, idx) => idx > 0 && l.trim() === "---");
+    if (end > 0) i = end + 1;
+  }
+  // Prose beats a heading ("# Ideas" says less than the sentence under it), but a note that is
+  // nothing but headings still gets one.
+  let heading = "";
+  for (; i < lines.length; i++) {
+    if (/^\s*#{1,6}\s/.test(lines[i])) {
+      heading ||= lines[i].replace(/^\s*#{1,6}\s+/, "").trim();
+      continue;
+    }
+    const line = lines[i]
+      .replace(/^\s*(#{1,6}\s+|>\s*|[-*+]\s+(\[[ xX]\]\s+)?|\d+[.)]\s+)/, "")
+      .replace(/[*_`~]|\^cura-[\w-]+/g, "")
+      .replace(/\[\[([^\]|]*\|)?([^\]]*)\]\]/g, "$2")
+      .trim();
+    if (!line || /^[-*_]{3,}$/.test(line)) continue;
+    return line.length > max ? `${line.slice(0, max - 1)}…` : line;
+  }
+  return heading;
+}
+
+function toNoteListItemVM(n: Note, projects: Project[], nowMs: number, timeZone: string): NoteListItemVM {
+  const project = n.projectId ? projects.find((p) => p.id === n.projectId) : undefined;
+  const updated = zonedYMD(new Date(n.updatedAt), timeZone);
+  const today = zonedYMD(new Date(nowMs), timeZone);
+  const dayDiff = Math.round(
+    (Date.UTC(today.year, today.month0, today.day) - Date.UTC(updated.year, updated.month0, updated.day)) / MS_PER_DAY
+  );
+  return {
+    id: n.id,
+    title: n.title,
+    projectId: project ? project.id : null,
+    projectName: project ? project.name : null,
+    projectCompleted: project?.isCompleted ?? false,
+    snippet: noteSnippet(n.body),
+    searchText: `${n.title}\n${n.body}`.toLowerCase(),
+    updatedLabel:
+      dayDiff <= 0 ? "Today" : dayDiff === 1 ? "Yesterday" : formatShortDate(new Date(updated.year, updated.month0, updated.day)),
   };
 }
 

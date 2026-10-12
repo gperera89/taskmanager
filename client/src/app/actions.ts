@@ -15,12 +15,14 @@ import {
   completeRoutineCluster,
   createCategory,
   createHabit,
+  createNote,
   createProject,
   createRoutine,
   createSubroutine,
   createTask,
   deleteCategory,
   deleteHabit,
+  deleteNote,
   deleteProject,
   deleteRoutine,
   deleteTask,
@@ -43,6 +45,10 @@ import {
   updateCategory,
   updateCategoryScope as updateCategoryScopeApi,
   updateHabit,
+  updateNote,
+  saveNoteBody,
+  type NoteSaveHints,
+  unlinkTaskFromNote,
   updateProject,
   updateRoutine,
   updateTask,
@@ -394,6 +400,47 @@ export async function toggleProject(id: string, isCompleted: boolean) {
 export async function removeProject(id: string) {
   await requireSession();
   await deleteProject(id);
+}
+
+// --- Notes ---
+// Plain string args rather than FormData: a note body is one opaque string, so there's nothing
+// to parse. The id is client-minted (see the Note model), so creates return nothing to swap.
+
+export async function addNote(id: string, title: string, projectId: string) {
+  await requireSession();
+  await createNote({ id, title, projectId: projectId || null });
+}
+
+export async function renameNote(id: string, title: string) {
+  await requireSession();
+  await updateNote(id, { title });
+}
+
+// `hints` is JSON (NoteSaveHints) — the outbox only carries strings, numbers and FormData.
+export async function updateNoteBody(id: string, body: string, hints: string) {
+  await requireSession();
+  let parsed: NoteSaveHints | undefined;
+  try {
+    parsed = hints ? (JSON.parse(hints) as NoteSaveHints) : undefined;
+  } catch {
+    parsed = undefined;
+  }
+  await saveNoteBody(id, body, parsed);
+}
+
+export async function unlinkTask(id: string) {
+  await requireSession();
+  await unlinkTaskFromNote(id);
+}
+
+export async function updateNoteProject(id: string, projectId: string) {
+  await requireSession();
+  await updateNote(id, { projectId: projectId || null });
+}
+
+export async function removeNote(id: string) {
+  await requireSession();
+  await deleteNote(id);
 }
 
 export async function addHabit(formData: FormData): Promise<string | undefined> {

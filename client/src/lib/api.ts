@@ -4,6 +4,15 @@ import { prisma } from "@/lib/db";
 import { nextOccurrence, resolveTaskRepeat, type TaskRepeatRule } from "@/lib/taskRecurrence";
 import { DEFAULT_TIME_ZONE, SUPPORTED_TIME_ZONES } from "@/lib/taskbookDates";
 import {
+  assignBlockIds,
+  defaultNoteTaskCategory,
+  hasCheckboxLines,
+  planNoteTaskSync,
+  removeBlockLine,
+  setBlockChecked,
+  setBlockTitle,
+} from "@/lib/noteTasks";
+import {
   combineDueDateTime,
   habitDateKey,
   MS_PER_DAY,
@@ -11,9 +20,9 @@ import {
   utcCalendarDay,
 } from "@/lib/shared";
 
-export type { Task, Project, Habit, HabitCompletion, Routine, Category, CategoryScope, CompletionLog, HabitScheduleType, RoutineFrequency, RoutineMonthlyMode, CapturedKind, CaptureSource } from "@prisma/client";
+export type { Note, Task, Project, Habit, HabitCompletion, Routine, Category, CategoryScope, CompletionLog, HabitScheduleType, RoutineFrequency, RoutineMonthlyMode, CapturedKind, CaptureSource } from "@prisma/client";
 export { isRoutineTickedNow } from "@/lib/shared";
-import type { CapturedKind, CaptureSource, CategoryScope, Habit, HabitScheduleType, RoutineFrequency, RoutineMonthlyMode } from "@prisma/client";
+import type { CapturedKind, CaptureSource, CategoryScope, Habit, Note, HabitScheduleType, RoutineFrequency, RoutineMonthlyMode } from "@prisma/client";
 
 const HABIT_SCHEDULE_TYPES: HabitScheduleType[] = ["WEEKLY_DAYS", "WEEKLY_COUNT", "MONTHLY_COUNT"];
 const ROUTINE_FREQUENCIES: RoutineFrequency[] = ["DAILY", "WEEKLY", "MONTHLY"];
@@ -151,8 +160,8 @@ export function updateTask(
     pausedUntil: string | null; // "YYYY-MM-DD" — break/holiday; null clears it
   }>
 ) {
-  return notFoundAsError("Task not found", () =>
-    prisma.task.update({
+  return notFoundAsError("Task not found", async () => {
+    const task = await prisma.task.update({
       where: { id },
       data: {
         title: input.title,
@@ -175,8 +184,24 @@ export function updateTask(
           input.pausedUntil === undefined ? undefined : input.pausedUntil ? combineDueDateTime(input.pausedUntil) : null,
         ...(input.repeat === undefined ? {} : repeatToPrismaData(input.repeat)),
       },
-    })
-  );
+    });
+    if (input.title !== undefined) await editTaskNoteLine(task, (body, blockId) => setBlockTitle(body, blockId, task.title));
+    return task;
+  });
+}
+
+// A task made from a note's checkbox line carries its edits back to that line — the other half
+// of the link that saveNoteBody below maintains from the note side. Costs nothing for ordinary
+// tasks; two operations (read + write the note) for linked ones.
+async function editTaskNoteLine(
+  task: { noteId: string | null; noteBlockId: string | null },
+  edit: (body: string, blockId: string) => string
+) {
+  if (!task.noteId || !task.noteBlockId) return;
+  const note = await prisma.note.findUnique({ where: { id: task.noteId }, select: { body: true } });
+  if (!note) return;
+  const next = edit(note.body, task.noteBlockId);
+  if (next !== note.body) await prisma.note.update({ where: { id: task.noteId }, data: { body: next } });
 }
 
 // Rewrites the manual order of a whole group (a due bucket or a project section) in one
@@ -202,13 +227,28 @@ export async function deleteTask(id: string) {
   // Subtasks cascade-delete with their parent (see schema: parent relation onDelete: Cascade).
   const task = await notFoundAsError("Task not found", () => prisma.task.delete({ where: { id } }));
   await deleteDayPlanBlocksFor("TASK", id);
+  await editTaskNoteLine(task, removeBlockLine);
   return task;
+}
+
+// Detaches a task from the note line it came from — the "Keep task" answer when its line is
+// removed from the note. The task carries on as an ordinary task.
+export function unlinkTaskFromNote(id: string) {
+  return notFoundAsError("Task not found", () =>
+    prisma.task.update({ where: { id }, data: { noteId: null, noteBlockId: null } })
+  );
 }
 
 // Completing a repeating task rolls its due date forward to the next occurrence in place
 // (isCompleted stays false) rather than marking it done — mirrors how Routines tick and
 // reset instead of leaving a trail of completed rows. Non-repeating tasks just toggle normally.
 export async function toggleTaskCompletion(id: string, isCompleted: boolean) {
+  const task = await toggleTaskCompletionRow(id, isCompleted);
+  await editTaskNoteLine(task, (body, blockId) => setBlockChecked(body, blockId, task.isCompleted));
+  return task;
+}
+
+async function toggleTaskCompletionRow(id: string, isCompleted: boolean) {
   if (isCompleted) {
     // Un-completing: clear the completion stamp and take back the (recent) history row.
     return notFoundAsError("Task not found", async () => {
@@ -355,6 +395,181 @@ export async function deleteProject(id: string) {
   const project = await notFoundAsError("Project not found", () => prisma.project.delete({ where: { id } }));
   await deleteDayPlanBlocksFor("PROJECT", id);
   return project;
+}
+
+// --- Notes (freeform Markdown, optionally attached to a project) ---
+
+const NOTE_TITLE_FALLBACK = "Untitled";
+
+// Upsert rather than create: the id comes from the client, and an outbox retry after a create
+// that did land (but whose response was lost) must not fail on the duplicate key.
+export function createNote(input: { id: string; title: string; projectId?: string | null; body?: string }) {
+  const title = input.title.trim() || NOTE_TITLE_FALLBACK;
+  return prisma.note.upsert({
+    where: { id: input.id },
+    create: { id: input.id, title, projectId: input.projectId || null, body: input.body ?? "" },
+    update: {},
+  });
+}
+
+export function updateNote(id: string, input: Partial<{ title: string; projectId: string | null }>) {
+  return notFoundAsError("Note not found", async () => {
+    const note = await prisma.note.update({
+      where: { id },
+      data: {
+        title: input.title === undefined ? undefined : input.title.trim() || NOTE_TITLE_FALLBACK,
+        projectId: input.projectId === undefined ? undefined : input.projectId || null,
+      },
+    });
+    // A note's tasks follow it into (or out of) a project.
+    if (input.projectId !== undefined) {
+      await prisma.task.updateMany({ where: { noteId: id }, data: { projectId: note.projectId } });
+    }
+    return note;
+  });
+}
+
+// What the app tells the server alongside a body it has already synced optimistically, so both
+// sides end up with identical rows: the ids and categories it gave the tasks it created (keyed by
+// block id), and how many tasks were linked to the note beforehand. A save with no hints (the
+// Obsidian bridge) gets ids and categories minted here instead.
+export type NoteSaveHints = {
+  creates?: Record<string, { id: string; category: string }>;
+  linked?: number;
+};
+
+// Saves a note's body and brings its tasks in line with its checkbox lines: new lines become
+// tasks, edited lines rename them, ticked lines complete them. Lines that disappeared are left
+// for the caller — the app asks before deleting (see store.tsx), so the sync never deletes.
+// Returns the body as stored, which can differ from the input: block ids are assigned, and a
+// ticked repeating task that rolled forward to its next date has its box un-ticked again.
+export async function saveNoteBody(id: string, input: string, hints?: NoteSaveHints): Promise<string> {
+  let body = assignBlockIds(input);
+  // The common case — prose with no checkboxes, in a note that never had any — is one write.
+  if (hints?.linked === 0 && !hasCheckboxLines(body)) {
+    await notFoundAsError("Note not found", () => prisma.note.update({ where: { id }, data: { body } }));
+    return body;
+  }
+  return notFoundAsError("Note not found", async () => {
+    const note = await prisma.note.findUniqueOrThrow({
+      where: { id },
+      select: { projectId: true, tasks: { select: { id: true, noteBlockId: true, title: true, isCompleted: true } } },
+    });
+    const plan = planNoteTaskSync(body, note.tasks);
+    const blockOf = new Map(note.tasks.map((t) => [t.id, t.noteBlockId]));
+
+    if (plan.creates.length) {
+      let fallbackCategory: string | null = null;
+      if (plan.creates.some((c) => !hints?.creates?.[c.blockId])) {
+        const [projectTasks, categories] = await Promise.all([
+          note.projectId ? prisma.task.findMany({ where: { projectId: note.projectId }, select: { category: true } }) : [],
+          getCategories(),
+        ]);
+        fallbackCategory = defaultNoteTaskCategory(projectTasks.map((t) => t.category), categories.map((c) => c.name));
+      }
+      const rows = plan.creates.map((c) => ({
+        id: hints?.creates?.[c.blockId]?.id ?? crypto.randomUUID(),
+        title: c.title,
+        category: hints?.creates?.[c.blockId]?.category ?? fallbackCategory ?? "Work",
+        projectId: note.projectId,
+        noteId: id,
+        noteBlockId: c.blockId,
+      }));
+      // skipDuplicates: an outbox retry of a save that did land must not trip on the ids.
+      await prisma.task.createMany({ data: rows, skipDuplicates: true });
+      rows.forEach((row, i) => {
+        blockOf.set(row.id, row.noteBlockId);
+        if (plan.creates[i].checked) plan.toggles.push({ taskId: row.id, isCompleted: false });
+      });
+    }
+    for (const r of plan.renames) await prisma.task.update({ where: { id: r.taskId }, data: { title: r.title } });
+    for (const t of plan.toggles) {
+      const after = await toggleTaskCompletionRow(t.taskId, t.isCompleted);
+      const blockId = blockOf.get(t.taskId);
+      if (blockId && after.isCompleted === t.isCompleted) body = setBlockChecked(body, blockId, after.isCompleted);
+    }
+    await prisma.note.update({ where: { id }, data: { body } });
+    return body;
+  });
+}
+
+export async function deleteNote(id: string) {
+  // deleteMany: a note deleted on another device first is already gone, which is the goal.
+  await prisma.note.deleteMany({ where: { id } });
+}
+
+// --- Obsidian vault bridge (api/vault-sync) ---
+//
+// The Cura Bridge plugin (obsidian-plugin/) mirrors notes into the vault's Projects/ folder. Cura
+// is the source of truth; the plugin polls the version below, pulls the snapshot when it moves,
+// and pushes edits made in Obsidian back through vaultSaveNote, which refuses (409) a save based
+// on a version that has since changed in Cura so the plugin can keep both copies.
+
+const VAULT_VERSION_SQL = Prisma.sql`md5(concat_ws('|',
+  (SELECT md5(coalesce(string_agg(to_jsonb(n)::text, ',' ORDER BY n."id"), '')) FROM "Note" n),
+  (SELECT md5(coalesce(string_agg(concat_ws(':', p."id", p."name", p."isCompleted", p."dueDate"), ',' ORDER BY p."id"), '')) FROM "Project" p)
+))`;
+
+export type VaultNote = { id: string; title: string; body: string; projectId: string | null; updatedAt: string };
+export type VaultProject = { id: string; name: string; dueDate: string | null; isCompleted: boolean };
+
+export async function getVaultVersion(): Promise<string> {
+  const rows = await prisma.$queryRaw<{ v: string }[]>`SELECT ${VAULT_VERSION_SQL} AS "v"`;
+  return rows[0]?.v ?? "";
+}
+
+// Everything the plugin needs in one operation. Projects come along whether or not they have notes,
+// so a note moved into a project folder in Obsidian can be matched to its project.
+export async function getVaultSnapshot(): Promise<{ version: string; notes: VaultNote[]; projects: VaultProject[] }> {
+  const rows = await prisma.$queryRaw<{ version: string; notes: VaultNote[]; projects: VaultProject[] }[]>`
+    SELECT
+      ${VAULT_VERSION_SQL} AS "version",
+      (SELECT coalesce(jsonb_agg(jsonb_build_object(
+         'id', n."id", 'title', n."title", 'body', n."body", 'projectId', n."projectId",
+         'updatedAt', to_char(n."updatedAt", 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')) ORDER BY n."createdAt"), '[]'::jsonb)
+       FROM "Note" n) AS "notes",
+      (SELECT coalesce(jsonb_agg(jsonb_build_object(
+         'id', p."id", 'name', p."name", 'isCompleted', p."isCompleted",
+         'dueDate', to_char(p."dueDate", 'YYYY-MM-DD'))), '[]'::jsonb)
+       FROM "Project" p) AS "projects"
+  `;
+  return rows[0];
+}
+
+function toVaultNote(n: { id: string; title: string; body: string; projectId: string | null; updatedAt: Date }): VaultNote {
+  return { id: n.id, title: n.title, body: n.body, projectId: n.projectId, updatedAt: n.updatedAt.toISOString() };
+}
+
+export type VaultSaveResult = { status: "ok" | "conflict" | "missing"; note?: VaultNote };
+
+// An edit made in Obsidian. `baseUpdatedAt` is the version the plugin last synced; if the note has
+// changed in Cura since, nothing is written and the current note comes back as a conflict.
+// `title`/`projectId` are only sent when the file was renamed or moved between folders.
+export async function vaultSaveNote(input: {
+  id: string;
+  body: string;
+  baseUpdatedAt: string;
+  title?: string;
+  projectId?: string | null;
+}): Promise<VaultSaveResult> {
+  const current = await prisma.note.findUnique({ where: { id: input.id } });
+  if (!current) return { status: "missing" };
+  if (current.updatedAt.toISOString() !== input.baseUpdatedAt) return { status: "conflict", note: toVaultNote(current) };
+  if (input.title !== undefined || input.projectId !== undefined) {
+    await updateNote(input.id, { title: input.title, projectId: input.projectId });
+  }
+  // No hints: the server mints ids and categories for any new checkbox lines. Lines removed in
+  // Obsidian leave their tasks linked; the app notices and asks before deleting them.
+  await saveNoteBody(input.id, input.body);
+  const saved = await prisma.note.findUniqueOrThrow({ where: { id: input.id } });
+  return { status: "ok", note: toVaultNote(saved) };
+}
+
+// A note started in Obsidian (a new file in _Unfiled or a project folder). The id is the plugin's.
+export async function vaultCreateNote(input: { id: string; title: string; body: string; projectId: string | null }) {
+  await createNote({ id: input.id, title: input.title, projectId: input.projectId });
+  if (input.body) await saveNoteBody(input.id, input.body);
+  return toVaultNote(await prisma.note.findUniqueOrThrow({ where: { id: input.id } }));
 }
 
 // --- Countdowns (important-event countdowns shown in the calendar rail) ---
@@ -1323,6 +1538,7 @@ function reviveDates<T>(value: T): T {
 const STATE_FINGERPRINT_SQL = Prisma.sql`md5(concat_ws('|',
   (SELECT md5(coalesce(string_agg(to_jsonb(t)::text, ',' ORDER BY t."id"), '')) FROM "Task" t),
   (SELECT md5(coalesce(string_agg(to_jsonb(p)::text, ',' ORDER BY p."id"), '')) FROM "Project" p),
+  (SELECT md5(coalesce(string_agg(to_jsonb(nt)::text, ',' ORDER BY nt."id"), '')) FROM "Note" nt),
   (SELECT md5(coalesce(string_agg(to_jsonb(h)::text, ',' ORDER BY h."id"), '')) FROM "Habit" h),
   (SELECT md5(coalesce(string_agg(to_jsonb(hc)::text, ',' ORDER BY hc."id"), '')) FROM "HabitCompletion" hc),
   (SELECT md5(coalesce(string_agg(to_jsonb(r)::text, ',' ORDER BY r."id"), '')) FROM "Routine" r),
@@ -1353,6 +1569,7 @@ export async function getStateVersion(): Promise<{ version: string; lastCronAtMs
 export type PageSnapshot = {
   tasks: Awaited<ReturnType<typeof getTasks>>;
   projects: Awaited<ReturnType<typeof getProjects>>;
+  notes: Note[];
   habits: Awaited<ReturnType<typeof getHabits>>;
   habitCompletions: Awaited<ReturnType<typeof getHabitCompletions>>;
   routines: Awaited<ReturnType<typeof getRoutines>>;
@@ -1396,6 +1613,7 @@ export async function getPageSnapshot(): Promise<PageSnapshot> {
               OR t."completedAt" >= to_timestamp(${completedCutoffMs}::float8 / 1000) AT TIME ZONE 'UTC')
       ) AS "tasks",
       (SELECT coalesce(jsonb_agg(to_jsonb(p)), '[]'::jsonb) FROM "Project" p) AS "projects",
+      (SELECT coalesce(jsonb_agg(to_jsonb(nt) ORDER BY nt."updatedAt" DESC), '[]'::jsonb) FROM "Note" nt) AS "notes",
       (SELECT coalesce(jsonb_agg(to_jsonb(h)), '[]'::jsonb) FROM "Habit" h) AS "habits",
       (SELECT coalesce(jsonb_agg(to_jsonb(hc) ORDER BY hc."date" ASC), '[]'::jsonb)
          FROM "HabitCompletion" hc
@@ -1436,6 +1654,7 @@ export async function getPageSnapshot(): Promise<PageSnapshot> {
   return {
     tasks: row.tasks,
     projects: row.projects,
+    notes: row.notes,
     habits: row.habits,
     habitCompletions: row.habitCompletions,
     routines: row.routines,

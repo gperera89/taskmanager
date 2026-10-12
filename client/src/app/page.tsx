@@ -31,6 +31,7 @@ export default async function Home() {
   const raw: RawState = {
     tasks: snapshot.tasks,
     projects: snapshot.projects,
+    notes: snapshot.notes,
     habits: snapshot.habits,
     habitCompletions: snapshot.habitCompletions,
     routines: snapshot.routines,

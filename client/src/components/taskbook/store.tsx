@@ -17,7 +17,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { AiNote, CapturedKind, Countdown, DayPlanBlock, HabitCompletion, HabitScheduleType, Routine, RoutineFrequency, RoutineMonthlyMode } from "@prisma/client";
+import type { AiNote, CapturedKind, Note, Countdown, DayPlanBlock, HabitCompletion, HabitScheduleType, Routine, RoutineFrequency, RoutineMonthlyMode } from "@prisma/client";
 import * as serverActions from "@/app/actions";
 import { deriveEntities, type RawState, type RawTask } from "@/lib/derive";
 import { formatLongDate } from "@/lib/taskbookDates";
@@ -44,6 +44,15 @@ import {
   type SerializedArg,
 } from "@/lib/offline";
 import { nextOccurrence, resolveTaskRepeat, type TaskRepeatRule } from "@/lib/taskRecurrence";
+import {
+  assignBlockIds,
+  bodyHasBlock,
+  defaultNoteTaskCategory,
+  planNoteTaskSync,
+  removeBlockLine,
+  setBlockChecked,
+  setBlockTitle,
+} from "@/lib/noteTasks";
 import type { CalendarEvent, CategoryScopeOption, Mode, TaskbookData } from "./types";
 
 // Persists the work/home/all toggle across sessions — this is a pure client display
@@ -113,6 +122,7 @@ export type ServerCalendarData = Omit<
   | "projectOptions"
   | "categoryOptions"
   | "pendingCaptures"
+  | "notes"
 >;
 
 export type TaskRepeatInput = {
@@ -194,7 +204,9 @@ export type TaskbookActions = {
   setTaskBlock: (id: string, reason: string, untilDate: string) => void; // empty reason clears
   reorderGroup: (orderedIds: string[]) => void;
   // Projects
-  addProject: (input: ProjectInput) => void;
+  // Returns the new project's temp id, so a note can be attached to it straight away (queued ops
+  // that reference the temp id are remapped to the real one when they flush).
+  addProject: (input: ProjectInput) => string;
   editProject: (id: string, input: ProjectInput) => void;
   duplicateProject: (templateId: string, name: string) => void;
   renameProject: (id: string, name: string) => void;
@@ -203,6 +215,16 @@ export type TaskbookActions = {
   toggleProject: (id: string, isCompleted: boolean) => void;
   setProjectSections: (id: string, enabled: boolean) => void;
   removeProject: (id: string) => void;
+  // Notes. addNote returns the new note's id (client-minted, final — no temp-id swap), so the
+  // caller can open the editor on it straight away.
+  addNote: (input: { title?: string; projectId?: string | null }) => string;
+  renameNote: (id: string, title: string) => void;
+  // Saves a note's body and syncs its checkbox lines with their tasks (creating, renaming and
+  // ticking them). Returns the body as it should now read — with block ids added to new checkbox
+  // lines — for the editor to adopt.
+  saveNoteBody: (id: string, body: string) => string;
+  setNoteProject: (id: string, projectId: string | null) => void;
+  removeNote: (id: string) => void;
   // Countdowns
   addCountdown: (input: CountdownInput) => void;
   editCountdown: (id: string, input: CountdownInput) => void;
@@ -266,6 +288,7 @@ type TaskbookContextValue = {
   pendingOps: number;
   toasts: Toast[];
   dismissToast: (id: number) => void;
+  subscribeNoteEdits: (noteId: string, fn: (transform: (body: string) => string) => void) => () => void;
 };
 
 const TaskbookContext = createContext<TaskbookContextValue | null>(null);
@@ -320,6 +343,22 @@ function repeatRuleOf(t: RawTask): TaskRepeatRule | null {
     monthlyOrdinal: t.repeatMonthlyOrdinal,
     monthlyWeekday: t.repeatMonthlyWeekday,
   };
+}
+
+// Completing (isCompleted = current state false) or un-completing a task — a repeating task rolls
+// its due date forward instead of completing, mirroring api.ts's toggleTaskCompletion.
+function toggledTask<T extends RawTask>(t: T, isCompleted: boolean): T {
+  if (isCompleted) return { ...t, isCompleted: false, completedAt: null };
+  const rule = repeatRuleOf(t);
+  if (rule && t.dueDate) {
+    const next = nextOccurrence(new Date(t.dueDate), rule);
+    // End the series once the next occurrence would land past the repeat-until date.
+    if (t.repeatUntil && utcCalendarDay(next) > utcCalendarDay(new Date(t.repeatUntil))) {
+      return { ...t, isCompleted: true, completedAt: new Date() };
+    }
+    return { ...t, dueDate: next, isCompleted: false, notifiedAt: null };
+  }
+  return { ...t, isCompleted: true, completedAt: new Date() };
 }
 
 function repeatFields(repeat: TaskRepeatInput) {
@@ -418,7 +457,11 @@ const REGISTRY: Record<string, RegistryEntry> = {
   reorderGroup: { fn: serverActions.reorderTaskGroup },
   addProject: {
     fn: serverActions.addProject,
-    swap: (r, temp, real) => ({ ...r, projects: r.projects.map((p) => (p.id === temp ? { ...p, id: real } : p)) }),
+    swap: (r, temp, real) => ({
+      ...r,
+      projects: r.projects.map((p) => (p.id === temp ? { ...p, id: real } : p)),
+      notes: r.notes.map((n) => (n.projectId === temp ? { ...n, projectId: real } : n)),
+    }),
   },
   editProject: { fn: serverActions.editProject },
   renameProject: { fn: serverActions.renameProject },
@@ -427,6 +470,12 @@ const REGISTRY: Record<string, RegistryEntry> = {
   toggleProject: { fn: serverActions.toggleProject },
   setProjectSections: { fn: serverActions.updateProjectSections },
   removeProject: { fn: serverActions.removeProject },
+  addNote: { fn: serverActions.addNote },
+  renameNote: { fn: serverActions.renameNote },
+  setNoteBody: { fn: serverActions.updateNoteBody },
+  setNoteProject: { fn: serverActions.updateNoteProject },
+  removeNote: { fn: serverActions.removeNote },
+  unlinkTask: { fn: serverActions.unlinkTask },
   addCountdown: {
     fn: serverActions.addCountdown,
     swap: (r, temp, real) => ({ ...r, countdowns: r.countdowns.map((c) => (c.id === temp ? { ...c, id: real } : c)) }),
@@ -640,6 +689,7 @@ export function StoreProvider({
     const id = toastSeq.current;
     setToasts((ts) => [...ts, { id, message, actionLabel, onAction }]);
     window.setTimeout(() => setToasts((ts) => ts.filter((t) => t.id !== id)), UNDO_MS);
+    return id;
   }, []);
   const dismissToast = useCallback((id: number) => setToasts((ts) => ts.filter((t) => t.id !== id)), []);
 
@@ -905,6 +955,7 @@ export function StoreProvider({
             suggestions: snapshot.raw.suggestions ?? [],
             aiNotes: snapshot.raw.aiNotes ?? [],
             countdowns: snapshot.raw.countdowns ?? [],
+            notes: snapshot.raw.notes ?? [],
           });
           if (snapshot.calendarEvents?.length) setEvents(snapshot.calendarEvents);
           // The rows on screen are now the snapshot's, so the version to compare against is the
@@ -1000,6 +1051,67 @@ export function StoreProvider({
     return () => window.clearInterval(timer);
   }, [maybeRefresh]);
 
+  // --- Notes ↔ tasks ---------------------------------------------------------------------------
+
+  // The open note's editor holds text the store hasn't seen yet (it saves on a debounce), so an
+  // edit to a note made from elsewhere — ticking its task in the side panel, renaming the task —
+  // has to reach the editor directly rather than through raw state, or the editor's next save
+  // would write the old line back. NotePage registers here while a note is open.
+  const noteEditListenersRef = useRef(new Map<string, (transform: (body: string) => string) => void>());
+  const subscribeNoteEdits = useCallback((noteId: string, fn: (transform: (body: string) => string) => void) => {
+    noteEditListenersRef.current.set(noteId, fn);
+    return () => {
+      if (noteEditListenersRef.current.get(noteId) === fn) noteEditListenersRef.current.delete(noteId);
+    };
+  }, []);
+
+  // Applies a line edit to a note locally — never queued: every caller's own server write makes the
+  // same edit to the stored note (see api.ts's editTaskNoteLine).
+  const editNoteBody = useCallback((noteId: string, transform: (body: string) => string) => {
+    noteEditListenersRef.current.get(noteId)?.(transform);
+    setRaw((r) => ({ ...r, notes: r.notes.map((n) => (n.id === noteId ? { ...n, body: transform(n.body) } : n)) }));
+  }, []);
+
+  // Tasks whose checkbox line was removed from their note, waiting out the warning toast before
+  // they're deleted. Keyed by task id; the line coming back (undo, paste) cancels the delete.
+  const pendingOrphansRef = useRef(new Map<string, { timer: number; toastId: number }>());
+
+  // Every task whose checkbox line has gone from its note — deleted in Cura's editor, or in
+  // Obsidian and synced up through the vault bridge (the server never deletes these itself) —
+  // gets a warning toast and is deleted when it closes, unless "Keep task" is pressed (the task
+  // carries on unlinked) or the line comes back first (an undo, a paste, Obsidian's undo).
+  useEffect(() => {
+    const bodies = new Map(raw.notes.map((n) => [n.id, n.body]));
+    const pending = pendingOrphansRef.current;
+    const orphanIds = new Set<string>();
+    for (const t of raw.tasks) {
+      if (!t.noteId || !t.noteBlockId) continue;
+      const body = bodies.get(t.noteId);
+      if (body === undefined || bodyHasBlock(body, t.noteBlockId)) continue;
+      orphanIds.add(t.id);
+      if (pending.has(t.id)) continue;
+      const taskId = t.id;
+      const timer = window.setTimeout(() => {
+        pending.delete(taskId);
+        setRaw((r) => ({ ...r, tasks: removeTaskById(r.tasks, taskId) }));
+        enqueue("removeTask", [taskId]);
+      }, UNDO_MS);
+      const toastId = pushToast(`"${t.title}" left its note, so its task will be deleted`, "Keep task", () => {
+        window.clearTimeout(timer);
+        pending.delete(taskId);
+        setRaw((r) => ({ ...r, tasks: mapTask(r.tasks, taskId, (x) => ({ ...x, noteId: null, noteBlockId: null })) }));
+        enqueue("unlinkTask", [taskId]);
+      });
+      pending.set(taskId, { timer, toastId });
+    }
+    for (const [taskId, p] of pending) {
+      if (orphanIds.has(taskId)) continue;
+      window.clearTimeout(p.timer);
+      setToasts((ts) => ts.filter((t) => t.id !== p.toastId));
+      pending.delete(taskId);
+    }
+  }, [raw.notes, raw.tasks, enqueue, pushToast]);
+
   // --- Undoable deletes -----------------------------------------------------------------------
 
   // The row leaves the UI immediately; the server delete is enqueued only after the undo
@@ -1058,6 +1170,8 @@ export function StoreProvider({
           durationMinutes: input.durationMinutes ?? null,
           blockedReason: null,
           blockedUntil: null,
+          noteId: null,
+          noteBlockId: null,
           pausedUntil: null,
           subtasks: [],
           ...repeatFields(input.repeat ?? null),
@@ -1084,27 +1198,15 @@ export function StoreProvider({
           id
         );
       },
-      toggleTask: (id, isCompleted) =>
-        mutate(
-          (r) => ({
-            ...r,
-            tasks: mapTask(r.tasks, id, (t) => {
-              if (isCompleted) return { ...t, isCompleted: false, completedAt: null };
-              const rule = repeatRuleOf(t);
-              if (rule && t.dueDate) {
-                const next = nextOccurrence(new Date(t.dueDate), rule);
-                // End the series once the next occurrence would land past the repeat-until date.
-                if (t.repeatUntil && utcCalendarDay(next) > utcCalendarDay(new Date(t.repeatUntil))) {
-                  return { ...t, isCompleted: true, completedAt: new Date() };
-                }
-                return { ...t, dueDate: next, isCompleted: false, notifiedAt: null };
-              }
-              return { ...t, isCompleted: true, completedAt: new Date() };
-            }),
-          }),
-          "toggleTask",
-          [id, isCompleted]
-        ),
+      toggleTask: (id, isCompleted) => {
+        mutate((r) => ({ ...r, tasks: mapTask(r.tasks, id, (t) => toggledTask(t, isCompleted)) }), "toggleTask", [id, isCompleted]);
+        // A task from a note ticks its checkbox line too (the server does the same on its side).
+        const row = rawRef.current.tasks.find((t) => t.id === id);
+        if (row?.noteId && row.noteBlockId) {
+          const done = toggledTask(row, isCompleted).isCompleted;
+          editNoteBody(row.noteId, (body) => setBlockChecked(body, row.noteBlockId!, done));
+        }
+      },
       removeTask: (id) => {
         let captured: { row: RawTask; parentId: string | null } | null = null;
         for (const t of rawRef.current.tasks) {
@@ -1121,13 +1223,19 @@ export function StoreProvider({
             parentId
               ? { ...r, tasks: mapTask(r.tasks, parentId, (p) => ({ ...p, subtasks: [...p.subtasks, row] })) }
               : { ...r, tasks: [...r.tasks, row] },
-          () => enqueue("removeTask", [id])
+          () => {
+            // A task from a note takes its line with it — once the undo window has passed.
+            if (row.noteId && row.noteBlockId) editNoteBody(row.noteId, (body) => removeBlockLine(body, row.noteBlockId!));
+            enqueue("removeTask", [id]);
+          }
         );
       },
       renameTask: (id, title) => {
         const fd = new FormData();
         fd.set("title", title);
         mutate((r) => ({ ...r, tasks: mapTask(r.tasks, id, (t) => ({ ...t, title })) }), "renameTask", [id, fd]);
+        const row = rawRef.current.tasks.find((t) => t.id === id);
+        if (row?.noteId && row.noteBlockId) editNoteBody(row.noteId, (body) => setBlockTitle(body, row.noteBlockId!, title));
       },
       setTaskDescription: (id, description) => {
         const fd = new FormData();
@@ -1276,6 +1384,7 @@ export function StoreProvider({
           [fd],
           id
         );
+        return id;
       },
       editProject: (id, input) => {
         const fd = new FormData();
@@ -1365,11 +1474,141 @@ export function StoreProvider({
       removeProject: (id) => {
         const captured = rawRef.current.projects.find((p) => p.id === id);
         if (!captured) return;
+        // The project's notes stay, as Unfiled (the server's onDelete: SetNull) — but only once
+        // the undo window has closed, so an Undo puts them back under the project untouched.
         deleteWithUndo(
           "Project",
           (r) => ({ ...r, projects: r.projects.filter((p) => p.id !== id) }),
           (r) => ({ ...r, projects: [...r.projects, captured] }),
-          () => enqueue("removeProject", [id])
+          () => {
+            setRaw((r) => ({ ...r, notes: r.notes.map((n) => (n.projectId === id ? { ...n, projectId: null } : n)) }));
+            enqueue("removeProject", [id]);
+          }
+        );
+      },
+
+      // --- Notes ---
+      // Every edit bumps updatedAt locally so the Notes list re-sorts as the server would.
+      addNote: (input) => {
+        const id = crypto.randomUUID();
+        const now = new Date();
+        const row: Note = {
+          id,
+          title: input.title?.trim() || "Untitled",
+          body: "",
+          projectId: input.projectId || null,
+          createdAt: now,
+          updatedAt: now,
+        };
+        mutate((r) => ({ ...r, notes: [row, ...r.notes] }), "addNote", [id, row.title, row.projectId ?? ""]);
+        return id;
+      },
+      renameNote: (id, title) => {
+        const next = title.trim() || "Untitled";
+        mutate(
+          (r) => ({ ...r, notes: r.notes.map((n) => (n.id === id ? { ...n, title: next, updatedAt: new Date() } : n)) }),
+          "renameNote",
+          [id, next]
+        );
+      },
+      saveNoteBody: (noteId, draft) => {
+        const r0 = rawRef.current;
+        const note = r0.notes.find((n) => n.id === noteId);
+        if (!note) return draft;
+        let body = assignBlockIds(draft);
+        const linked = r0.tasks.filter((t) => t.noteId === noteId);
+        const plan = planNoteTaskSync(body, linked);
+
+        // New tasks get their final ids here (no temp-id swap), and the server is told them.
+        const category = defaultNoteTaskCategory(
+          note.projectId ? r0.tasks.filter((t) => t.projectId === note.projectId).map((t) => t.category) : [],
+          r0.categories.map((c) => c.name)
+        );
+        const now = new Date();
+        const creates: Record<string, { id: string; category: string }> = {};
+        const newRows: RawTask[] = plan.creates.map((c) => {
+          const id = crypto.randomUUID();
+          creates[c.blockId] = { id, category };
+          const row: RawTask = {
+            id,
+            title: c.title,
+            description: null,
+            category,
+            dueDate: null,
+            isCompleted: false,
+            completedAt: null,
+            createdAt: now,
+            notifiedAt: null,
+            projectId: note.projectId,
+            parentId: null,
+            section: null,
+            sortOrder: null,
+            reminderLeadMinutes: null,
+            durationMinutes: null,
+            blockedReason: null,
+            blockedUntil: null,
+            pausedUntil: null,
+            noteId,
+            noteBlockId: c.blockId,
+            subtasks: [],
+            ...NO_REPEAT,
+          };
+          return c.checked ? toggledTask(row, false) : row;
+        });
+
+        // Ticks from the note. A repeating task rolls forward instead of completing, so its box
+        // is un-ticked again — mirrored server-side in saveNoteBody.
+        const toggled = new Map<string, RawTask>();
+        for (const t of plan.toggles) {
+          const row = linked.find((l) => l.id === t.taskId);
+          if (!row) continue;
+          const after = toggledTask(row, t.isCompleted);
+          toggled.set(row.id, after);
+          if (after.isCompleted === t.isCompleted && row.noteBlockId) body = setBlockChecked(body, row.noteBlockId, after.isCompleted);
+        }
+        const renamed = new Map(plan.renames.map((r) => [r.taskId, r.title]));
+
+        setRaw((r) => ({
+          ...r,
+          notes: r.notes.map((n) => (n.id === noteId ? { ...n, body, updatedAt: new Date() } : n)),
+          tasks: [
+            ...r.tasks.map((t) => {
+              let next = toggled.get(t.id) ?? t;
+              const title = renamed.get(t.id);
+              if (title !== undefined) next = { ...next, title };
+              return next;
+            }),
+            ...newRows,
+          ],
+        }));
+        enqueue("setNoteBody", [noteId, body, JSON.stringify({ creates, linked: linked.length })]);
+
+        // Lines that disappeared are picked up by the orphan watcher below the actions.
+        return body;
+      },
+      setNoteProject: (id, projectId) =>
+        mutate(
+          (r) => ({
+            ...r,
+            notes: r.notes.map((n) => (n.id === id ? { ...n, projectId, updatedAt: new Date() } : n)),
+            // The note's tasks follow it (api.ts's updateNote does the same).
+            tasks: r.tasks.map((t) => (t.noteId === id ? { ...t, projectId } : t)),
+          }),
+          "setNoteProject",
+          [id, projectId ?? ""]
+        ),
+      removeNote: (id) => {
+        const captured = rawRef.current.notes.find((n) => n.id === id);
+        if (!captured) return;
+        deleteWithUndo(
+          "Note",
+          (r) => ({ ...r, notes: r.notes.filter((n) => n.id !== id) }),
+          (r) => ({ ...r, notes: [captured, ...r.notes] }),
+          () => {
+            // Its tasks stay, as ordinary tasks (the server's onDelete: SetNull).
+            setRaw((r) => ({ ...r, tasks: r.tasks.map((t) => (t.noteId === id ? { ...t, noteId: null, noteBlockId: null } : t)) }));
+            enqueue("removeNote", [id]);
+          }
         );
       },
 
@@ -1817,6 +2056,8 @@ export function StoreProvider({
           durationMinutes: null,
           blockedReason: null,
           blockedUntil: null,
+          noteId: null,
+          noteBlockId: null,
           pausedUntil: null,
           subtasks: [],
           ...NO_REPEAT,
@@ -1866,7 +2107,7 @@ export function StoreProvider({
           [eventId]
         ),
     };
-  }, [enqueue, deleteWithUndo, pushToast, refreshNow]);
+  }, [enqueue, deleteWithUndo, pushToast, refreshNow, editNoteBody]);
 
   const data = useMemo<TaskbookData>(
     () => ({
@@ -1886,7 +2127,7 @@ export function StoreProvider({
 
   return (
     <TaskbookContext.Provider
-      value={{ data, actions, raw, calendarEvents: events, refreshCalendar, calendarRefreshing, syncNow, syncing, nowMs: liveNowMs, mode, setMode, offline, pendingOps, toasts, dismissToast }}
+      value={{ data, actions, raw, calendarEvents: events, refreshCalendar, calendarRefreshing, syncNow, syncing, nowMs: liveNowMs, mode, setMode, offline, pendingOps, toasts, dismissToast, subscribeNoteEdits }}
     >
       {children}
     </TaskbookContext.Provider>

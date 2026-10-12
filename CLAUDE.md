@@ -4,8 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repo layout
 
-This repo is a thin wrapper around a single app: everything lives in `client/`, a Next.js (App
-Router) project. There is nothing at the repo root except this file and `client/`.
+The app lives in `client/`, a Next.js (App Router) project. `obsidian-plugin/` is the Cura Bridge
+Obsidian plugin that mirrors notes into the vault (see "Obsidian vault bridge" below); it has its
+own `package.json` and is built and installed separately.
 
 **Read `client/AGENTS.md` before writing any code that touches Next.js APIs.** This project is
 pinned to a Next.js version newer than most training data — conventions differ from what you'd
@@ -132,6 +133,46 @@ therefore ONE raw-SQL operation (`getCronSnapshot` in `api.ts`: heartbeat-stampi
 reads as JSON aggregates), with retention sweeps gated to the first run of each local day. Keep it
 that way: don't add per-run queries to the cron path, and prefer batching/piggybacking reads for
 anything that runs on a schedule.
+
+### Notes
+`Note` rows are freeform Markdown, optionally attached to a project (`onDelete: SetNull` — a
+deleted project's notes become Unfiled). The Notes tab (`NotesView.tsx`) lists them; a note opens
+full-screen in `NotePage.tsx` with the project's `ProjectCard` beside it (a bottom sheet on
+phones). The body editor is CodeMirror 6 (`MarkdownEditor.tsx`, loaded via `next/dynamic`) so the
+Markdown round-trips byte-for-byte — this is groundwork for mirroring notes into the Obsidian
+vault's `Projects/` folder. Note ids are minted client-side (`crypto.randomUUID`) so the editor can
+save straight after a create without a temp-id swap; `createNote` upserts to stay idempotent
+under outbox retries. Body edits are saved on a ~1.2s debounce (one queued write each), and an
+incoming server copy only replaces the editor's text when nothing local is unsaved.
+
+**Checkbox lines are tasks.** `- [ ] text` in a note becomes a task (in the note's project, or
+standalone if Unfiled), linked by an Obsidian block id appended to the line (`^cura-k3x9q2`,
+stored as `Task.noteBlockId`; hidden in Cura's editor). `src/lib/noteTasks.ts` is the shared,
+client-safe logic (parse, assign ids, plan the sync, edit a line by block id). The server is
+authoritative: `saveNoteBody` in `api.ts` creates/renames/ticks tasks from the body, and
+`toggleTaskCompletion`/`updateTask`/`deleteTask` edit the linked line back — so every path that
+touches a task (MCP, notification actions, voice) keeps its note in step. The store mirrors both
+directions optimistically and sends the ids of tasks it created as hints, so client and server
+rows match without a swap. A removed line never deletes its task server-side; the app warns
+(toast with "Keep task") and deletes after the undo window. Edits to an open note made from
+elsewhere in the app reach the editor via `subscribeNoteEdits` rather than raw state, since the
+editor holds unsaved text the store hasn't seen.
+
+### Obsidian vault bridge
+`obsidian-plugin/` keeps a Markdown file per note in the Obsidian vault — `Projects/Project — <Name>
+<YYYY-MM>/<Title>.md`, completed projects under `Archives/`, unattached notes in
+`Projects/_Unfiled/` — and syncs edits both ways through `api/vault-sync` (bearer
+`VAULT_SYNC_SECRET`; exempt from the proxy). Cura is the source of truth; a file is tied to its
+note by `cura-note:` in its frontmatter, and the plugin touches no other files except new ones
+started inside those folders (imported as notes). It polls a one-operation version fingerprint
+(`getVaultVersion`) and pulls the whole snapshot only when it moves. Saves carry the
+`updatedAt` they were based on; if Cura changed since, the server answers 409 and the plugin
+keeps Obsidian's text as a "(conflict …)" copy. Renaming a file renames the note, moving it
+between Cura folders changes its project, deleting it deletes the note (its tasks stay).
+The sync engine (`src/core.ts`) has no Obsidian imports; `npm test` there runs it end-to-end
+against a running Cura and a temp folder. Build with `npm run build`, then copy `main.js` and
+`manifest.json` into the vault's `.obsidian/plugins/cura-bridge/`. It's desktop-only: one Mac
+syncs, and Obsidian Sync carries the files to other devices.
 
 ### Voice capture
 `Header.tsx`'s mic button records audio client-side and posts it to

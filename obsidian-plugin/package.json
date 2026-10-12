@@ -1,0 +1,15 @@
+{
+  "name": "cura-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Obsidian plugin that mirrors Cura's notes into the vault (see src/core.ts).",
+  "scripts": {
+    "build": "tsc --noEmit && node esbuild.config.mjs",
+    "test": "node --experimental-strip-types test/sync.test.ts"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.12",
+    "obsidian": "^1.14.4",
+    "typescript": "^5.9.3"
+  }
+}
