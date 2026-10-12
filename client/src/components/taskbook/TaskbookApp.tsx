@@ -54,6 +54,10 @@ const AREA_SHORTCUTS: Record<string, AreaKey> = {
 // Letter keys → home/all/work mode, matching ModeToggle's order.
 const MODE_SHORTCUTS: Record<string, Mode> = { h: "home", a: "all", w: "work" };
 
+// Below the lg breakpoint (1024px) the views are a swipeable carousel; at or above it, fixed
+// content beside the calendar rail.
+const MOBILE_QUERY = "(max-width: 1023px)";
+
 export default function TaskbookApp() {
   const { data, actions, raw, calendarEvents, nowMs, mode, setMode } = useTaskbook();
   const [area, setArea] = useState<AreaKey>("tasks");
@@ -69,7 +73,10 @@ export default function TaskbookApp() {
   // The note open full-screen in the editor, if any — it sits over whichever tab opened it, so
   // closing it lands back where you were.
   const [openNoteId, setOpenNoteId] = useState<string | null>(null);
-  const [isMobile, setIsMobile] = useState(false);
+  // Read straight from the viewport: this component only ever renders on the client (the store
+  // draws the static frame until it's ready — see StoreProvider), so there's no server render to
+  // match, and starting from `false` would paint the desktop layout on a phone for a frame.
+  const [isMobile, setIsMobile] = useState(() => window.matchMedia(MOBILE_QUERY).matches);
   const scrollRef = useRef<HTMLDivElement>(null);
   // While we programmatically snap the carousel to a tapped tab, ignore the scroll
   // events it emits so they don't fight the target we're animating toward.
@@ -105,7 +112,7 @@ export default function TaskbookApp() {
   // Mirror the lg breakpoint (1024px) used for the layout: below it we swipe a carousel,
   // at or above it we show the fixed content + calendar rail.
   useEffect(() => {
-    const mq = window.matchMedia("(max-width: 1023px)");
+    const mq = window.matchMedia(MOBILE_QUERY);
     const update = () => setIsMobile(mq.matches);
     update();
     mq.addEventListener("change", update);

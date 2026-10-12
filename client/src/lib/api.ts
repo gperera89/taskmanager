@@ -1,6 +1,7 @@
 import "server-only";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import type { RawState } from "@/lib/derive";
 import { nextOccurrence, resolveTaskRepeat, type TaskRepeatRule } from "@/lib/taskRecurrence";
 import { DEFAULT_TIME_ZONE, SUPPORTED_TIME_ZONES } from "@/lib/taskbookDates";
 import {
@@ -1527,9 +1528,9 @@ function reviveDates<T>(value: T): T {
 //
 // An md5 of every row the page snapshot reads, computed *inside* Postgres so the rows themselves
 // never cross the wire — the whole check is one operation returning 32 bytes. The client keeps
-// the fingerprint next to its IndexedDB snapshot and asks /api/state-version on open/focus:
-// when it matches, a full server render would hand back exactly what is already on screen, so
-// the refresh is skipped entirely (see store.tsx). When it differs, the normal refresh runs.
+// the fingerprint next to its IndexedDB snapshot and sends it with `pullState` on open/focus:
+// when it matches, the server's rows are exactly what is already on screen, so nothing else is
+// read or sent (see store.tsx). When it differs, the full snapshot comes back in the same call.
 //
 // `lastCronAt` is excluded deliberately: the notification cron restamps it every minute, so
 // including it would make the fingerprint differ on every single check. Everything else is
@@ -1552,7 +1553,7 @@ const STATE_FINGERPRINT_SQL = Prisma.sql`md5(concat_ws('|',
   (SELECT md5((to_jsonb(a) - 'lastCronAt')::text) FROM "AppSettings" a WHERE a."id" = ${APP_SETTINGS_ID})
 ))`;
 
-// The fingerprint on its own — what /api/state-version answers with. `lastCronAt` rides along
+// The fingerprint on its own — what `pullState` checks first. `lastCronAt` rides along
 // because it's the one field deliberately left out of the fingerprint: the client still needs
 // the current heartbeat (the "reminders may not be firing" banner reads it), and a version check
 // that skipped the refresh would otherwise leave the page showing an ever-older cron time.
@@ -1668,5 +1669,27 @@ export async function getPageSnapshot(): Promise<PageSnapshot> {
     timeZone: settings.timeZone,
     lastCronAt: settings.lastCronAt,
     stateVersion: row.stateVersion,
+  };
+}
+
+// The slice of a page snapshot the client store holds as its raw state. Shared by the initial
+// page render and `pullState` (the store's background sync), so the two can never disagree on
+// what a "full state" is.
+export function snapshotToRaw(snapshot: PageSnapshot): RawState {
+  return {
+    tasks: snapshot.tasks,
+    projects: snapshot.projects,
+    notes: snapshot.notes,
+    habits: snapshot.habits,
+    habitCompletions: snapshot.habitCompletions,
+    routines: snapshot.routines,
+    categories: snapshot.categories,
+    captures: snapshot.captures,
+    timeZone: snapshot.timeZone,
+    dismissedEventIds: snapshot.dismissedEventIds,
+    dayPlanBlocks: snapshot.dayPlanBlocks,
+    suggestions: snapshot.suggestions,
+    aiNotes: snapshot.aiNotes,
+    countdowns: snapshot.countdowns,
   };
 }

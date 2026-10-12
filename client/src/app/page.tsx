@@ -1,6 +1,5 @@
-import { getPageSnapshot } from "@/lib/api";
+import { getPageSnapshot, snapshotToRaw } from "@/lib/api";
 import { formatLongDate } from "@/lib/taskbookDates";
-import type { RawState } from "@/lib/derive";
 import TaskbookApp from "@/components/taskbook/TaskbookApp";
 import { StoreProvider, type ServerCalendarData } from "@/components/taskbook/store";
 
@@ -28,22 +27,7 @@ export default async function Home() {
   // TaskbookApp via deriveCalendarView — including for this initial render, since it's a client
   // component rendered on the server too — so it can react instantly to optimistic edits, month
   // navigation, and timezone changes rather than needing a page refresh (see lib/derive.ts).
-  const raw: RawState = {
-    tasks: snapshot.tasks,
-    projects: snapshot.projects,
-    notes: snapshot.notes,
-    habits: snapshot.habits,
-    habitCompletions: snapshot.habitCompletions,
-    routines: snapshot.routines,
-    categories: snapshot.categories,
-    captures: snapshot.captures,
-    timeZone: snapshot.timeZone,
-    dismissedEventIds: snapshot.dismissedEventIds,
-    dayPlanBlocks: snapshot.dayPlanBlocks,
-    suggestions: snapshot.suggestions,
-    aiNotes: snapshot.aiNotes,
-    countdowns: snapshot.countdowns,
-  };
+  const raw = snapshotToRaw(snapshot);
 
   const serverData: ServerCalendarData = {
     todayLabel: formatLongDate(now),

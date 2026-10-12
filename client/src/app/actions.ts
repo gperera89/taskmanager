@@ -53,7 +53,11 @@ import {
   updateRoutine,
   updateTask,
   updateTimeZone as updateTimeZoneApi,
+  getPageSnapshot,
+  getStateVersion,
+  snapshotToRaw,
 } from "@/lib/api";
+import type { RawState } from "@/lib/derive";
 import { CALENDAR_CACHE_TAG, getCalendarEvents, type CalendarEvent } from "@/lib/calendar";
 import { parseDurationInput } from "@/lib/shared";
 // updateTag (not revalidateTag) — this is a read-your-own-writes refresh: it must expire the
@@ -666,6 +670,38 @@ export async function dismissCalendarEvent(eventId: string) {
 export async function restoreCalendarEvent(eventId: string) {
   await requireSession();
   await restoreCalendarEventApi(eventId);
+}
+
+export type PulledState = {
+  version: string;
+  lastCronAtMs: number | null;
+  // Server clock at the time of the read — what the store stamps its IndexedDB snapshot with, so
+  // it stays comparable with a later page render's `nowMs` (server clock vs server clock).
+  serverNowMs: number;
+  // Null when `knownVersion` already matched: the device's rows are current.
+  raw: RawState | null;
+};
+
+// The store's background sync, replacing the old "check /api/state-version, then router.refresh()
+// the whole page" pair. The common case — nothing changed since this device last looked — costs
+// the one fingerprint query. Otherwise the full snapshot comes back as data for the store to swap
+// in, with no page re-render (no layout, no session lookup in the top bar, no RSC payload).
+// Pass null to skip the comparison and always get the rows.
+export async function pullState(knownVersion: string | null): Promise<PulledState> {
+  await requireSession();
+  const { version, lastCronAtMs } = await getStateVersion();
+  if (knownVersion !== null && version === knownVersion) {
+    return { version, lastCronAtMs, serverNowMs: Date.now(), raw: null };
+  }
+  const snapshot = await getPageSnapshot();
+  return {
+    // The snapshot's own fingerprint, not the one above — a write landing between the two reads
+    // would otherwise pair the newer rows with the older version.
+    version: snapshot.stateVersion,
+    lastCronAtMs: snapshot.lastCronAt ? snapshot.lastCronAt.getTime() : null,
+    serverNowMs: Date.now(),
+    raw: snapshotToRaw(snapshot),
+  };
 }
 
 export type CalendarPayload = { events: CalendarEvent[]; errors: string[] };

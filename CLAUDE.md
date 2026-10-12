@@ -88,14 +88,18 @@ an earlier `revalidatePath`-per-action design that had an ~8s click-to-update la
 - `src/components/taskbook/store.tsx` — `StoreProvider`/`useTaskbook()`. Holds raw entity state,
   exposes typed mutation methods. Each method patches local state immediately, then fires the
   matching server action in the background; creates insert a `tmp-…` id and swap in the real one
-  when the action resolves. On any write error, or when the tab regains focus/visibility, it
-  `router.refresh()`s to reconcile with server truth (this also picks up voice captures and other
-  devices' edits, at the cost of those not appearing until a focus event). That reconcile is
-  gated on a change check: `GET /api/state-version` returns an md5 of every row the page reads
-  (`STATE_FINGERPRINT_SQL` in `api.ts`, computed inside Postgres — one operation, 32 bytes back),
-  and the refresh is skipped entirely when it matches the fingerprint the current rows came from.
+  when the action resolves. Edits go through a durable IndexedDB outbox, and the raw state is
+  snapshotted to IndexedDB too. **Start-up** draws the static `AppFrame` until the store has picked
+  its rows (`ready`): the device snapshot wins over the page HTML whenever that HTML came from the
+  service worker's cache (the norm once installed), ops are queued, or the device is offline — so
+  the app paints once, from the best rows, with the right phone/desktop layout. **Sync** is one
+  server action, `pullState(knownVersion)`: it checks an md5 of every row the page reads
+  (`STATE_FINGERPRINT_SQL` in `api.ts`, computed inside Postgres) and returns either "unchanged"
+  or the full rows, which the store swaps in without a page re-render. It runs after start-up, on
+  focus/visibility, on a 3-minute poll while visible, and after a rejected write; it never
+  overwrites rows while ops are queued or a local edit landed mid-flight.
   `AppSettings.lastCronAt` is excluded from the hash (it moves every minute) and rides along in
-  the response instead. Anything the page shows that a skipped refresh would leave stale must
+  the response instead. Anything the page shows that an unchanged sync would leave stale must
   therefore be computed client-side — that's why the header's date label is.
 - `src/components/taskbook/formParse.ts` — client-side `FormData` → typed input parsers mirroring
   the ones in `app/actions.ts`, so forms keep plain `name=` attributes but feed the optimistic store.

@@ -16,7 +16,6 @@
 // due-bucketing, counts and streaks all update exactly as a server round trip would have.
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import type { AiNote, CapturedKind, Note, Countdown, DayPlanBlock, HabitCompletion, HabitScheduleType, Routine, RoutineFrequency, RoutineMonthlyMode } from "@prisma/client";
 import * as serverActions from "@/app/actions";
 import { deriveEntities, type RawState, type RawTask } from "@/lib/derive";
@@ -53,6 +52,7 @@ import {
   setBlockChecked,
   setBlockTitle,
 } from "@/lib/noteTasks";
+import AppFrame from "./AppFrame";
 import type { CalendarEvent, CategoryScopeOption, Mode, TaskbookData } from "./types";
 
 // Persists the work/home/all toggle across sessions — this is a pure client display
@@ -79,24 +79,28 @@ const REFRESH_DEBOUNCE_MS = 5000;
 // is minutes rather than seconds, and why a hidden tab never ticks.
 const VERSION_POLL_MS = 3 * 60_000;
 
-// A full refresh is a whole server render (every row re-queried, re-serialized, re-derived and
-// re-seeded into the store), and most opens don't need one: nothing has changed since the last
-// visit. /api/state-version answers that question with a 32-byte fingerprint of the same rows
-// (see STATE_FINGERPRINT_SQL in lib/api.ts), so an unchanged database costs one tiny request
-// instead of the whole render. If it can't be reached, nothing is refreshed either — a failed
-// version check means the refresh would have failed too.
-type StateVersionResponse = { version: string; lastCronAtMs: number | null };
+// How long the app waits on IndexedDB before giving up and drawing the server's rows. WebKit's
+// IndexedDB can stall on the first open after a cold launch; the splash must never hang on it.
+const HYDRATE_TIMEOUT_MS = 1500;
 
-async function fetchStateVersion(): Promise<StateVersionResponse | null> {
-  try {
-    const res = await fetch("/api/state-version", { cache: "no-store", credentials: "same-origin" });
-    if (!res.ok) return null;
-    const body = (await res.json()) as { v?: unknown; lastCronAtMs?: unknown };
-    if (typeof body.v !== "string" || !body.v) return null;
-    return { version: body.v, lastCronAtMs: typeof body.lastCronAtMs === "number" ? body.lastCronAtMs : null };
-  } catch {
-    return null;
-  }
+// A page render this much older than the device clock was served from the service worker's
+// cache, not the network (see sw.js) — so its rows are from a previous visit, and the device's
+// own snapshot (which also carries that visit's edits) is the better starting point. Generous on
+// purpose: a fresh network render is milliseconds old, and a device clock a few seconds off must
+// not tip the comparison.
+const CACHED_SHELL_AGE_MS = 30_000;
+
+// Rows persisted by an older deploy can predate fields added since — backfill them so the
+// derivers never trip over a missing array.
+function withRawDefaults(raw: RawState): RawState {
+  return {
+    ...raw,
+    notes: raw.notes ?? [],
+    dayPlanBlocks: raw.dayPlanBlocks ?? [],
+    suggestions: raw.suggestions ?? [],
+    aiNotes: raw.aiNotes ?? [],
+    countdowns: raw.countdowns ?? [],
+  };
 }
 
 function isMode(v: string | null): v is Mode {
@@ -542,11 +546,13 @@ const REGISTRY: Record<string, RegistryEntry> = {
   restoreEvent: { fn: serverActions.restoreCalendarEvent },
 };
 
-// `renderedAt` is the server's `nowMs` from the render this snapshot was taken against — a
-// *server* clock reading, so it's comparable with a later render's `nowMs`. `savedAt` is the
+// `renderedAt` is the server's `nowMs` from the render this snapshot was taken against, or the
+// server time of the last sync that confirmed its rows — a *server* clock reading either way, so
+// it's comparable with a later render's `nowMs`. `savedAt` is the
 // local clock and is kept for diagnostics only: comparing it against `nowMs` would pit this
 // browser's clock against Vercel's, and a device running even slightly fast would then prefer
-// its own stale snapshot over fresh server data on every load.
+// its own stale snapshot over fresh server data on every load. (Start-up's cached-shell check
+// does compare the local clock with `nowMs`, but only against a wide margin — CACHED_SHELL_AGE_MS.)
 type Snapshot = {
   raw: RawState;
   calendarEvents: CalendarEvent[];
@@ -570,8 +576,21 @@ export function StoreProvider({
   stateVersion: string;
   children: React.ReactNode;
 }) {
-  const router = useRouter();
   const [raw, setRaw] = useState(initialRaw);
+  // False until the device's own snapshot has been read (or ruled out). Until then the provider
+  // draws the static app frame instead of its children: the rows in the page HTML may be from a
+  // cached shell days old, and the layout can't know phone from desktop before the client runs,
+  // so painting either would only be replaced a moment later. One paint, from the best rows.
+  const [ready, setReady] = useState(false);
+  // Counts local edits to `raw`, so a sync that was in flight while one landed knows not to
+  // overwrite it with server rows that predate it. Bumped by the effect below for every change
+  // except the ones a sync itself applies (flagged through `applyingPullRef`).
+  const editSeqRef = useRef(0);
+  const applyingPullRef = useRef(false);
+  useEffect(() => {
+    if (applyingPullRef.current) applyingPullRef.current = false;
+    else editSeqRef.current += 1;
+  }, [raw]);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [calendarErrors, setCalendarErrors] = useState<string[]>([]);
   // Gates the IndexedDB snapshot write below: until the calendar lands, `events` is empty, and
@@ -586,12 +605,19 @@ export function StoreProvider({
   }, [raw]);
   const [offline, setOffline] = useState(false);
   const [pendingOps, setPendingOps] = useState(0);
-  // Server fingerprint of the rows currently on screen — see maybeRefresh below. Held in a ref
-  // (not state) because only the refresh logic reads it, and it must never trigger a re-render.
+  // Server fingerprint of the rows currently on screen — see `pull` below. Held in a ref (not
+  // state) because only the sync logic reads it, and it must never trigger a re-render.
   const stateVersionRef = useRef(stateVersion);
   useEffect(() => {
     stateVersionRef.current = stateVersion;
   }, [stateVersion]);
+  // Server clock reading for the rows on screen: the page render's `nowMs`, then the time of the
+  // last sync that confirmed or replaced them. Persisted with the IndexedDB snapshot as
+  // `renderedAt` (see Snapshot).
+  const renderedAtRef = useRef(nowMs);
+  useEffect(() => {
+    renderedAtRef.current = nowMs;
+  }, [nowMs]);
   // The cron heartbeat, refreshed by version checks that skip the full render (null until one
   // reports in — until then the server render's own value stands).
   const [cronAtMs, setCronAtMs] = useState<number | null>(null);
@@ -641,7 +667,6 @@ export function StoreProvider({
   // triggered by our own optimistic setRaw don't clobber local state. This is React's
   // "adjust state when a prop changes" pattern (compared during render, no effect needed).
   const [seededFrom, setSeededFrom] = useState(initialRaw);
-  // A manual refresh is "done" exactly when that new snapshot lands (see syncNow below).
   const [syncing, setSyncing] = useState(false);
   if (initialRaw !== seededFrom) {
     setSeededFrom(initialRaw);
@@ -702,31 +727,53 @@ export function StoreProvider({
   const idMapRef = useRef<Record<string, string>>({});
   const refreshAtRef = useRef(0);
 
-  const refreshNow = useCallback(() => {
-    refreshAtRef.current = Date.now();
-    router.refresh();
-  }, [router]);
+  // Bumped after every sync that reached the server, so the snapshot effect re-persists the
+  // refreshed `renderedAt`/version even when the rows themselves didn't change.
+  const [syncStamp, setSyncStamp] = useState(0);
+  const pullingRef = useRef(false);
 
-  // Refresh only if the database has actually changed since the render (or IndexedDB snapshot)
-  // currently on screen. This is what stops every app open costing a full server render: the
-  // common case — nothing touched Cura since you last looked — now ends at a 32-byte response.
-  // A failed check refreshes nothing: it means the network is down, and a full render would
-  // only have failed more slowly.
-  const maybeRefresh = useCallback(async () => {
-    const result = await fetchStateVersion();
-    if (!result) return;
-    // The heartbeat is excluded from the fingerprint (it moves every minute), so carry it across
-    // by hand — otherwise skipping the refresh would age it into a false "reminders may not be
-    // firing" warning.
-    setCronAtMs(result.lastCronAtMs);
-    if (result.version === stateVersionRef.current) {
-      // Nothing to pull. Count it as a reconcile for debounce purposes so the paired
-      // focus/visibilitychange events don't fire a second check straight after this one.
-      refreshAtRef.current = Date.now();
-      return;
+  // Sync with the server in one call (see `pullState` in app/actions.ts): send the fingerprint of
+  // the rows on screen, get back either "unchanged" or the full rows to swap in — no page
+  // re-render. Resolves true when the device is now in step with the server. A failed call
+  // changes nothing: the rows on screen stay, and the next focus/poll tries again.
+  const pull = useCallback(async ({ force = false }: { force?: boolean } = {}): Promise<boolean> => {
+    if (pullingRef.current) return false;
+    pullingRef.current = true;
+    refreshAtRef.current = Date.now();
+    const editSeqAtStart = editSeqRef.current;
+    try {
+      const result = await serverActions.pullState(force ? null : stateVersionRef.current);
+      // The heartbeat is excluded from the fingerprint (it moves every minute), so it rides along
+      // on every answer — otherwise an unchanged sync would age it into a false "reminders may
+      // not be firing" warning.
+      setCronAtMs(result.lastCronAtMs);
+      setOffline(false);
+      if (result.raw) {
+        // A local edit made while this was in flight (or still queued for the server) isn't in
+        // these rows — applying them would briefly undo it. Leave the version alone so the next
+        // sync, after the edit has been sent, picks the rows up instead.
+        const queued = idbAvailable() ? await outboxCount().catch(() => 1) : 0;
+        if (editSeqRef.current !== editSeqAtStart || queued > 0) return false;
+        applyingPullRef.current = true;
+        setRaw(withRawDefaults(result.raw));
+        stateVersionRef.current = result.version;
+      }
+      renderedAtRef.current = result.serverNowMs;
+      setLiveNowMs(Date.now());
+      setSyncStamp((n) => n + 1);
+      return true;
+    } catch (err) {
+      console.error("[store] sync failed:", err);
+      return false;
+    } finally {
+      pullingRef.current = false;
     }
-    refreshNow();
-  }, [refreshNow]);
+  }, []);
+
+  // The two ways the rest of the store reconciles: unconditionally (after a rejected write, or
+  // a server-computed change like duplicating a project) and only-if-changed (open/focus/poll).
+  const refreshNow = useCallback(() => pull({ force: true }), [pull]);
+  const maybeRefresh = useCallback(() => pull(), [pull]);
 
   // Manual calendar pull. Deliberately NOT routed through the optimistic outbox: there's nothing
   // to patch locally, it's a read that has to hit the network, so it awaits the server and then
@@ -836,7 +883,7 @@ export function StoreProvider({
     if (drained && (sawServerError || hadFailureRef.current)) {
       // Reconcile once after recovering from an offline stretch or a rejected op.
       hadFailureRef.current = false;
-      refreshNow();
+      void refreshNow();
     }
   }, [pushToast, refreshNow, syncPendingCount]);
 
@@ -847,11 +894,11 @@ export function StoreProvider({
   }, [flush]);
 
   // Manual refresh (the header's ⟳). Rolls the clock forward so date labels/buckets are right
-  // straight away, drains anything still queued, then pulls a fresh server render — the same
+  // straight away, drains anything still queued, then pulls the server's rows — the same
   // reconcile the focus handler does, but on demand: on a phone the tab is often restored from
   // the background without a focus refresh landing promptly, leaving stale rows on screen. The
-  // spinner clears when the new snapshot arrives (the re-seed above), with a timeout so a
-  // refresh that never comes back can't leave it spinning forever.
+  // spinner clears when the sync settles, with a timeout so one that never comes back can't
+  // leave it spinning forever.
   const syncTimeoutRef = useRef<number | null>(null);
   const syncNow = useCallback(() => {
     setSyncing(true);
@@ -861,7 +908,13 @@ export function StoreProvider({
       syncTimeoutRef.current = null;
       setSyncing(false);
     }, 15_000);
-    void flushRef.current().finally(() => refreshNow());
+    void flushRef.current()
+      .then(() => refreshNow())
+      .finally(() => {
+        if (syncTimeoutRef.current) window.clearTimeout(syncTimeoutRef.current);
+        syncTimeoutRef.current = null;
+        setSyncing(false);
+      });
   }, [refreshNow]);
 
   // Enqueue + immediately try to flush. Falls back to a direct call when IndexedDB is
@@ -878,7 +931,7 @@ export function StoreProvider({
           })
           .catch((err) => {
             console.error(`[store] ${action} failed, refreshing:`, err);
-            refreshNow();
+            void refreshNow();
           });
         return;
       }
@@ -893,7 +946,7 @@ export function StoreProvider({
           console.error("[store] outbox write failed, sending directly:", err);
           void (REGISTRY[action].fn as (...a: unknown[]) => Promise<unknown>)(...rawArgs).catch((e) => {
             console.error(`[store] ${action} failed, refreshing:`, e);
-            refreshNow();
+            void refreshNow();
           });
         });
     },
@@ -925,12 +978,32 @@ export function StoreProvider({
     return () => navigator.serviceWorker.removeEventListener("message", onMessage);
   }, []);
 
-  // Hydrate from the IndexedDB snapshot when it's newer than the server render (the service
-  // worker served a cached shell) or when queued ops exist (their optimistic rows only live
-  // in the snapshot). One-shot, on mount.
+  // Start-up: pick the rows to draw first, then reveal the app (see `ready`). One-shot, on mount.
+  //
+  // The device's snapshot wins whenever the page HTML can't be trusted to be newer: when the
+  // service worker answered from its cache (the usual case once installed — see sw.js), when ops
+  // are still queued (their optimistic rows only live in the snapshot), or when offline. A page
+  // that really did just come from the network is fresher than anything on disk and is kept.
+  // Either way the app paints once; a sync then runs in the background and patches the rows in
+  // place if anything changed elsewhere.
   useEffect(() => {
-    if (!idbAvailable()) return;
+    // The clock was seeded from the page render, which for a cached shell can be yesterday's —
+    // until the first one-minute tick, tasks would bucket into "Today"/"Overdue" against it.
+    // One-time sync from the device clock after mount — it can't be read during SSR.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLiveNowMs(Date.now());
+    if (!idbAvailable()) {
+      setReady(true);
+      return;
+    }
     let cancelled = false;
+    let revealed = false;
+    const reveal = () => {
+      if (revealed || cancelled) return;
+      revealed = true;
+      setReady(true);
+    };
+    const giveUp = window.setTimeout(reveal, HYDRATE_TIMEOUT_MS);
     void (async () => {
       try {
         const [snapshot, idMap, queued] = await Promise.all([
@@ -942,63 +1015,68 @@ export function StoreProvider({
         if (idMap) idMapRef.current = idMap;
         setPendingOps(queued);
         const offlineNow = typeof navigator !== "undefined" && !navigator.onLine;
-        // Server-clock vs server-clock: the snapshot wins only when it was taken against a
-        // *newer server render* than the one currently on screen, which is exactly the cached-
-        // shell case. Snapshots written before `renderedAt` existed never win on age alone.
-        const shellIsStale = snapshot?.renderedAt !== undefined && snapshot.renderedAt > nowMs;
-        if (snapshot && (shellIsStale || queued > 0 || offlineNow)) {
-          // Backfill fields added after the snapshot was written (schema drift across deploys) —
-          // a stale snapshot without them would crash the derivers on `.filter`/`.map`.
-          setRaw({
-            ...snapshot.raw,
-            dayPlanBlocks: snapshot.raw.dayPlanBlocks ?? [],
-            suggestions: snapshot.raw.suggestions ?? [],
-            aiNotes: snapshot.raw.aiNotes ?? [],
-            countdowns: snapshot.raw.countdowns ?? [],
-            notes: snapshot.raw.notes ?? [],
-          });
+        // Server-clock vs server-clock where possible: a snapshot taken against this render or a
+        // later sync is at least as fresh as it. Otherwise fall back on the shell's age.
+        const snapshotIsNewer = snapshot?.renderedAt !== undefined && snapshot.renderedAt >= nowMs;
+        const shellFromCache = Date.now() - nowMs > CACHED_SHELL_AGE_MS;
+        // Too late to swap rows in without the very flash this is here to prevent — unless
+        // queued ops make the snapshot the only copy of some edits.
+        const useSnapshot =
+          !!snapshot && (snapshotIsNewer || shellFromCache || queued > 0 || offlineNow) && (!revealed || queued > 0);
+        if (snapshot && useSnapshot) {
+          setRaw(withRawDefaults(snapshot.raw));
           if (snapshot.calendarEvents?.length) setEvents(snapshot.calendarEvents);
           // The rows on screen are now the snapshot's, so the version to compare against is the
           // snapshot's too — the cached shell's own fingerprint is from whenever it was cached,
           // which can be older still.
           if (snapshot.stateVersion) stateVersionRef.current = snapshot.stateVersion;
+          if (snapshot.renderedAt !== undefined) renderedAtRef.current = snapshot.renderedAt;
         }
         if (offlineNow) setOffline(true);
-        if (queued > 0) void flushRef.current();
-        // A stale shell means the service worker answered this navigation from cache instead of
-        // the network (see sw.js) — so the HTML on screen is from a previous visit and nothing
-        // is on its way to replace it. Pull server truth now. Skipped when ops are queued: a
-        // server render would clobber their optimistic rows, and the post-drain refresh in
-        // `flush` covers that case instead.
-        // ...but only if it would bring anything back. On a phone that is opened and closed all
-        // day, the answer is usually no, and the version check settles it in one small request.
-        if (shellIsStale && queued === 0 && !offlineNow) void maybeRefresh();
+        if (queued > 0) {
+          // Sync once the queue has drained (see the end of `flush`) — a pull now would be
+          // refused anyway while ops are queued.
+          hadFailureRef.current = true;
+          void flushRef.current();
+        } else if (!offlineNow && (useSnapshot || shellFromCache || revealed)) {
+          // Whatever is on screen came from disk or a cached shell — check it against the server.
+          // (A page that just came from the network is current; it needs no check.)
+          void maybeRefresh();
+        }
       } catch (err) {
         console.error("[store] snapshot hydration failed:", err);
+        void maybeRefresh();
+      } finally {
+        window.clearTimeout(giveUp);
+        reveal();
       }
     })();
     return () => {
       cancelled = true;
+      window.clearTimeout(giveUp);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Snapshot the raw state (debounced) so an offline start has data to render. Held until the
+  // Snapshot the raw state (debounced) so the next start has data to render. Held until the
   // calendar has settled: writing before that would persist an empty event list over the good
   // one already stored, and a cached-shell start would then come up with no calendar at all.
   useEffect(() => {
-    if (!idbAvailable() || !calendarSettled) return;
+    // Also held until start-up has picked its rows: before that `raw` may still be a cached
+    // shell's, and writing it would overwrite the newer snapshot it's about to be replaced by.
+    if (!idbAvailable() || !calendarSettled || !ready) return;
     const timer = window.setTimeout(() => {
       void kvSet(SNAPSHOT_KEY, {
         raw,
         calendarEvents: events,
         savedAt: Date.now(),
-        renderedAt: nowMs,
-        stateVersion,
+        renderedAt: renderedAtRef.current,
+        stateVersion: stateVersionRef.current,
       } satisfies Snapshot).catch(() => {});
     }, 500);
     return () => window.clearTimeout(timer);
-  }, [raw, events, nowMs, stateVersion, calendarSettled]);
+    // `syncStamp`: a sync that confirmed the rows still moves `renderedAt` forward.
+  }, [raw, events, calendarSettled, ready, syncStamp]);
 
   // Reconcile with the server when the tab regains focus (covers optimistic drift, other
   // devices, and voice captures landing while away). Debounced: focus + visibilitychange fire
@@ -1134,7 +1212,7 @@ export function StoreProvider({
     [pushToast]
   );
 
-  // `router` from useRouter() is a stable instance, so these callbacks are built once and reused.
+  // Every dependency here is a stable callback, so these are built once and reused.
   const actions = useMemo<TaskbookActions>(() => {
     const mutate = (patch: (r: RawState) => RawState, action: string, args: (string | number | boolean | FormData)[]) => {
       setRaw(patch);
@@ -1424,7 +1502,7 @@ export function StoreProvider({
         if (name) fd.set("name", name);
         void serverActions
           .duplicateProject(templateId, fd)
-          .then(() => refreshNow())
+          .then(() => void refreshNow())
           .catch((err) => {
             console.error("[store] duplicateProject failed:", err);
             pushToast("Couldn't duplicate the project.");
@@ -2129,7 +2207,7 @@ export function StoreProvider({
     <TaskbookContext.Provider
       value={{ data, actions, raw, calendarEvents: events, refreshCalendar, calendarRefreshing, syncNow, syncing, nowMs: liveNowMs, mode, setMode, offline, pendingOps, toasts, dismissToast, subscribeNoteEdits }}
     >
-      {children}
+      {ready ? children : <AppFrame />}
     </TaskbookContext.Provider>
   );
 }
