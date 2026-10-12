@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { disablePush, enablePush, getPushState, type PushState } from "@/lib/pushClient";
 import { formatUtcOffset, getTimeZoneOffsetMs, OTHER_TIME_ZONES, SUPPORTED_TIME_ZONES } from "@/lib/taskbookDates";
 import CategoryManager from "./CategoryManager";
 import { REVEAL_ON_HOVER, SelectField } from "./shared";
@@ -148,20 +149,44 @@ function AiNotesManager() {
 function NotificationHealth() {
   const { data, nowMs } = useTaskbook();
   const [testState, setTestState] = useState<"idle" | "sending" | "sent" | "failed">("idle");
+  // Which channel the last test went out on — "push" is Cura's own notification, "ntfy" the
+  // fallback (no device signed up, or every subscription gone).
+  const [testChannel, setTestChannel] = useState<"push" | "ntfy" | "none" | null>(null);
+  const [pushState, setPushState] = useState<PushState | null>(null);
+  const [pushBusy, setPushBusy] = useState(false);
+  useEffect(() => {
+    void getPushState()
+      .then(setPushState)
+      .catch(() => setPushState("unsupported"));
+  }, []);
 
   async function sendTest() {
     setTestState("sending");
     try {
       const res = await fetch("/api/push/test", { method: "POST" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const body = (await res.json()) as { ntfyConfigured?: boolean };
-      setTestState("sent");
-      if (body.ntfyConfigured === false) {
-        console.warn("[notifications] NTFY_TOPIC is not configured — only web push was attempted.");
-      }
+      const body = (await res.json()) as { channel?: "push" | "ntfy" | "none" };
+      setTestChannel(body.channel ?? null);
+      setTestState(body.channel === "none" ? "failed" : "sent");
     } catch (err) {
       console.error("[notifications] test send failed:", err);
       setTestState("failed");
+    }
+  }
+
+  async function togglePush() {
+    setPushBusy(true);
+    try {
+      if (pushState === "on") {
+        await disablePush();
+        setPushState("off");
+      } else {
+        setPushState(await enablePush());
+      }
+    } catch (err) {
+      console.error("[push] switching notifications failed:", err);
+    } finally {
+      setPushBusy(false);
     }
   }
 
@@ -182,9 +207,40 @@ function NotificationHealth() {
           disabled={testState === "sending"}
           className="cursor-pointer whitespace-nowrap rounded-md bg-(--accent) px-2.5 py-1 text-xs text-(--on-accent) disabled:opacity-60"
         >
-          {testState === "sending" ? "Sending…" : testState === "sent" ? "Sent ✓" : testState === "failed" ? "Failed — retry" : "Send test"}
+          {testState === "sending"
+            ? "Sending…"
+            : testState === "sent"
+              ? testChannel === "ntfy"
+                ? "Sent via ntfy ✓"
+                : "Sent ✓"
+              : testState === "failed"
+                ? "Failed — retry"
+                : "Send test"}
         </button>
       </div>
+      {pushState && (
+        <div className="mt-2 flex items-center justify-between gap-2 border-t border-(--border-faint) pt-2">
+          <span className="text-(--ink-muted)">{PUSH_STATE_LABEL[pushState]}</span>
+          {(pushState === "on" || pushState === "off") && (
+            <button
+              type="button"
+              onClick={() => void togglePush()}
+              disabled={pushBusy}
+              className="cursor-pointer whitespace-nowrap rounded-md border border-(--border-strong) px-2.5 py-1 text-xs text-(--ink) disabled:opacity-60"
+            >
+              {pushBusy ? "…" : pushState === "on" ? "Turn off" : "Turn on"}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
+
+const PUSH_STATE_LABEL: Record<PushState, string> = {
+  on: "This device gets Cura's own notifications.",
+  off: "This device gets reminders through ntfy. Turn on Cura's own notifications?",
+  blocked: "Notifications are blocked for Cura — allow them in this device's settings.",
+  unsupported: "Cura's own notifications need the Home Screen app on iPhone — reminders come through ntfy here.",
+  unavailable: "Cura's own notifications aren't set up on the server yet — reminders come through ntfy.",
+};

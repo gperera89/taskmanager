@@ -1,12 +1,17 @@
+import { auth } from "@/auth";
 import { completeRoutineCluster, snoozeTask, untickRoutineCluster } from "@/lib/api";
 
-// Target of the action buttons on ntfy notifications ("Done" on a due routine,
-// "Snooze 1 day" on a due task). Authenticated with the cron secret — the button's request is
-// fired by the ntfy app, which has no session cookie. Exempted from session auth in proxy.ts.
+// Target of the action buttons on notifications ("Done" on a due routine, "Snooze 1 day" on a
+// due task). Two callers, two kinds of auth:
+//  - the ntfy app, which has no session cookie, sends the cron secret as a bearer token;
+//  - Cura's own service worker (Web Push buttons, where the platform shows them) is same-origin
+//    and sends the session cookie.
+// Exempted from the session redirect in proxy.ts so the first kind can reach it at all.
 export async function POST(request: Request) {
   const secret = process.env.CRON_SECRET;
   const authHeader = request.headers.get("authorization");
-  if (!secret || authHeader !== `Bearer ${secret}`) {
+  const bySecret = !!secret && authHeader === `Bearer ${secret}`;
+  if (!bySecret && !(await auth())) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 

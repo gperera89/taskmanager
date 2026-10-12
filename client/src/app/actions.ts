@@ -56,7 +56,10 @@ import {
   getPageSnapshot,
   getStateVersion,
   snapshotToRaw,
+  registerPushSubscription,
+  deletePushSubscription,
 } from "@/lib/api";
+import { webPushPublicKey } from "@/lib/push";
 import type { RawState } from "@/lib/derive";
 import { CALENDAR_CACHE_TAG, getCalendarEvents, type CalendarEvent } from "@/lib/calendar";
 import { parseDurationInput } from "@/lib/shared";
@@ -702,6 +705,27 @@ export async function pullState(knownVersion: string | null): Promise<PulledStat
     serverNowMs: Date.now(),
     raw: snapshotToRaw(snapshot),
   };
+}
+
+// --- Web Push ---------------------------------------------------------------------------------
+
+// Null when the server has no VAPID keys: the device then has nothing to subscribe to, and the
+// Settings switch says so instead of offering it.
+export async function getPushPublicKey(): Promise<string | null> {
+  await requireSession();
+  return webPushPublicKey();
+}
+
+// See registerPushSubscription in lib/api.ts for what "dead" means to the caller.
+export async function savePushSubscription(sub: { endpoint: string; p256dh: string; auth: string }): Promise<"ok" | "dead"> {
+  await requireSession();
+  if (!/^https:\/\//.test(sub.endpoint) || !sub.p256dh || !sub.auth) throw new Error("Invalid subscription");
+  return registerPushSubscription(sub);
+}
+
+export async function removePushSubscription(endpoint: string): Promise<void> {
+  await requireSession();
+  await deletePushSubscription(endpoint);
 }
 
 export type CalendarPayload = { events: CalendarEvent[]; errors: string[] };

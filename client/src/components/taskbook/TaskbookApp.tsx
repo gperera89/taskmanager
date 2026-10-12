@@ -23,6 +23,7 @@ import LogbookModal from "./LogbookModal";
 import ReviewModal from "./ReviewModal";
 import StatusBanners from "./StatusBanners";
 import Toasts from "./Toasts";
+import ReminderSheet, { parseReminderTarget, type ReminderTarget } from "./ReminderSheet";
 
 // The order of the portrait/mobile carousel. On desktop the calendar is a side rail
 // instead of a swipeable panel, so it is dropped from the content flow there.
@@ -70,6 +71,27 @@ export default function TaskbookApp() {
   const [reviewOpen, setReviewOpen] = useState(false);
   // The habit whose completion heatmap is open (by id, so it tracks live optimistic edits).
   const [heatmapHabitId, setHeatmapHabitId] = useState<string | null>(null);
+  // The item a tapped reminder points at (see ReminderSheet). Read from the launch URL directly:
+  // like `isMobile` below, this component only renders on the client.
+  const [reminderTarget, setReminderTarget] = useState<ReminderTarget | null>(() =>
+    parseReminderTarget(new URLSearchParams(window.location.search).get("open"))
+  );
+  useEffect(() => {
+    // Drop the parameter so a reload (or the next launch from the Home Screen) doesn't reopen it.
+    const url = new URL(window.location.href);
+    if (url.searchParams.has("open")) {
+      url.searchParams.delete("open");
+      window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
+    }
+    // A reminder tapped while Cura was already running arrives as a message instead of a launch.
+    const onMessage = (event: MessageEvent) => {
+      if (event.data?.type !== "cura-open") return;
+      const target = parseReminderTarget(typeof event.data.target === "string" ? event.data.target : null);
+      if (target) setReminderTarget(target);
+    };
+    navigator.serviceWorker?.addEventListener("message", onMessage);
+    return () => navigator.serviceWorker?.removeEventListener("message", onMessage);
+  }, []);
   // The note open full-screen in the editor, if any — it sits over whichever tab opened it, so
   // closing it lands back where you were.
   const [openNoteId, setOpenNoteId] = useState<string | null>(null);
@@ -505,6 +527,16 @@ export default function TaskbookApp() {
       {logbookOpen && <LogbookModal onClose={() => setLogbookOpen(false)} />}
       {reviewOpen && <ReviewModal onClose={() => setReviewOpen(false)} />}
       {heatmapHabit && <HabitHeatmap habit={heatmapHabit} onClose={() => setHeatmapHabitId(null)} />}
+      {reminderTarget && (
+        <ReminderSheet
+          target={reminderTarget}
+          onClose={() => setReminderTarget(null)}
+          onShowList={(next) => {
+            setReminderTarget(null);
+            selectTab(next);
+          }}
+        />
+      )}
       <Toasts />
     </ModalContext.Provider>
   );

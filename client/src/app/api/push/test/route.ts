@@ -8,12 +8,13 @@ export async function POST() {
   const session = await auth();
   if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
-  const ntfyConfigured = Boolean(process.env.NTFY_TOPIC);
-  await deliver({
+  // Which channel took it — "push" means Cura's own notification reached at least one device,
+  // "ntfy" that it fell back (no device signed up, or every subscription gone).
+  const channel = await deliver({
     title: "Cura test notification",
     body: `Sent ${new Date().toUTCString()} — if you can read this, delivery works.`,
     url: "/",
     tag: "test",
   });
-  return Response.json({ ok: true, ntfyConfigured });
+  return Response.json({ ok: true, channel });
 }

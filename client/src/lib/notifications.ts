@@ -13,21 +13,25 @@ import {
 } from "@/lib/api";
 import { countdownYears, isRoutineTickedNow, nextCountdownOccurrenceMs, MS_PER_DAY } from "@/lib/shared";
 import { isRoutineDueToday } from "@/lib/taskRecurrence";
+import { sendWebPush } from "@/lib/push";
 import { calendarDateFromDue, dueInstant, formatShortDate, pad2, zonedNow } from "@/lib/taskbookDates";
 
 // --- Delivery layer -------------------------------------------------------------------------
 //
-// Single channel: ntfy (https://ntfy.sh) — a real push app on iOS/Android/desktop with
-// reliable APNs/FCM delivery and a persistent per-topic history, so a reminder survives as a
-// record even after it scrolls off the lock screen. Configure with:
+// Two channels, never both for the same reminder:
+//  1. Web Push (lib/push.ts) — Cura's own notification, from the installed app. Tried first.
+//  2. ntfy (https://ntfy.sh) — only when Web Push reached no device: none registered, VAPID keys
+//     unset, or every subscription rejected as gone (iOS silently revokes home-screen app
+//     subscriptions now and then). That's the failure that once made Web Push unreliable enough
+//     to drop; with ntfy behind it, a revoked subscription costs nothing but the channel, and the
+//     device re-registers the next time Cura is opened (see lib/pushClient.ts).
+// (Both channels used to fire for every reminder, so each one arrived twice on the phone.)
+//
+// ntfy configuration:
 //   NTFY_TOPIC   (required to enable; treat as a secret — anyone who knows it can read/send)
 //   NTFY_SERVER  (optional, defaults to https://ntfy.sh — set for a self-hosted instance)
 //   NTFY_TOKEN   (optional, for reserved topics)
 //   APP_URL      (optional, absolute URL the notification's tap/click opens)
-//
-// The old Web Push channel (VAPID + per-device PushSubscription rows) is GONE: with both
-// channels live every reminder arrived twice on the phone, and ntfy was the one delivering
-// reliably (iOS silently revokes PWA push subscriptions it considers abusive).
 
 type NotifyAction = {
   label: string;
@@ -59,9 +63,22 @@ function ntfyActionsHeader(actions: NotifyAction[]): string {
     .join("; ");
 }
 
-export async function deliver(payload: PushPayload): Promise<void> {
+export type DeliveryChannel = "push" | "ntfy" | "none";
+
+export async function deliver(payload: PushPayload): Promise<DeliveryChannel> {
+  // Anything going wrong on the Web Push side (bad VAPID config included) must cost only that
+  // channel, never the reminder.
+  const pushed = await sendWebPush(payload).catch((err) => {
+    console.error("[notifications] web push failed, falling back to ntfy:", err);
+    return 0;
+  });
+  if (pushed > 0) return "push";
+  return (await deliverViaNtfy(payload)) ? "ntfy" : "none";
+}
+
+async function deliverViaNtfy(payload: PushPayload): Promise<boolean> {
   const topic = process.env.NTFY_TOPIC;
-  if (!topic) return;
+  if (!topic) return false;
   const server = (process.env.NTFY_SERVER ?? "https://ntfy.sh").replace(/\/$/, "");
   const headers: Record<string, string> = {
     // Non-ASCII in header values breaks fetch; ntfy reads UTF-8 titles from this RFC 2047-free
@@ -81,6 +98,7 @@ export async function deliver(payload: PushPayload): Promise<void> {
 
   const res = await fetch(`${server}/${topic}`, { method: "POST", body: payload.body, headers });
   if (!res.ok) console.error("[notifications] ntfy publish failed:", res.status, await res.text().catch(() => ""));
+  return res.ok;
 }
 
 // --- Due checks (called by /api/cron/check-due) ----------------------------------------------
@@ -129,7 +147,7 @@ async function notifyDueRoutines(routines: CronRoutine[], now: Date, timeZone: s
       await deliver({
         title: r.title,
         body,
-        url: "/",
+        url: `/?open=routine:${r.id}`,
         tag: `routine-${r.id}`,
         actions: [{ label: "Done", path: `/api/notify-action?kind=complete-routine&id=${r.id}` }],
       });
@@ -245,7 +263,7 @@ export async function checkAndNotifyDueItems(): Promise<{
       await deliver({
         title: t.reminderLeadMinutes ? "Task coming up" : "Task due",
         body: t.title,
-        url: "/",
+        url: `/?open=task:${t.id}`,
         tag: `task-${t.id}`,
         actions: [{ label: "Snooze 1 day", path: `/api/notify-action?kind=snooze-task&id=${t.id}&days=1` }],
       });

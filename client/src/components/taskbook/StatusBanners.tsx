@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { enablePush, getPushState, isStandalone, syncPush } from "@/lib/pushClient";
 import { useTaskbook } from "./store";
 
 // The notification cron should run about once a minute; if nothing has stamped the heartbeat
@@ -12,6 +13,10 @@ const CRON_STALE_MS = 10 * 60 * 1000;
 // says anything, and most ticks never show it at all. Going offline is a sustained state, so
 // that half shows immediately.
 const SYNC_NOTICE_DELAY_MS = 700;
+
+// "Not now" on the notifications prompt holds it off this long before asking again.
+const PUSH_PROMPT_SNOOZE_MS = 30 * 24 * 60 * 60 * 1000;
+const PUSH_PROMPT_KEY = "cura-push-prompt-dismissed";
 
 // Slim, non-blocking banners under the header: offline/pending-sync state, and a warning when
 // the notification cron's heartbeat goes stale (a lapsed scheduler otherwise fails silently).
@@ -48,9 +53,46 @@ export default function StatusBanners() {
     };
   }, [syncing]);
 
+  // Web Push for this device. Re-registers quietly on start (see syncPush) and when the service
+  // worker reports the browser rotated the subscription. Offers to switch it on only in the
+  // installed app, which is the only place iOS allows it — never in a browser tab.
+  const [pushPrompt, setPushPrompt] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void syncPush();
+    void getPushState()
+      .then((state) => {
+        if (cancelled || state !== "off" || !isStandalone()) return;
+        let dismissedAt = 0;
+        try {
+          dismissedAt = Number(localStorage.getItem(PUSH_PROMPT_KEY) ?? 0);
+        } catch {
+          // Unreadable storage — ask.
+        }
+        if (Date.now() - dismissedAt > PUSH_PROMPT_SNOOZE_MS) setPushPrompt(true);
+      })
+      .catch(() => {});
+    const onMessage = (event: MessageEvent) => {
+      if (event.data?.type === "cura-push-changed") void syncPush({ force: true });
+    };
+    navigator.serviceWorker?.addEventListener("message", onMessage);
+    return () => {
+      cancelled = true;
+      navigator.serviceWorker?.removeEventListener("message", onMessage);
+    };
+  }, []);
+  function dismissPushPrompt() {
+    setPushPrompt(false);
+    try {
+      localStorage.setItem(PUSH_PROMPT_KEY, String(Date.now()));
+    } catch {
+      // Then it just asks again next start.
+    }
+  }
+
   const cronStale = data.lastCronAtMs === null || nowMs - data.lastCronAtMs > CRON_STALE_MS;
   const showSync = offline || (syncing && syncNoticeDue);
-  if (!showSync && !cronStale) return null;
+  if (!showSync && !cronStale && !pushPrompt) return null;
 
   return (
     <div className="relative flex flex-none flex-col">
@@ -83,6 +125,29 @@ export default function StatusBanners() {
                 Reset &amp; reload
               </button>
             )}
+          </div>
+        </div>
+      )}
+      {/* Floats like the sync notice, for the same reason: it turns up a moment after the first
+          paint, and shoving every list down a row then would be exactly the jump start-up is
+          built to avoid. */}
+      {pushPrompt && !showSync && (
+        <div className="pointer-events-none relative z-20 h-0 overflow-visible">
+          <div className="pointer-events-auto absolute inset-x-0 top-0 flex items-center justify-center gap-3 border-b border-(--border-strong) bg-(--surface-active) px-6 py-2 text-xs text-(--ink-muted) shadow-[0_4px_12px_rgba(42,38,34,.12)] motion-safe:animate-[status-fade-in_160ms_ease-out]">
+            <span>Get reminders from Cura itself on this device.</span>
+            <button
+              type="button"
+              onClick={() => {
+                setPushPrompt(false);
+                void enablePush();
+              }}
+              className="cursor-pointer rounded-md bg-(--accent) px-2.5 py-1 text-(--on-accent)"
+            >
+              Turn on
+            </button>
+            <button type="button" onClick={dismissPushPrompt} className="cursor-pointer underline decoration-dotted underline-offset-2">
+              Not now
+            </button>
           </div>
         </div>
       )}

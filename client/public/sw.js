@@ -1,5 +1,5 @@
-// Cura service worker: offline app-shell caching. (Notifications are delivered via ntfy —
-// see lib/notifications.ts — so there are no Web Push handlers here anymore.)
+// Cura service worker: offline app-shell caching, plus showing Cura's own notifications (Web
+// Push — see lib/push.ts; ntfy is only the fallback, see lib/notifications.ts).
 //
 // Caching strategy (GET, same-origin only; /api/* is never cached):
 //  - navigations: cache-first (stale-while-revalidate) — the cached shell paints immediately and
@@ -183,6 +183,81 @@ self.addEventListener("fetch", (event) => {
         })
         .catch(() => undefined);
       return cached || (await network) || Response.error();
+    })()
+  );
+});
+
+// --- Notifications ----------------------------------------------------------------------------
+//
+// Every push MUST end in a visible notification. iOS revokes the subscription of a web app whose
+// push events show nothing (the userVisibleOnly contract), so even a payload that fails to parse
+// still puts something on screen.
+self.addEventListener("push", (event) => {
+  let msg = {};
+  try {
+    msg = event.data ? event.data.json() : {};
+  } catch {
+    msg = { body: event.data ? event.data.text() : "" };
+  }
+  const actions = Array.isArray(msg.actions) ? msg.actions : [];
+  event.waitUntil(
+    self.registration.showNotification(msg.title || "Cura", {
+      body: msg.body || "",
+      tag: msg.tag,
+      icon: "/icon.png",
+      badge: "/icon.png",
+      data: {
+        url: msg.url || "/",
+        // action id -> /api/notify-action path, for the buttons below
+        paths: Object.fromEntries(actions.map((a) => [a.action, a.path])),
+      },
+      // Ignored where unsupported (iOS, Safari): there the tap opens the item instead.
+      actions: actions.map((a) => ({ action: a.action, title: a.title })),
+    })
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const data = event.notification.data || {};
+  const path = event.action && data.paths ? data.paths[event.action] : null;
+  event.waitUntil(
+    (async () => {
+      if (path) {
+        // A button: do it in the background with the session cookie, no window needed.
+        try {
+          const res = await fetch(path, { method: "POST", credentials: "same-origin" });
+          if (res.ok) return;
+        } catch {
+          // Fall through and open the item, so the tap isn't lost.
+        }
+      }
+      const url = new URL(data.url || "/", self.location.origin);
+      const open = url.searchParams.get("open");
+      const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      const existing = windows.find((w) => new URL(w.url).origin === self.location.origin);
+      if (existing) {
+        // Cura is already running: bring it forward and point it at the item, rather than
+        // loading a second copy.
+        await existing.focus();
+        if (open) existing.postMessage({ type: "cura-open", target: open });
+        return;
+      }
+      await self.clients.openWindow(url.pathname + url.search);
+    })()
+  );
+});
+
+// The browser rotated the subscription on its own. Tell the server about the new one; the open
+// app re-checks on its next start too (lib/pushClient.ts), which covers browsers that never fire
+// this event (iOS among them).
+self.addEventListener("pushsubscriptionchange", (event) => {
+  const next = event.newSubscription;
+  if (!next) return;
+  event.waitUntil(
+    (async () => {
+      const windows = await self.clients.matchAll({ type: "window" });
+      for (const w of windows) w.postMessage({ type: "cura-push-changed" });
     })()
   );
 });

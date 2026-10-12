@@ -383,3 +383,16 @@ model Routine {
   parent      Routine?  @relation("RoutineSubroutines", fields: [parentId], references: [id], onDelete: Cascade)
   subroutines Routine[] @relation("RoutineSubroutines")
 }
+// One device's Web Push subscription (the browser's PushSubscription JSON, flattened). Reminders
+// go to every live row first; ntfy is only the fallback when none of them took the message (see
+// lib/push.ts). A row the push service rejected as gone is kept with `failedAt` set rather than
+// deleted, so when that device next opens Cura and re-registers the same dead endpoint it can be
+// told to resubscribe instead of silently re-arming a subscription that will never deliver.
+model PushSubscription {
+  id        String    @id @default(uuid())
+  endpoint  String    @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime  @default(now())
+  failedAt  DateTime?
+}

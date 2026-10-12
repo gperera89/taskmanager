@@ -1693,3 +1693,34 @@ export function snapshotToRaw(snapshot: PageSnapshot): RawState {
     countdowns: snapshot.countdowns,
   };
 }
+
+// --- Web Push subscriptions -------------------------------------------------------------------
+
+export function getLivePushSubscriptions() {
+  return prisma.pushSubscription.findMany({ where: { failedAt: null } });
+}
+
+// The push service answered 404/410 for this endpoint: the device unsubscribed, or (iOS) revoked
+// it. Kept rather than deleted — see the PushSubscription model.
+export function markPushSubscriptionFailed(endpoint: string) {
+  return prisma.pushSubscription.updateMany({ where: { endpoint }, data: { failedAt: new Date() } });
+}
+
+// Called by a device on open (throttled client-side) and when notifications are switched on.
+// "dead" tells the device the push service already rejected this exact subscription, so it
+// should drop it and subscribe afresh — re-registering it would just fail again at the next
+// reminder.
+export async function registerPushSubscription(sub: { endpoint: string; p256dh: string; auth: string }): Promise<"ok" | "dead"> {
+  const existing = await prisma.pushSubscription.findUnique({ where: { endpoint: sub.endpoint } });
+  if (existing?.failedAt && existing.p256dh === sub.p256dh && existing.auth === sub.auth) return "dead";
+  await prisma.pushSubscription.upsert({
+    where: { endpoint: sub.endpoint },
+    create: sub,
+    update: { p256dh: sub.p256dh, auth: sub.auth, failedAt: null },
+  });
+  return "ok";
+}
+
+export function deletePushSubscription(endpoint: string) {
+  return prisma.pushSubscription.deleteMany({ where: { endpoint } });
+}

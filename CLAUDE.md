@@ -121,12 +121,19 @@ from Tailwind's own breakpoints used for finer-grained CSS elsewhere). `ModalCon
 — tasks are only ever *created* there, since editing an existing task happens inline on its row
 (`TasksView.tsx`'s `TaskRow`, also reused inside `ProjectsView.tsx`'s project cards).
 
-### Notifications (ntfy)
-`src/lib/notifications.ts` (`server-only`) publishes to an [ntfy](https://ntfy.sh) topic
-(`NTFY_TOPIC`/`NTFY_SERVER`/`NTFY_TOKEN` env vars; `Icon` header points at the app's public
-`/icon.png`, `Actions` headers carry the cron secret so notification buttons can hit
-`/api/notify-action` without a session). The old Web Push channel was removed after it double-
-delivered alongside ntfy — `public/sw.js` is now caching-only. `/api/cron/check-due`
+### Notifications (Web Push, ntfy fallback)
+`src/lib/notifications.ts` (`server-only`) decides what's due; `deliver()` sends each reminder on
+exactly ONE channel. First Web Push (`src/lib/push.ts`, VAPID keys `NEXT_PUBLIC_VAPID_PUBLIC_KEY`/
+`VAPID_PRIVATE_KEY`/`VAPID_SUBJECT`) to every live `PushSubscription` row; only if no device took
+it does it fall back to an [ntfy](https://ntfy.sh) topic (`NTFY_TOPIC`/`NTFY_SERVER`/`NTFY_TOKEN`;
+`Actions` headers carry the cron secret so ntfy's buttons can hit `/api/notify-action`). The two
+used to fire together and double-deliver — don't reintroduce that. iOS silently revokes home-screen
+app subscriptions now and then: a 404/410 marks the row `failedAt`, the reminder falls back to
+ntfy, and the device re-registers on its next open (`src/lib/pushClient.ts`, at most daily; a
+"dead" answer makes it resubscribe). `public/sw.js` shows every push (it must — iOS revokes apps
+whose pushes show nothing) and routes taps: a button posts to `/api/notify-action` with the
+session cookie; a plain tap opens `/?open=task:<id>`/`routine:<id>`, which `ReminderSheet.tsx`
+turns into Done/Tomorrow — iOS can't put buttons on web-app notifications. `/api/cron/check-due`
 (`src/app/api/cron/check-due/route.ts`) is hit by an **external** scheduler on a short interval
 (Vercel Hobby's own Cron is capped at once/day, too coarse), authenticated by a `CRON_SECRET`
 bearer token rather than a user session.
