@@ -123,6 +123,7 @@ export type ServerCalendarData = Omit<
   | "habits"
   | "habitAtRiskCount"
   | "countdowns"
+  | "nextHoliday"
   | "projectOptions"
   | "categoryOptions"
   | "pendingCaptures"

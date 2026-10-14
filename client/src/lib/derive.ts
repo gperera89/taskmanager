@@ -6,6 +6,7 @@
 // would have (this used to exclude the calendar rail; see git history if that distinction ever
 // needs resurrecting).
 
+import { SCHOOL_HOLIDAYS } from "@/lib/schoolHolidays";
 import type { Note, Task, Project, Habit, HabitCompletion, Routine, Category, VoiceCapture, DayPlanBlock, AiSuggestion, AiNote, Countdown } from "@prisma/client";
 import { countdownYears, formatDuration, habitDateKey, habitStatus, nextCountdownOccurrenceMs, taskOrderCompare, isRoutineTickedNow, routineDueAtMs, zonedFaceMs, MS_PER_DAY, ROUTINE_SOON_WINDOW_MS } from "@/lib/shared";
 export { combineDueDateTime, isRoutineTickedNow } from "@/lib/shared";
@@ -35,6 +36,7 @@ import type {
   CalendarEvent,
   CategoryOption,
   CountdownVM,
+  HolidayCountdownVM,
   DayDetailVM,
   HabitCardVM,
   Mode,
@@ -89,6 +91,7 @@ export type DerivedEntities = {
   habits: HabitCardVM[];
   habitAtRiskCount: number;
   countdowns: CountdownVM[];
+  nextHoliday: HolidayCountdownVM | null;
   projectOptions: ProjectOption[];
   categoryOptions: CategoryOption[];
   pendingCaptures: VoiceCaptureVM[];
@@ -550,6 +553,28 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
   }
   countdownVMs.sort((a, b) => a.daysAway - b.daysAway || a.title.localeCompare(b.title));
 
+  // Next school holiday — the one underway, else the soonest to start. Dates are calendar days,
+  // compared at UTC midnight like the zoned "today" above.
+  let nextHoliday: HolidayCountdownVM | null = null;
+  const dayMs = (ymd: string) => Date.parse(`${ymd}T00:00:00Z`);
+  const holidayLabel = (ms: number) => formatShortDate(calendarDateFromDue(new Date(ms)));
+  for (const h of SCHOOL_HOLIDAYS) {
+    const startMs = dayMs(h.start);
+    const endMs = h.end ? dayMs(h.end) : startMs;
+    if (endMs < zonedToday) continue;
+    const daysAway = Math.round((startMs - zonedToday) / MS_PER_DAY);
+    const multiDay = h.end != null && endMs > startMs;
+    nextHoliday = {
+      title: h.title,
+      daysLabel: daysAway <= 0 ? "Now" : daysAway === 1 ? "Tomorrow" : `${daysAway} days`,
+      detailLabel:
+        daysAway <= 0
+          ? multiDay ? `Until ${holidayLabel(endMs)}` : "Today"
+          : multiDay ? `${holidayLabel(startMs)} – ${holidayLabel(endMs)}` : holidayLabel(startMs),
+    };
+    break;
+  }
+
   // Voice captures (notification panel).
   const CAPTURED_KIND_MAP: Record<string, VoiceCaptureVM["kind"]> = {
     TASK: "task",
@@ -577,6 +602,7 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
     habits: habitVMs,
     habitAtRiskCount,
     countdowns: countdownVMs,
+    nextHoliday,
     projectOptions: raw.projects.map((p) => ({ id: p.id, name: p.name })),
     categoryOptions: raw.categories.map((c) => ({ id: c.id, name: c.name, scope: c.scope })),
     pendingCaptures,
