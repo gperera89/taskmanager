@@ -399,6 +399,7 @@ export default function TaskbookApp() {
             dayDetail={dayDetail}
             upcoming={calendarView.upcoming}
             countdowns={data.countdowns}
+            nextHoliday={data.nextHoliday}
             onEditCountdown={(item) => setModal({ mode: "edit", kind: "event", item })}
             onRemoveCountdown={actions.removeCountdown}
             onClickDay={clickDay}
@@ -473,6 +474,7 @@ export default function TaskbookApp() {
               dayDetail={dayDetail}
               upcoming={calendarView.upcoming}
               countdowns={data.countdowns}
+              nextHoliday={data.nextHoliday}
               onEditCountdown={(item) => setModal({ mode: "edit", kind: "event", item })}
               onRemoveCountdown={actions.removeCountdown}
               onClickDay={clickDay}
