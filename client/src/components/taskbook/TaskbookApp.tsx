@@ -48,7 +48,7 @@ const AREA_SHORTCUTS: Record<string, AreaKey> = {
   "4": "habits",
   "5": "calendar",
 };
-// Notes live in the Projects tab now; "6" (once the Notes tab) starts a new Unfiled note.
+// Notes live in the Projects tab; "6" (the old Notes tab key) starts a new Unfiled note.
 const NEW_NOTE_SHORTCUT = "6";
 
 // Letter keys → home/all/work mode, matching ModeToggle's order.

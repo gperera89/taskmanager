@@ -11,7 +11,7 @@
 
 // Bumping this drops every previously cached shell/asset on the next activation — the escape
 // hatch when a device is stuck serving a stale build.
-const CACHE_VERSION = "cura-v3";
+const CACHE_VERSION = "cura-v4";
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 // Where the build id of the currently cached shell is parked, so a background revalidate can tell
