@@ -413,9 +413,10 @@ export async function removeProject(id: string) {
 // Plain string args rather than FormData: a note body is one opaque string, so there's nothing
 // to parse. The id is client-minted (see the Note model), so creates return nothing to swap.
 
-export async function addNote(id: string, title: string, projectId: string) {
+// `taskId` is optional so creates queued by an older client (three args) still replay.
+export async function addNote(id: string, title: string, projectId: string, taskId?: string) {
   await requireSession();
-  await createNote({ id, title, projectId: projectId || null });
+  await createNote({ id, title, projectId: projectId || null, taskId: taskId || null });
 }
 
 export async function renameNote(id: string, title: string) {

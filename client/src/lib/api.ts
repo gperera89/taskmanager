@@ -187,8 +187,16 @@ export function updateTask(
       },
     });
     if (input.title !== undefined) await editTaskNoteLine(task, (body, blockId) => setBlockTitle(body, blockId, task.title));
+    if (input.projectId !== undefined) await moveTaskNotes(task.id, task.projectId);
     return task;
   });
+}
+
+// Notes about a task always carry its project, so they follow it when it moves — and, like any
+// note moving project, take their own checkbox tasks along (see updateNote).
+async function moveTaskNotes(taskId: string, projectId: string | null) {
+  const moved = await prisma.note.updateMany({ where: { taskId }, data: { projectId } });
+  if (moved.count) await prisma.task.updateMany({ where: { note: { taskId } }, data: { projectId } });
 }
 
 // A task made from a note's checkbox line carries its edits back to that line — the other half
@@ -404,22 +412,41 @@ const NOTE_TITLE_FALLBACK = "Untitled";
 
 // Upsert rather than create: the id comes from the client, and an outbox retry after a create
 // that did land (but whose response was lost) must not fail on the duplicate key.
-export function createNote(input: { id: string; title: string; projectId?: string | null; body?: string }) {
+// A note about a task takes the task's project, whatever `projectId` says. A task that has gone
+// (deleted before the queued create arrived) leaves the note at the project it was given.
+export async function createNote(input: {
+  id: string;
+  title: string;
+  projectId?: string | null;
+  taskId?: string | null;
+  body?: string;
+}) {
   const title = input.title.trim() || NOTE_TITLE_FALLBACK;
+  const task = input.taskId
+    ? await prisma.task.findUnique({ where: { id: input.taskId }, select: { id: true, projectId: true } })
+    : null;
+  const projectId = task ? task.projectId : input.projectId || null;
   return prisma.note.upsert({
     where: { id: input.id },
-    create: { id: input.id, title, projectId: input.projectId || null, body: input.body ?? "" },
+    create: { id: input.id, title, projectId, taskId: task?.id ?? null, body: input.body ?? "" },
     update: {},
   });
 }
 
 export function updateNote(id: string, input: Partial<{ title: string; projectId: string | null }>) {
   return notFoundAsError("Note not found", async () => {
+    // A note moved to another project quietly stops being about its task.
+    const before =
+      input.projectId === undefined
+        ? null
+        : await prisma.note.findUniqueOrThrow({ where: { id }, select: { projectId: true, taskId: true } });
+    const projectId = input.projectId === undefined ? undefined : input.projectId || null;
     const note = await prisma.note.update({
       where: { id },
       data: {
         title: input.title === undefined ? undefined : input.title.trim() || NOTE_TITLE_FALLBACK,
-        projectId: input.projectId === undefined ? undefined : input.projectId || null,
+        projectId,
+        taskId: before?.taskId && before.projectId !== projectId ? null : undefined,
       },
     });
     // A note's tasks follow it into (or out of) a project.

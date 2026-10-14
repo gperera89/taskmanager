@@ -16,7 +16,7 @@
 // due-bucketing, counts and streaks all update exactly as a server round trip would have.
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import type { AiNote, CapturedKind, Note, Countdown, DayPlanBlock, HabitCompletion, HabitScheduleType, Routine, RoutineFrequency, RoutineMonthlyMode } from "@prisma/client";
+import type { AiNote, CapturedKind, Note, Countdown, Task, DayPlanBlock, HabitCompletion, HabitScheduleType, Routine, RoutineFrequency, RoutineMonthlyMode } from "@prisma/client";
 import * as serverActions from "@/app/actions";
 import { deriveEntities, type RawState, type RawTask } from "@/lib/derive";
 import { formatLongDate } from "@/lib/taskbookDates";
@@ -220,8 +220,8 @@ export type TaskbookActions = {
   setProjectSections: (id: string, enabled: boolean) => void;
   removeProject: (id: string) => void;
   // Notes. addNote returns the new note's id (client-minted, final — no temp-id swap), so the
-  // caller can open the editor on it straight away.
-  addNote: (input: { title?: string; projectId?: string | null }) => string;
+  // caller can open the editor on it straight away. A note about a task takes the task's project.
+  addNote: (input: { title?: string; projectId?: string | null; taskId?: string | null }) => string;
   renameNote: (id: string, title: string) => void;
   // Saves a note's body and syncs its checkbox lines with their tasks (creating, renaming and
   // ticking them). Returns the body as it should now read — with block ids added to new checkbox
@@ -389,10 +389,30 @@ function removeTaskById(tasks: RawTask[], id: string): RawTask[] {
     .map((t) => (t.subtasks.some((s) => s.id === id) ? { ...t, subtasks: t.subtasks.filter((s) => s.id !== id) } : t));
 }
 
+// Notes about deleted tasks stay, at project level — the server's onDelete: SetNull on
+// Note.taskId. `task` is the deleted row, subtasks included (they go with it).
+function detachTaskNotes(r: RawState, task: Pick<RawTask, "id" | "subtasks">): RawState {
+  const gone = new Set([task.id, ...task.subtasks.map((s) => s.id)]);
+  if (!r.notes.some((n) => n.taskId && gone.has(n.taskId))) return r;
+  return { ...r, notes: r.notes.map((n) => (n.taskId && gone.has(n.taskId) ? { ...n, taskId: null } : n)) };
+}
+
+function findTask(tasks: RawTask[], id: string): Task | undefined {
+  for (const t of tasks) {
+    if (t.id === id) return t;
+    const sub = t.subtasks.find((s) => s.id === id);
+    if (sub) return sub;
+  }
+  return undefined;
+}
+
 // Swaps a create's temp id for the server-assigned real one, wherever the row lives.
 function swapTaskId(r: RawState, temp: string, real: string): RawState {
   return {
     ...r,
+    notes: r.notes.some((n) => n.taskId === temp)
+      ? r.notes.map((n) => (n.taskId === temp ? { ...n, taskId: real } : n))
+      : r.notes,
     tasks: r.tasks.map((t) => {
       if (t.id === temp) return { ...t, id: real };
       if (t.subtasks.some((s) => s.id === temp)) {
@@ -1171,7 +1191,7 @@ export function StoreProvider({
       const taskId = t.id;
       const timer = window.setTimeout(() => {
         pending.delete(taskId);
-        setRaw((r) => ({ ...r, tasks: removeTaskById(r.tasks, taskId) }));
+        setRaw((r) => detachTaskNotes({ ...r, tasks: removeTaskById(r.tasks, taskId) }, t));
         enqueue("removeTask", [taskId]);
       }, UNDO_MS);
       const toastId = pushToast(`"${t.title}" left its note, so its task will be deleted`, "Keep task", () => {
@@ -1304,6 +1324,8 @@ export function StoreProvider({
           () => {
             // A task from a note takes its line with it — once the undo window has passed.
             if (row.noteId && row.noteBlockId) editNoteBody(row.noteId, (body) => removeBlockLine(body, row.noteBlockId!));
+            // Notes about the task stay, now at project level (the server's onDelete: SetNull).
+            setRaw((r) => detachTaskNotes(r, row));
             enqueue("removeTask", [id]);
           }
         );
@@ -1332,8 +1354,20 @@ export function StoreProvider({
       setTaskProject: (id, projectId) => {
         const fd = new FormData();
         fd.set("projectId", projectId);
+        const next = projectId || null;
         mutate(
-          (r) => ({ ...r, tasks: mapTask(r.tasks, id, (t) => ({ ...t, projectId: projectId || null })) }),
+          (r) => {
+            // Notes about the task follow it, and their checkbox tasks follow them (api.ts's
+            // moveTaskNotes).
+            const moved = new Set(r.notes.filter((n) => n.taskId === id).map((n) => n.id));
+            return {
+              ...r,
+              tasks: mapTask(r.tasks, id, (t) => ({ ...t, projectId: next })).map((t) =>
+                t.noteId && moved.has(t.noteId) ? { ...t, projectId: next } : t
+              ),
+              notes: moved.size ? r.notes.map((n) => (moved.has(n.id) ? { ...n, projectId: next } : n)) : r.notes,
+            };
+          },
           "setTaskProject",
           [id, fd]
         );
@@ -1570,15 +1604,17 @@ export function StoreProvider({
       addNote: (input) => {
         const id = crypto.randomUUID();
         const now = new Date();
+        const task = input.taskId ? findTask(rawRef.current.tasks, input.taskId) : undefined;
         const row: Note = {
           id,
           title: input.title?.trim() || "Untitled",
           body: "",
-          projectId: input.projectId || null,
+          projectId: task ? task.projectId : input.projectId || null,
+          taskId: task?.id ?? null,
           createdAt: now,
           updatedAt: now,
         };
-        mutate((r) => ({ ...r, notes: [row, ...r.notes] }), "addNote", [id, row.title, row.projectId ?? ""]);
+        mutate((r) => ({ ...r, notes: [row, ...r.notes] }), "addNote", [id, row.title, row.projectId ?? "", row.taskId ?? ""]);
         return id;
       },
       renameNote: (id, title) => {
@@ -1668,7 +1704,12 @@ export function StoreProvider({
         mutate(
           (r) => ({
             ...r,
-            notes: r.notes.map((n) => (n.id === id ? { ...n, projectId, updatedAt: new Date() } : n)),
+            // A note moved to another project quietly stops being about its task (api.ts's updateNote).
+            notes: r.notes.map((n) =>
+              n.id === id
+                ? { ...n, projectId, taskId: n.projectId === projectId ? n.taskId : null, updatedAt: new Date() }
+                : n
+            ),
             // The note's tasks follow it (api.ts's updateNote does the same).
             tasks: r.tasks.map((t) => (t.noteId === id ? { ...t, projectId } : t)),
           }),
