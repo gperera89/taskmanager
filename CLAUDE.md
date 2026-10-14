@@ -147,7 +147,13 @@ anything that runs on a schedule.
 
 ### Notes
 `Note` rows are freeform Markdown, optionally attached to a project (`onDelete: SetNull` — a
-deleted project's notes become Unfiled). The Notes tab (`NotesView.tsx`) lists them; a note opens
+deleted project's notes become Unfiled) and optionally about one task (`Note.taskId`, relation
+`TaskNotes` — distinct from `Task.noteId`, the checkbox-line link). A task note always carries its
+task's project: moving the task moves its notes (`moveTaskNotes`), moving the note to another
+project quietly drops the task, and deleting the task leaves the note at project level. There is
+no Notes tab: notes live in the Projects tab (`ProjectsView.tsx` — an Unfiled card first, each
+project card listing its notes via `NoteList.tsx`, task notes marked with their task) and under
+each task row behind an icon and count; a done task's notes hide with it. A note opens
 full-screen in `NotePage.tsx` with the project's `ProjectCard` beside it (a bottom sheet on
 phones). The body editor is CodeMirror 6 (`MarkdownEditor.tsx`, loaded via `next/dynamic`) so the
 Markdown round-trips byte-for-byte — this is groundwork for mirroring notes into the Obsidian

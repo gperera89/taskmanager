@@ -12,7 +12,6 @@ import BottomTabs from "./BottomTabs";
 import CalendarRail from "./CalendarRail";
 import TasksView from "./TasksView";
 import ProjectsView from "./ProjectsView";
-import NotesView from "./NotesView";
 import NotePage from "./NotePage";
 import RoutinesView from "./RoutinesView";
 import HabitsView from "./HabitsView";
@@ -28,14 +27,13 @@ import ReminderSheet, { parseReminderTarget, type ReminderTarget } from "./Remin
 
 // The order of the portrait/mobile carousel. On desktop the calendar is a side rail
 // instead of a swipeable panel, so it is dropped from the content flow there.
-const CAROUSEL_VIEWS: AreaKey[] = ["tasks", "projects", "notes", "routines", "habits", "calendar"];
+const CAROUSEL_VIEWS: AreaKey[] = ["tasks", "projects", "routines", "habits", "calendar"];
 
 // Which Add-modal tab the current view should default to — so tapping "+ Add" from Projects
 // opens straight to the Project form instead of always defaulting to Task.
 const AREA_TO_KIND: Record<AreaKey, ItemKind> = {
   tasks: "task",
   projects: "project",
-  notes: "task", // unused — "Add" on the Notes tab starts a new note instead (see openAdd)
   routines: "routine",
   habits: "habit",
   calendar: "task",
@@ -49,9 +47,9 @@ const AREA_SHORTCUTS: Record<string, AreaKey> = {
   "3": "routines",
   "4": "habits",
   "5": "calendar",
-  // Notes came later; it takes the next free digit rather than renumbering the Stream Deck keys.
-  "6": "notes",
 };
+// Notes live in the Projects tab now; "6" (once the Notes tab) starts a new Unfiled note.
+const NEW_NOTE_SHORTCUT = "6";
 
 // Letter keys → home/all/work mode, matching ModeToggle's order.
 const MODE_SHORTCUTS: Record<string, Mode> = { h: "home", a: "all", w: "work" };
@@ -144,13 +142,12 @@ export default function TaskbookApp() {
 
   const modalActions = useMemo(
     () => ({
-      openAdd: () =>
-        area === "notes" ? setOpenNoteId(actions.addNote({})) : setModal({ mode: "add", initialKind: AREA_TO_KIND[area] }),
+      openAdd: () => setModal({ mode: "add", initialKind: AREA_TO_KIND[area] }),
       openEdit: (state: Extract<ModalState, { mode: "edit" }>) => setModal(state),
       openHeatmap: (habitId: string) => setHeatmapHabitId(habitId),
       openNote: (noteId: string) => setOpenNoteId(noteId),
     }),
-    [area, actions]
+    [area]
   );
   const closeNote = useCallback(() => setOpenNoteId(null), []);
 
@@ -198,13 +195,15 @@ export default function TaskbookApp() {
       const api = shortcutRef.current;
       if (e.key === "n") {
         e.preventDefault();
-        if (areaRef.current === "notes") api.newNote();
-        else setModal({ mode: "add", initialKind: AREA_TO_KIND[areaRef.current] });
+        setModal({ mode: "add", initialKind: AREA_TO_KIND[areaRef.current] });
       } else if (e.key === "/") {
         e.preventDefault();
         // The search field is rendered per view (and once per carousel panel on mobile), so
         // focus whichever copy is in the DOM first rather than looking one up by id.
         document.querySelector<HTMLInputElement>("[data-taskbook-search]")?.focus();
+      } else if (e.key === NEW_NOTE_SHORTCUT) {
+        e.preventDefault();
+        api.newNote();
       } else if (AREA_SHORTCUTS[e.key]) {
         // Calendar is the side rail on desktop, not a main view — "5" is mobile-only
         // (selecting it on desktop would just get render-corrected back to Tasks).
@@ -342,6 +341,8 @@ export default function TaskbookApp() {
   // Look the heatmap habit up live so optimistic completion toggles re-render its grid.
   const heatmapHabit = heatmapHabitId != null ? data.habits.find((h) => h.id === heatmapHabitId) : undefined;
 
+  const unfiledNotes = data.notes.filter((n) => !n.projectId);
+
   function viewFor(key: AreaKey) {
     switch (key) {
       case "tasks":
@@ -361,14 +362,13 @@ export default function TaskbookApp() {
           <ProjectsView
             cards={data.projectCards}
             activeCount={data.activeProjectCount}
+            unfiledNotes={unfiledNotes}
             query={query}
             onQueryChange={setQuery}
             categoryOptions={data.categoryOptions}
             projectOptions={data.projectOptions}
           />
         );
-      case "notes":
-        return <NotesView notes={data.notes} query={query} onQueryChange={setQuery} />;
       case "routines":
         return (
           <RoutinesView
@@ -506,7 +506,6 @@ export default function TaskbookApp() {
             setOpenNoteId(null);
             selectTab(next);
           }}
-          noteCount={data.notes.length}
           tasksRemainingToday={data.tasksRemainingToday}
           activeProjectCount={data.activeProjectCount}
           routineTotalCount={data.routineTotalCount}

@@ -10,7 +10,8 @@ import { AnimatedList, useCompletionHold } from "./motion";
 import { DateTimePickerPanel, PickerPopover, formatPickerLabel } from "./DateTimePicker";
 import SearchBar from "./SearchBar";
 import { TaskRow } from "./TasksView";
-import type { CategoryOption, ProjectCardVM, ProjectOption } from "./types";
+import NoteList from "./NoteList";
+import type { CategoryOption, NoteListItemVM, ProjectCardVM, ProjectOption } from "./types";
 
 const fieldInputClass =
   "w-full rounded-md border border-(--border-strong) bg-(--card) px-2 py-1 text-[13.5px] text-(--ink) outline-none focus:border-(--accent-text)";
@@ -147,9 +148,13 @@ function ProjectExpandToggle({ mode, onCycle }: { mode: ProjectViewMode; onCycle
   );
 }
 
+// The Projects tab, which is also where notes live: Unfiled notes (not yet part of a project)
+// get the first card, and every project card lists its notes — task notes marked with their task.
+// Search reaches into task titles and note text, and a matching card lists just the matching notes.
 export default function ProjectsView({
   cards,
   activeCount,
+  unfiledNotes,
   query,
   onQueryChange,
   categoryOptions,
@@ -157,50 +162,100 @@ export default function ProjectsView({
 }: {
   cards: ProjectCardVM[];
   activeCount: number;
+  unfiledNotes: NoteListItemVM[];
   query: string;
   onQueryChange: (v: string) => void;
   categoryOptions: CategoryOption[];
   projectOptions: ProjectOption[];
 }) {
+  const { actions } = useTaskbook();
+  const { openNote } = useModalActions();
   const q = query.trim().toLowerCase();
-  const filtered = q ? cards.filter((c) => c.name.toLowerCase().includes(q)) : cards;
+  const noteMatches = (n: NoteListItemVM) => n.searchText.includes(q);
+  const filtered = q
+    ? cards.filter(
+        (c) =>
+          c.name.toLowerCase().includes(q) ||
+          c.description?.toLowerCase().includes(q) ||
+          c.tasks.some((t) => t.title.toLowerCase().includes(q)) ||
+          c.notes.some(noteMatches)
+      )
+    : cards;
+  const unfiled = q ? unfiledNotes.filter(noteMatches) : unfiledNotes.filter((n) => !n.taskDone);
 
   return (
     <div>
       <div className="flex items-end justify-between">
         <div className="font-script text-[62px] leading-[0.8] text-(--ink)">Projects</div>
-        <div className="pb-2.5 text-[13px] text-(--ink-muted)">{activeCount} active</div>
+        <div className="flex items-center gap-3 pb-1.5">
+          <span className="text-[13px] text-(--ink-muted)">{activeCount} active</span>
+          <button
+            type="button"
+            onClick={() => openNote(actions.addNote({}))}
+            className="cursor-pointer rounded-full border border-(--border-strong) bg-(--card) px-3.5 py-1 text-[13px] text-(--info) hover:border-(--accent-text) hover:text-(--accent-text)"
+          >
+            + Note
+          </button>
+        </div>
       </div>
       <div className="my-5 mb-1 h-px bg-(--rule)" />
 
-      <SearchBar query={query} onQueryChange={onQueryChange} placeholder="Search projects…" />
+      <SearchBar query={query} onQueryChange={onQueryChange} placeholder="Search projects, tasks and notes…" />
 
-      {filtered.length === 0 && (
+      {filtered.length === 0 && (q ? unfiled.length === 0 : cards.length === 0) && (
         <p className="py-8 text-[15px] italic text-(--ink-soft)">
-          {q ? "No projects match your search." : "Nothing here yet."}
+          {q ? "Nothing matches your search." : "Nothing here yet."}
         </p>
       )}
 
       <AnimatedList className="grid max-w-[940px] grid-cols-1 gap-5.5 lg:grid-cols-2">
+        {(!q || unfiled.length > 0) && (
+          <div
+            key="__unfiled__"
+            data-flip-id="__unfiled__"
+            className="group self-start rounded-xl border border-dashed border-(--border-strong) px-5.5 pb-5 pt-5.5"
+          >
+            <div className="flex items-baseline justify-between gap-2">
+              <div className="text-[21px] font-semibold text-(--ink)">Unfiled</div>
+              <span className="text-[13px] text-(--ink-muted)">
+                {unfiled.length} {unfiled.length === 1 ? "note" : "notes"}
+              </span>
+            </div>
+            <div className="mb-3 mt-1.5 text-[13.5px] italic leading-snug text-(--ink-muted)">
+              Ideas that haven&apos;t earned a project yet. Open one to file it, or to make a project from it.
+            </div>
+            <NoteList notes={unfiled} showTask expandAll={Boolean(q)} onAdd={() => actions.addNote({})} />
+          </div>
+        )}
         {filtered.map((project) => (
-          <ProjectCard key={project.id} project={project} categoryOptions={categoryOptions} projectOptions={projectOptions} />
+          <ProjectCard
+            key={project.id}
+            project={project}
+            categoryOptions={categoryOptions}
+            projectOptions={projectOptions}
+            noteQuery={q}
+          />
         ))}
       </AnimatedList>
     </div>
   );
 }
 
+
 export function ProjectCard({
   project,
   categoryOptions,
   projectOptions,
   hideNotes = false,
+  noteQuery = "",
 }: {
   project: ProjectCardVM;
   categoryOptions: CategoryOption[];
   projectOptions: ProjectOption[];
   // The note page's side panel shows this card beside a note — its own notes list moves there.
   hideNotes?: boolean;
+  // A search in progress (lowercased): list only the notes that match, done tasks' notes included.
+  noteQuery?: string;
 }) {
   const { actions } = useTaskbook();
   const { openNote } = useModalActions();
@@ -251,6 +306,10 @@ export function ProjectCard({
           }))
           .filter((s) => s.tasks.length > 0);
   const visibleCount = visibleSections.reduce((n, s) => n + s.tasks.length, 0);
+  // A done task's notes are tucked away with it — unless they're what a search is looking for.
+  const notes = noteQuery
+    ? project.notes.filter((n) => n.searchText.includes(noteQuery))
+    : project.notes.filter((n) => !n.taskDone);
 
   return (
     <div
@@ -354,28 +413,26 @@ export function ProjectCard({
         {project.durationLabel && <Chip>◷ {project.durationLabel}</Chip>}
       </div>
 
-      {!hideNotes && (
-        <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px]">
-          {project.notes.map((note) => (
-            <button
-              key={note.id}
-              type="button"
-              onClick={() => openNote(note.id)}
-              className="flex cursor-pointer items-center gap-1 text-(--info) hover:text-(--accent-text)"
-            >
-              <NoteGlyph />
-              <span className="max-w-[220px] truncate">{note.title}</span>
-            </button>
-          ))}
+      {!hideNotes &&
+        (notes.length > 0 ? (
+          <div className="mt-3">
+            <div className={`${labelClass} mb-1`}>Notes</div>
+            <NoteList
+              notes={notes}
+              showTask
+              expandAll={Boolean(noteQuery)}
+              onAdd={() => actions.addNote({ projectId: project.id })}
+            />
+          </div>
+        ) : (
           <button
             type="button"
             onClick={() => openNote(actions.addNote({ projectId: project.id }))}
-            className={`cursor-pointer text-(--ink-faint) hover:text-(--info) ${project.notes.length ? REVEAL_ON_HOVER : ""}`}
+            className={`mt-2.5 cursor-pointer text-[13px] text-(--ink-faint) hover:text-(--info) ${REVEAL_ON_HOVER}`}
           >
             + Note
           </button>
-        </div>
-      )}
+        ))}
 
       <div className="my-2.5 mb-4 h-1 overflow-hidden rounded-full bg-(--border-soft)">
         <div className="h-full rounded-full bg-(--accent)" style={{ width: `${project.progressPct}%` }} />
@@ -500,17 +557,5 @@ export function ProjectCard({
         )}
       </AnimatedList>
     </div>
-  );
-}
-
-// Material Symbols "description" — a page with lines, marking a link to a note.
-export function NoteGlyph({ size = 14 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 -960 960 960" className="flex-none" aria-hidden>
-      <path
-        d="M320-240h320v-80H320v80Zm0-160h320v-80H320v80ZM240-80q-33 0-56.5-23.5T160-160v-640q0-33 23.5-56.5T240-880h320l240 240v480q0 33-23.5 56.5T720-80H240Zm280-520v-200H240v640h480v-440H520ZM240-800v200-200 640-640Z"
-        style={{ fill: "currentColor" }}
-      />
-    </svg>
   );
 }

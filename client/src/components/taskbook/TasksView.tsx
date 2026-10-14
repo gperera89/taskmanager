@@ -22,6 +22,8 @@ import RepeatFields from "./RepeatFields";
 import SearchBar from "./SearchBar";
 import SuggestionStrip from "./SuggestionStrip";
 import type { TimeSuggestion } from "@/lib/timeSuggestions";
+import NoteList, { NoteGlyph } from "./NoteList";
+import { useModalActions } from "./ModalContext";
 import type { CategoryOption, ProjectOption, TaskGroupVM, TaskItemVM } from "./types";
 
 // Drag-to-reorder passes the dragged task id between rows of the same group via this shared
@@ -182,6 +184,12 @@ export function TaskRow({
   const progressPct = hasSubtasks ? Math.round((task.subtasksDone / task.subtasksTotal) * 100) : 0;
   const [subtasksOpen, setSubtasksOpen] = useState(false);
   const [addingSubtask, setAddingSubtask] = useState(false);
+  // Notes about the task fold away behind an icon and count until it's tapped; a done task's
+  // notes go with it.
+  const { openNote } = useModalActions();
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [openSubtaskNotes, setOpenSubtaskNotes] = useState<string | null>(null);
+  const showNotes = !task.isCompleted;
   const [blockOpen, setBlockOpen] = useState(false);
   const [blockReasonDraft, setBlockReasonDraft] = useState(task.blockedReason ?? "");
   const [blockUntilDraft, setBlockUntilDraft] = useState(task.blockedUntilValue);
@@ -789,12 +797,40 @@ export function TaskRow({
               + Subtask
             </button>
           )}
+          {showNotes &&
+            (task.notes.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => setNotesOpen((v) => !v)}
+                aria-expanded={notesOpen}
+                aria-label={`${task.notes.length} ${task.notes.length === 1 ? "note" : "notes"}`}
+                className="flex cursor-pointer items-center gap-1 text-xs text-(--info)"
+              >
+                <NoteGlyph size={13} />
+                {task.notes.length}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => openNote(actions.addNote({ taskId: task.id }))}
+                className={`cursor-pointer text-xs text-(--ink-faint) hover:text-(--info) ${REVEAL_ON_HOVER}`}
+              >
+                + Note
+              </button>
+            ))}
         </div>
+
+        {showNotes && notesOpen && task.notes.length > 0 && (
+          <div className="mt-1.5 border-l border-(--border-strong) pl-3">
+            <NoteList notes={task.notes} compact onAdd={() => actions.addNote({ taskId: task.id })} />
+          </div>
+        )}
 
         {subtasksOpen && (
           <ul className="mt-1.5 flex flex-col pl-1">
             {task.subtasks.map((s) => (
-              <li key={s.id} className="group/sub flex items-center gap-2.5 py-1.5">
+              <Fragment key={s.id}>
+              <li className="group/sub flex items-center gap-2.5 py-1.5">
                 <CheckSquare action={() => actions.toggleTask(s.id, s.isCompleted)} checked={s.isCompleted} size={20} />
                 <span
                   onClick={() => actions.toggleTask(s.id, s.isCompleted)}
@@ -803,6 +839,27 @@ export function TaskRow({
                 >
                   {s.title}
                 </span>
+                {!s.isCompleted &&
+                  (s.notes.length > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => setOpenSubtaskNotes((id) => (id === s.id ? null : s.id))}
+                      aria-expanded={openSubtaskNotes === s.id}
+                      aria-label={`${s.notes.length} ${s.notes.length === 1 ? "note" : "notes"}`}
+                      className="flex cursor-pointer items-center gap-1 text-xs text-(--info)"
+                    >
+                      <NoteGlyph size={12} />
+                      {s.notes.length}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => openNote(actions.addNote({ taskId: s.id }))}
+                      className="cursor-pointer text-xs text-(--ink-faint) opacity-0 transition-opacity hover:text-(--info) group-hover/sub:opacity-100 [@media(hover:none)]:opacity-100"
+                    >
+                      Note
+                    </button>
+                  ))}
                 <button
                   type="button"
                   onClick={() => actions.removeTask(s.id)}
@@ -812,6 +869,12 @@ export function TaskRow({
                   Remove
                 </button>
               </li>
+              {openSubtaskNotes === s.id && !s.isCompleted && s.notes.length > 0 && (
+                <li className="mb-1 ml-[30px] border-l border-(--border-strong) pl-3">
+                  <NoteList notes={s.notes} compact onAdd={() => actions.addNote({ taskId: s.id })} />
+                </li>
+              )}
+              </Fragment>
             ))}
             <li>
               {addingSubtask ? (

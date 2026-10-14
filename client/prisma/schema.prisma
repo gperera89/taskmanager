@@ -73,6 +73,10 @@ model Project {
 // project (shown beside it while editing); unattached notes are "Unfiled". Deleting a project
 // leaves its notes behind as Unfiled rather than taking the writing with it.
 //
+// A note can also be about one task (`taskId`). It then always carries that task's project:
+// moving the task moves its notes, and moving the note to another project quietly drops the
+// task. Deleting the task leaves its notes at project level.
+//
 // The id is minted on the client (crypto.randomUUID) so a note can be written to straight after
 // it's created, before the outbox has delivered the create — see store.tsx's addNote.
 model Note {
@@ -81,11 +85,15 @@ model Note {
   body      String   @default("")
   projectId String?
   project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  taskId    String?
+  task      Task?    @relation("TaskNotes", fields: [taskId], references: [id], onDelete: SetNull)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  tasks     Task[]
+  // Tasks made from this note's checkbox lines — not to be confused with `task` above.
+  tasks     Task[]   @relation("NoteCheckboxTasks")
 
   @@index([projectId])
+  @@index([taskId])
 }
 
 // An important date to count down to, shown in the calendar rail ("12 days · Tracey's
@@ -167,8 +175,11 @@ model Task {
   // line and the task both ways — ticking either ticks both (see lib/noteTasks.ts). Deleting the
   // note leaves its tasks behind as ordinary tasks.
   noteId      String?
-  note        Note?     @relation(fields: [noteId], references: [id], onDelete: SetNull)
+  note        Note?     @relation("NoteCheckboxTasks", fields: [noteId], references: [id], onDelete: SetNull)
   noteBlockId String?
+
+  // Notes written about this task (Note.taskId).
+  notes       Note[]    @relation("TaskNotes")
 
   // Subtasks: a task can be broken down into child tasks of itself.
   parentId    String?

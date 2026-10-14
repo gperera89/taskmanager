@@ -160,8 +160,27 @@ export default function NotePage({
     actions.setNoteProject(noteId, projectId);
   }
 
+  // The task this note is about, if it's still loaded (a long-done task drops out of the fetch).
+  const aboutTask = note.taskId
+    ? raw.tasks.flatMap((t) => [t, ...t.subtasks]).find((t) => t.id === note.taskId)
+    : undefined;
+
   const panel = (
     <div className="flex flex-col gap-4">
+      {note.taskId && (
+        <div>
+          <div className={`${labelClass} mb-1`}>About this task</div>
+          <div
+            className="text-[15px] leading-snug"
+            style={{
+              color: aboutTask?.isCompleted ? "var(--ink-soft)" : "var(--ink)",
+              textDecoration: aboutTask?.isCompleted ? "line-through" : "none",
+            }}
+          >
+            {aboutTask?.title ?? "A completed task"}
+          </div>
+        </div>
+      )}
       {project ? (
         <ProjectCard project={project} categoryOptions={categoryOptions} projectOptions={projectOptions} hideNotes />
       ) : note.projectId ? (

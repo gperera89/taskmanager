@@ -45,7 +45,6 @@ import type {
   MyDayTrayItemVM,
   MyDayVM,
   MyDayZoneVM,
-  NoteLinkVM,
   NoteListItemVM,
   ProjectCardVM,
   ProjectOption,
@@ -171,7 +170,12 @@ function toTimeInputValue(date: Date | null): string {
 
 // --- Task VMs ---
 
-function toTaskVM(t: RawTask, projectNameById: Map<string, string>, now: Date): TaskItemVM {
+function toTaskVM(
+  t: RawTask,
+  projectNameById: Map<string, string>,
+  now: Date,
+  notesByTask: Map<string, NoteListItemVM[]>
+): TaskItemVM {
   const due = t.dueDate ? new Date(t.dueDate) : null;
   const dueLabel = due ? formatDueLabel(due) : null;
   const repeatUntil = t.repeatUntil ? new Date(t.repeatUntil) : null;
@@ -231,7 +235,13 @@ function toTaskVM(t: RawTask, projectNameById: Map<string, string>, now: Date): 
     blockedLabel: t.blockedReason
       ? `Waiting: ${t.blockedReason}${t.blockedUntil ? ` · until ${formatShortDate(calendarDateFromDue(new Date(t.blockedUntil)))}` : ""}`
       : null,
-    subtasks: t.subtasks.map((s) => ({ id: s.id, title: s.title, isCompleted: s.isCompleted })),
+    subtasks: t.subtasks.map((s) => ({
+      id: s.id,
+      title: s.title,
+      isCompleted: s.isCompleted,
+      notes: notesByTask.get(s.id) ?? [],
+    })),
+    notes: notesByTask.get(t.id) ?? [],
   };
 }
 
@@ -287,10 +297,25 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
   // so the mode filter only narrows the task list (and, below, the calendar).
   const scopeByName = categoryScopeMap(raw.categories);
   const projectNameById = new Map(raw.projects.map((p) => [p.id, p.name]));
+  // Notes, newest edit first. Not mode-filtered: a note has no category to match on.
+  const tasksById = new Map<string, { title: string; isCompleted: boolean }>();
+  for (const t of raw.tasks) {
+    tasksById.set(t.id, t);
+    for (const sub of t.subtasks) tasksById.set(sub.id, sub);
+  }
+  const noteVMs = [...(raw.notes ?? [])]
+    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+    .map((n) => toNoteListItemVM(n, raw.projects, tasksById, nowMs, raw.timeZone));
+  const notesByTask = new Map<string, NoteListItemVM[]>();
+  for (const n of noteVMs) {
+    if (!n.taskId) continue;
+    if (!notesByTask.has(n.taskId)) notesByTask.set(n.taskId, []);
+    notesByTask.get(n.taskId)!.push(n);
+  }
   const grouped = new Map<DueBucket, { vm: TaskItemVM; dueMs: number | null; createdMs: number }[]>();
   for (const t of raw.tasks) {
     if (!taskMatchesMode(t.category, mode, scopeByName)) continue;
-    const vm = toTaskVM(t, projectNameById, now);
+    const vm = toTaskVM(t, projectNameById, now, notesByTask);
     // While a break is active the task is bucketed/sorted by its resume date, so it drops out
     // of Overdue/Today and reappears as due when the break ends (like a paused routine skips).
     const realDue = t.dueDate ? new Date(t.dueDate) : null;
@@ -327,15 +352,11 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
     if (mode === "all") return true;
     return (tasksByProject.get(p.id) ?? []).some((t) => taskMatchesMode(t.category, mode, scopeByName));
   });
-  // Notes, newest edit first. Not mode-filtered: a note has no category to match on.
-  const notesByRecency = [...(raw.notes ?? [])].sort(
-    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-  );
-  const notesByProject = new Map<string, NoteLinkVM[]>();
-  for (const n of notesByRecency) {
+  const notesByProject = new Map<string, NoteListItemVM[]>();
+  for (const n of noteVMs) {
     if (!n.projectId) continue;
     if (!notesByProject.has(n.projectId)) notesByProject.set(n.projectId, []);
-    notesByProject.get(n.projectId)!.push({ id: n.id, title: n.title });
+    notesByProject.get(n.projectId)!.push(n);
   }
 
   const projectCards: ProjectCardVM[] = visibleProjects.map((p) => {
@@ -351,7 +372,7 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
     const sorted = [...items].sort(
       (a, b) => Number(a.isCompleted) - Number(b.isCompleted) || taskOrderCompare(orderKey(a), orderKey(b))
     );
-    const tasks = sorted.map((t) => toTaskVM(t, projectNameById, now));
+    const tasks = sorted.map((t) => toTaskVM(t, projectNameById, now, notesByTask));
     // Group by section, preserving first-appearance order; unsectioned tasks lead. With
     // sections toggled off the card renders one flat headingless group regardless of any
     // stray section values (the disable path clears them server-side).
@@ -585,7 +606,7 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
     projectOptions: raw.projects.map((p) => ({ id: p.id, name: p.name })),
     categoryOptions: raw.categories.map((c) => ({ id: c.id, name: c.name, scope: c.scope })),
     pendingCaptures,
-    notes: notesByRecency.map((n) => toNoteListItemVM(n, raw.projects, nowMs, raw.timeZone)),
+    notes: noteVMs,
   };
 }
 
@@ -620,8 +641,16 @@ export function noteSnippet(body: string, max = 140): string {
   return heading;
 }
 
-function toNoteListItemVM(n: Note, projects: Project[], nowMs: number, timeZone: string): NoteListItemVM {
+function toNoteListItemVM(
+  n: Note,
+  projects: Project[],
+  tasksById: Map<string, { title: string; isCompleted: boolean }>,
+  nowMs: number,
+  timeZone: string
+): NoteListItemVM {
   const project = n.projectId ? projects.find((p) => p.id === n.projectId) : undefined;
+  // A task that isn't loaded was completed long enough ago to drop out of the fetch.
+  const task = n.taskId ? tasksById.get(n.taskId) : undefined;
   const updated = zonedYMD(new Date(n.updatedAt), timeZone);
   const today = zonedYMD(new Date(nowMs), timeZone);
   const dayDiff = Math.round(
@@ -633,6 +662,9 @@ function toNoteListItemVM(n: Note, projects: Project[], nowMs: number, timeZone:
     projectId: project ? project.id : null,
     projectName: project ? project.name : null,
     projectCompleted: project?.isCompleted ?? false,
+    taskId: n.taskId,
+    taskTitle: task?.title ?? null,
+    taskDone: n.taskId ? (task?.isCompleted ?? true) : false,
     snippet: noteSnippet(n.body),
     searchText: `${n.title}\n${n.body}`.toLowerCase(),
     updatedLabel:
