@@ -113,6 +113,13 @@ export type CountdownVM = {
   detailLabel: string; // "42 years · Mon 28 Jul" (yearly) or just the date (one-off)
 };
 
+// The next school holiday (from SCHOOL_HOLIDAYS), pinned at the top of the Countdowns block.
+export type HolidayCountdownVM = {
+  title: string;
+  daysLabel: string; // "Now" | "Tomorrow" | "66 days"
+  detailLabel: string; // "Sat 19 Dec – Sun 3 Jan", or "Until Sun 3 Jan" while it's underway
+};
+
 export type HabitScheduleType = "WEEKLY_DAYS" | "WEEKLY_COUNT" | "MONTHLY_COUNT";
 
 export type HabitCardVM = {
@@ -304,6 +311,7 @@ export type TaskbookData = {
   habitAtRiskCount: number;
   calendarErrors: string[];
   countdowns: CountdownVM[]; // soonest first — the calendar rail's "Countdowns" block
+  nextHoliday: HolidayCountdownVM | null; // underway or next school holiday
   projectOptions: ProjectOption[];
   categoryOptions: CategoryOption[];
   pendingCaptures: VoiceCaptureVM[];
