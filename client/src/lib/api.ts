@@ -1069,9 +1069,9 @@ export function sweepDayPlanBlocks() {
   });
 }
 
-// --- AI planner suggestions + notes (My Day) ---
+// --- AI planner suggestions + notes (Tasks view) ---
 
-// PENDING suggestions surface in My Day; responded rows are kept forever as the feedback log
+// PENDING suggestions surface above the task list; responded rows are kept forever as the feedback log
 // (their dedupeKey also permanently suppresses regeneration — see schema comment).
 export function getActiveSuggestions() {
   return prisma.aiSuggestion.findMany({
@@ -1122,6 +1122,7 @@ export function createSuggestions(
     description?: string | null;
     eventId?: string | null;
     eventTitle?: string | null;
+    projectId?: string | null;
     suggestedDate?: string | null; // "YYYY-MM-DD"
   }[]
 ) {
@@ -1133,6 +1134,7 @@ export function createSuggestions(
       description: r.description ?? null,
       eventId: r.eventId ?? null,
       eventTitle: r.eventTitle ?? null,
+      projectId: r.projectId ?? null,
       suggestedDate: r.suggestedDate ? combineDueDateTime(r.suggestedDate) : null,
     })),
     skipDuplicates: true,
@@ -1174,10 +1176,15 @@ export async function getSuggestionFeedback(sinceDays = 90) {
 export async function acceptSuggestion(id: string, input: { category: string; dueDate?: string | null }) {
   return notFoundAsError("Suggestion not found", async () => {
     const suggestion = await prisma.aiSuggestion.findUniqueOrThrow({ where: { id } });
+    // The project may have been deleted since the idea was generated — file it unattached then.
+    const project = suggestion.projectId
+      ? await prisma.project.findUnique({ where: { id: suggestion.projectId }, select: { id: true } })
+      : null;
     const task = await createTask({
       title: suggestion.title,
       category: input.category,
       description: suggestion.description,
+      projectId: project?.id ?? null,
       dueDate:
         input.dueDate !== undefined
           ? input.dueDate
@@ -1218,11 +1225,72 @@ export function deleteAiNote(id: string) {
   return prisma.aiNote.deleteMany({ where: { id } });
 }
 
-// First-run seeding: the user's stated workflow rules become the initial editable notes.
-export async function seedAiNotesIfEmpty(defaults: string[]) {
-  const count = await prisma.aiNote.count();
-  if (count > 0) return;
-  await prisma.aiNote.createMany({ data: defaults.map((content) => ({ content })) });
+// The morning run starts each day's ideas afresh: anything still unanswered from earlier is
+// dropped (not dismissed — it was never judged, so it mustn't count as negative feedback or
+// block the model from proposing it again if it's still relevant).
+export function clearPendingSuggestions() {
+  return prisma.aiSuggestion.deleteMany({ where: { status: "PENDING" } });
+}
+
+export function countPendingSuggestions() {
+  return prisma.aiSuggestion.count({ where: { status: "PENDING" } });
+}
+
+// Everything the generation prompt needs about the user's own work (beyond the calendar), in
+// two reads. `projects`: active projects with their deadline and open-task shape, so the model
+// can spot a project with no next step or a deadline with nothing scheduled. `needsDuration`:
+// open top-level tasks due today or overdue with no duration set — the model estimates one for
+// each, which sizes the Tasks view's suggested-time chip.
+export async function getPlannerContext(todayKey: string) {
+  const endOfToday = new Date(combineDueDateTime(todayKey).getTime() + MS_PER_DAY);
+  const [projects, needsDuration] = await Promise.all([
+    prisma.project.findMany({
+      where: { isCompleted: false },
+      select: {
+        id: true,
+        name: true,
+        dueDate: true,
+        tasks: { where: { isCompleted: false, parentId: null }, select: { title: true, dueDate: true } },
+      },
+    }),
+    prisma.task.findMany({
+      where: { isCompleted: false, parentId: null, durationMinutes: null, dueDate: { lt: endOfToday } },
+      select: { id: true, title: true, description: true, project: { select: { name: true } } },
+      take: 40,
+    }),
+  ]);
+  return {
+    projects: projects.map((p) => ({
+      id: p.id,
+      name: p.name,
+      dueDate: p.dueDate ? new Date(p.dueDate).toISOString().slice(0, 10) : null,
+      openTasks: p.tasks.length,
+      datedTasks: p.tasks.filter((t) => t.dueDate).length,
+      nextDue:
+        p.tasks
+          .map((t) => (t.dueDate ? new Date(t.dueDate).toISOString().slice(0, 10) : null))
+          .filter((d): d is string => d != null)
+          .sort()[0] ?? null,
+    })),
+    needsDuration: needsDuration.map((t) => ({
+      id: t.id,
+      title: t.title,
+      description: t.description?.slice(0, 200) ?? null,
+      project: t.project?.name ?? null,
+    })),
+  };
+}
+
+// Stores the model's duration estimates (see Task.aiDurationMinutes) in ONE statement — a
+// per-task update (or an interactive transaction around them) multiplies operations and has timed
+// out over a slow link.
+export function setAiDurationEstimates(estimates: { id: string; minutes: number }[]) {
+  if (!estimates.length) return Promise.resolve(0);
+  const values = Prisma.join(estimates.map((e) => Prisma.sql`(${e.id}, ${e.minutes}::int)`));
+  return prisma.$executeRaw`
+    UPDATE "Task" AS t SET "aiDurationMinutes" = v.minutes
+    FROM (VALUES ${values}) AS v(id, minutes)
+    WHERE t."id" = v.id`;
 }
 
 // Blocked tasks for the generation prompt — the AI nudges when a block is due to clear or a

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AreaKey, CapturedKind, ItemKind, ModalState, Mode } from "./types";
 import { deriveCalendarView, deriveMyDay } from "@/lib/derive";
+import { deriveTimeSuggestions } from "@/lib/timeSuggestions";
 import { zonedYMD } from "@/lib/taskbookDates";
 import { useTaskbook } from "./store";
 import { ModalContext } from "./ModalContext";
@@ -318,6 +319,11 @@ export default function TaskbookApp() {
   const dayDetail = selectedDay != null ? calendarView.dayDetails[selectedDay] : undefined;
   // The My Day timeline for the selected day — re-derived on every optimistic edit / clock tick,
   // which is what makes completions/drags/pushes reflow the schedule instantly.
+  // Suggested slots today for overdue/untimed tasks — a second My Day pass (see timeSuggestions.ts).
+  const timeSuggestions = useMemo(
+    () => deriveTimeSuggestions(raw, calendarEvents, nowMs, mode),
+    [raw, calendarEvents, nowMs, mode]
+  );
   const myDay = useMemo(
     () => (selectedDay != null ? deriveMyDay(raw, calendarEvents, nowMs, viewYear, viewMonth0, selectedDay, mode) : undefined),
     [raw, calendarEvents, nowMs, viewYear, viewMonth0, selectedDay, mode]
@@ -347,6 +353,7 @@ export default function TaskbookApp() {
             onQueryChange={setQuery}
             categoryOptions={data.categoryOptions}
             projectOptions={data.projectOptions}
+            timeSuggestions={timeSuggestions}
           />
         );
       case "projects":

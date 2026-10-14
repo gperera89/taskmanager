@@ -194,6 +194,15 @@ notification panel; dismissing or editing it deletes the row). This route accept
 Google session *or* an `X-Shortcut-Secret` header, since the iPhone Shortcut integration can't hold
 a login cookie.
 
+### AI suggestions
+`src/lib/suggestions.ts` asks Claude (once each morning via `/api/cron/generate-suggestions`, or the
+↻ button) for up to five task ideas from the calendar, active projects and blocked tasks, steered by
+the `AiNote` rows (Settings → AI planner notes — the only standing instructions; nothing is seeded).
+The same call estimates `Task.aiDurationMinutes` for overdue/due-today tasks with no duration.
+`SuggestionStrip.tsx` shows three ideas above the task list. Separately, `lib/timeSuggestions.ts`
+proposes a slot today for every overdue or untimed task by re-running the My Day auto-scheduler on
+a copy of the state — client-side, live, no stored rows until the user taps the chip.
+
 ### Habit log (Stoic journal)
 `/api/habit-log/<habitId>` (`src/app/api/habit-log/[id]/route.ts`): POST ticks a habit via `completeHabit`, GET only checks the link.
 The Stoic journal (stoic.cura-gp.app, a separate private repo) calls it from the browser after an

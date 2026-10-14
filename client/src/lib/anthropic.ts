@@ -2,7 +2,7 @@ import "server-only";
 
 // Thin Anthropic Messages API client, matching the house style of the OpenAI callers
 // (lib/voice.ts, lib/email.ts, lib/assistant/openai.ts): raw fetch, no SDK, defensive
-// coercion at the call site. Used by the My Day suggestion generator (lib/suggestions.ts).
+// coercion at the call site. Used by the AI suggestion generator (lib/suggestions.ts).
 
 // The daily suggestion run is a structured-extraction job with explicit rules in the prompt —
 // Haiku is fast and cheap for it. Swap to "claude-sonnet-5" if quality disappoints.

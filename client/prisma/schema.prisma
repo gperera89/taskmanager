@@ -124,6 +124,10 @@ model Task {
   // How long this task is expected to take, in minutes (null = unset). Lets a dated task occupy
   // a block of time on the schedule rather than a single instant.
   durationMinutes Int?
+  // The AI planner's estimate of durationMinutes, written by the morning suggestions run for
+  // overdue/due-today tasks that have none. Never shown as the task's duration — it only sizes
+  // the "suggested time" chip in the Tasks view, which sets durationMinutes when accepted.
+  aiDurationMinutes Int?
   // On-hold marker: what this task is waiting on before it can proceed (null = not blocked),
   // and the date the block is expected to clear (UTC-midnight calendar-date encoding). While
   // blocked, the task is excluded from My Day auto-scheduling/look-ahead; the AI planner is
@@ -310,6 +314,9 @@ model AiSuggestion {
   // The calendar event that prompted this (CalendarEvent.id + denormalized title), if any.
   eventId       String?
   eventTitle    String?
+  // The project the idea belongs to (validated against active projects), carried onto the task
+  // created on accept. Loose ref — a deleted project just leaves the accepted task unfiled.
+  projectId     String?
   // Proposed due date for the created task — UTC-midnight calendar date encoding.
   suggestedDate DateTime?
   status        SuggestionStatus @default(PENDING)

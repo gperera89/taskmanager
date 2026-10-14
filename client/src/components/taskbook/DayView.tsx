@@ -10,7 +10,7 @@ import type { DayDetailVM, MyDayVM } from "./types";
 // scheduled that day into one editable 5am–9pm timeline plus tray and look-ahead sections.
 export default function DayView({ detail, myDay }: { detail: DayDetailVM; myDay: MyDayVM }) {
   const { actions } = useTaskbook();
-  // Today always renders the full planner (the suggestions section and template anchors live
+  // Today always renders the full planner (the day template's anchors live
   // there); other days collapse to the empty note when truly blank.
   const isEmpty =
     !myDay.isToday &&

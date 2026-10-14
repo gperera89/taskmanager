@@ -243,6 +243,19 @@ export async function updateTaskDuration(id: string, formData: FormData) {
   await updateTask(id, { durationMinutes: parseDurationInput(String(formData.get("duration") ?? "")) });
 }
 
+// Accepting a suggested time: due date, clock time and duration in one write.
+export async function scheduleTask(id: string, formData: FormData) {
+  await requireSession();
+  const dueDate = String(formData.get("dueDate") ?? "").trim();
+  const dueTime = String(formData.get("dueTime") ?? "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDate) || !/^\d{2}:\d{2}$/.test(dueTime)) return;
+  await updateTask(id, {
+    dueDate,
+    dueTime,
+    durationMinutes: parseDurationInput(String(formData.get("duration") ?? "")),
+  });
+}
+
 // Rewrites the manual order of a whole group (due bucket / project section) in one call —
 // the ids arrive in their new display order.
 export async function reorderTaskGroup(formData: FormData) {
@@ -621,11 +634,11 @@ export async function updateTimeZone(timeZone: string) {
   await updateTimeZoneApi(timeZone);
 }
 
-// --- AI planner suggestions + notes (My Day) ---
+// --- AI planner suggestions + notes (Tasks view) ---
 
-// Regenerate suggestions on demand (the ↻ button). Called directly (not via the outbox) — it
-// needs a connection anyway, and the caller refreshes with the result.
-export async function refreshSuggestions(): Promise<{ created: number; skipped: number }> {
+// Top the suggestions back up to the day's five (the ↻ button). Called directly (not via the
+// outbox) — it needs a connection anyway, and the caller syncs afterwards.
+export async function refreshSuggestions(): Promise<{ created: number; skipped: number; durations: number }> {
   await requireSession();
   const { generateSuggestions } = await import("@/lib/suggestions");
   return generateSuggestions();

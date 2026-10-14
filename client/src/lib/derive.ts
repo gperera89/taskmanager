@@ -775,7 +775,7 @@ function parseHHMM(value: string | null | undefined): number | null {
   return minutes >= 0 && minutes < 24 * 60 ? minutes : null;
 }
 
-function formatClock(minutes: number): string {
+export function formatClock(minutes: number): string {
   const h24 = Math.floor(minutes / 60) % 24;
   const mm = minutes % 60;
   const h12 = h24 % 12 || 12;

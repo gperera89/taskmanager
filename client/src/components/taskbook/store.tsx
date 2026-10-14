@@ -205,6 +205,8 @@ export type TaskbookActions = {
   setTaskSection: (id: string, section: string) => void;
   setTaskReminderLead: (id: string, minutes: number | null) => void;
   setTaskDuration: (id: string, minutes: number | null) => void;
+  // Accept a suggested time: move the task to `dueDate` at `dueTime` with a duration.
+  scheduleTask: (id: string, dueDate: string, dueTime: string, durationMinutes: number) => void;
   setTaskBlock: (id: string, reason: string, untilDate: string) => void; // empty reason clears
   reorderGroup: (orderedIds: string[]) => void;
   // Projects
@@ -457,6 +459,7 @@ const REGISTRY: Record<string, RegistryEntry> = {
   setTaskSection: { fn: serverActions.updateTaskSection },
   setTaskReminderLead: { fn: serverActions.updateTaskReminderLead },
   setTaskDuration: { fn: serverActions.updateTaskDuration },
+  scheduleTask: { fn: serverActions.scheduleTask },
   setTaskBlock: { fn: serverActions.updateTaskBlock },
   reorderGroup: { fn: serverActions.reorderTaskGroup },
   addProject: {
@@ -1246,6 +1249,7 @@ export function StoreProvider({
           sortOrder: null,
           reminderLeadMinutes: input.reminderLeadMinutes ?? null,
           durationMinutes: input.durationMinutes ?? null,
+          aiDurationMinutes: null,
           blockedReason: null,
           blockedUntil: null,
           noteId: null,
@@ -1396,6 +1400,25 @@ export function StoreProvider({
         mutate(
           (r) => ({ ...r, tasks: mapTask(r.tasks, id, (t) => ({ ...t, durationMinutes: minutes })) }),
           "setTaskDuration",
+          [id, fd]
+        );
+      },
+      scheduleTask: (id, dueDate, dueTime, durationMinutes) => {
+        const fd = new FormData();
+        fd.set("dueDate", dueDate);
+        fd.set("dueTime", dueTime);
+        fd.set("duration", String(durationMinutes));
+        mutate(
+          (r) => ({
+            ...r,
+            tasks: mapTask(r.tasks, id, (t) => ({
+              ...t,
+              dueDate: combineDueDateTime(dueDate, dueTime),
+              durationMinutes,
+              notifiedAt: null,
+            })),
+          }),
+          "scheduleTask",
           [id, fd]
         );
       },
@@ -1623,6 +1646,7 @@ export function StoreProvider({
             sortOrder: null,
             reminderLeadMinutes: null,
             durationMinutes: null,
+            aiDurationMinutes: null,
             blockedReason: null,
             blockedUntil: null,
             pausedUntil: null,
@@ -2126,12 +2150,13 @@ export function StoreProvider({
           completedAt: null,
           createdAt: new Date(),
           notifiedAt: null,
-          projectId: null,
+          projectId: suggestion.projectId && rawRef.current.projects.some((p) => p.id === suggestion.projectId) ? suggestion.projectId : null,
           parentId: null,
           section: null,
           sortOrder: null,
           reminderLeadMinutes: null,
           durationMinutes: null,
+          aiDurationMinutes: null,
           blockedReason: null,
           blockedUntil: null,
           noteId: null,

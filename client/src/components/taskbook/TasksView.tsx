@@ -20,6 +20,8 @@ import { AnimatedList, leavingStyle, useCompletionHold } from "./motion";
 import { DateTimePickerPanel, PickerPopover } from "./DateTimePicker";
 import RepeatFields from "./RepeatFields";
 import SearchBar from "./SearchBar";
+import SuggestionStrip from "./SuggestionStrip";
+import type { TimeSuggestion } from "@/lib/timeSuggestions";
 import type { CategoryOption, ProjectOption, TaskGroupVM, TaskItemVM } from "./types";
 
 // Drag-to-reorder passes the dragged task id between rows of the same group via this shared
@@ -33,6 +35,7 @@ export default function TasksView({
   onQueryChange,
   categoryOptions,
   projectOptions,
+  timeSuggestions,
 }: {
   groups: TaskGroupVM[];
   remainingToday: number;
@@ -40,6 +43,7 @@ export default function TasksView({
   onQueryChange: (v: string) => void;
   categoryOptions: CategoryOption[];
   projectOptions: ProjectOption[];
+  timeSuggestions: Map<string, TimeSuggestion>; // proposed slots today, keyed by task id
 }) {
   const [showCompleted, setShowCompleted] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
@@ -61,6 +65,8 @@ export default function TasksView({
       <div className="my-5 mt-5 mb-1 h-px max-w-[680px] bg-(--rule)" />
 
       <SearchBar query={query} onQueryChange={onQueryChange} placeholder="Search tasks…" />
+
+      {!q && <SuggestionStrip />}
 
       {/* One list, not one per group: the group headings carry flip ids alongside the rows, so a
           task leaving "Today" slides the headings below it up rather than snapping them. */}
@@ -101,6 +107,7 @@ export default function TasksView({
                   onCompleting={hold}
                   leaving={isLeaving(task.id)}
                   reorderIds={group.tasks.map((t) => t.id)}
+                  timeSuggestion={timeSuggestions.get(task.id)}
                 />
               ))}
             </Fragment>
@@ -154,6 +161,7 @@ export function TaskRow({
   leaving = false,
   reorderIds,
   sectionOptions,
+  timeSuggestion,
 }: {
   task: TaskItemVM;
   categoryOptions: CategoryOption[];
@@ -166,6 +174,8 @@ export function TaskRow({
   reorderIds?: string[];
   // Existing section names in the row's project — shows the section picker chip (project cards).
   sectionOptions?: string[];
+  // A proposed slot today for an overdue / untimed task (Tasks view only) — one tap accepts it.
+  timeSuggestion?: TimeSuggestion;
 }) {
   const { actions } = useTaskbook();
   const hasSubtasks = task.subtasksTotal > 0;
@@ -549,6 +559,20 @@ export function TaskRow({
               </div>
             )}
           </div>
+
+          {timeSuggestion && !task.isCompleted && (
+            <button
+              type="button"
+              onClick={() =>
+                actions.scheduleTask(task.id, timeSuggestion.dueDate, timeSuggestion.dueTime, timeSuggestion.durationMinutes)
+              }
+              title="Suggested time today — tap to set it"
+              className={chipSelectClass}
+              style={{ color: "var(--accent-text)", background: "transparent", border: "1px dashed var(--accent-text)" }}
+            >
+              ✓ {timeSuggestion.label}
+            </button>
+          )}
 
           {/* On-hold ("waiting on") only applies to tasks inside a project — standalone tasks
               just move their due date instead. */}
