@@ -5,6 +5,7 @@ import {
   createRoutine,
   createTask,
   createVoiceCaptureNotice,
+  getAppSettings,
   getCategories,
   getProjects,
 } from "@/lib/api";
@@ -30,12 +31,14 @@ export async function POST(request: Request) {
   try {
     // Fetched before transcribing, not after: the project/category names are fed to the transcriber
     // as a vocabulary hint, since the parser can only match them when they come back spelled exactly.
-    const [categories, projects] = await Promise.all([getCategories(), getProjects()]);
+    // Settings ride along so the parser's "today" is the configured zone's, not the server's (UTC).
+    const [categories, projects, settings] = await Promise.all([getCategories(), getProjects(), getAppSettings()]);
     const transcript = await transcribeAudio(audio, [...categories.map((c) => c.name), ...projects.map((p) => p.name)]);
     const parsed = await parseCaptureFromTranscript(
       transcript,
       categories.map((c) => c.name),
-      projects.map((p) => ({ id: p.id, name: p.name }))
+      projects.map((p) => ({ id: p.id, name: p.name })),
+      settings.timeZone
     );
 
     let entityId: string;

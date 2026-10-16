@@ -210,6 +210,13 @@ function pauseBand(habit: HabitSchedule): { startKey: string; endKey: string } |
   return a <= b ? { startKey: a, endKey: b } : { startKey: b, endKey: a };
 }
 
+// Whether `dateKey` (YYYY-MM-DD) falls inside the habit's planned-break band. Exported for
+// derive.ts's My Day builder, which must skip paused habits the way it skips paused routines.
+export function habitPausedOn(habit: HabitSchedule, dateKey: string): boolean {
+  const band = pauseBand(habit);
+  return band != null && dateKey >= band.startKey && dateKey <= band.endKey;
+}
+
 export type HabitStatus = {
   // Progress within the current period: how many completions vs the target.
   progressDone: number;
@@ -264,7 +271,8 @@ export function habitStatus(habit: HabitSchedule, completionKeys: Set<string>, n
       streak,
       isDoneToday,
       isPeriodMet,
-      atRisk: !todayPaused && !isPeriodMet && target - done > daysLeft,
+      // "+ 1" counts today itself as an available day, matching the weekly at-risk rule below.
+      atRisk: !todayPaused && !isPeriodMet && target - done > daysLeft + 1,
       lapsed: !todayPaused && !isPeriodMet && done === 0,
     };
   }

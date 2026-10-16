@@ -19,7 +19,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { AiNote, CapturedKind, Note, Countdown, Task, DayPlanBlock, HabitCompletion, HabitScheduleType, Routine, RoutineFrequency, RoutineMonthlyMode } from "@prisma/client";
 import * as serverActions from "@/app/actions";
 import { deriveEntities, type RawState, type RawTask } from "@/lib/derive";
-import { formatLongDate } from "@/lib/taskbookDates";
+import { formatLongDate, zonedCalendarDate, zonedNow } from "@/lib/taskbookDates";
 import {
   combineDueDateTime,
   habitDateKey,
@@ -354,13 +354,24 @@ function repeatRuleOf(t: RawTask): TaskRepeatRule | null {
 
 // Completing (isCompleted = current state false) or un-completing a task — a repeating task rolls
 // its due date forward instead of completing, mirroring api.ts's toggleTaskCompletion.
-function toggledTask<T extends RawTask>(t: T, isCompleted: boolean): T {
+function toggledTask<T extends RawTask>(t: T, isCompleted: boolean, timeZone: string): T {
   if (isCompleted) return { ...t, isCompleted: false, completedAt: null };
   const rule = repeatRuleOf(t);
   if (rule && t.dueDate) {
-    const next = nextOccurrence(new Date(t.dueDate), rule);
-    // End the series once the next occurrence would land past the repeat-until date.
-    if (t.repeatUntil && utcCalendarDay(next) > utcCalendarDay(new Date(t.repeatUntil))) {
+    // Mirror toggleTaskCompletion in api.ts: roll forward until the occurrence is
+    // today or later, so completing an overdue repeating task settles it.
+    const untilDay = t.repeatUntil ? utcCalendarDay(new Date(t.repeatUntil)) : null;
+    const pastEnd = () => untilDay !== null && utcCalendarDay(next) > untilDay;
+    let next = nextOccurrence(new Date(t.dueDate), rule);
+    if (!pastEnd()) {
+      const todayDay = utcCalendarDay(zonedNow(Date.now(), timeZone));
+      let guard = 0;
+      while (utcCalendarDay(next) < todayDay && guard++ < 500) {
+        next = nextOccurrence(next, rule);
+        if (pastEnd()) break;
+      }
+    }
+    if (pastEnd()) {
       return { ...t, isCompleted: true, completedAt: new Date() };
     }
     return { ...t, dueDate: next, isCompleted: false, notifiedAt: null };
@@ -667,11 +678,12 @@ export function StoreProvider({
   // matches the HTML, then re-checked on every minute tick.
   const [todayLabel, setTodayLabel] = useState(serverData.todayLabel);
   useEffect(() => {
-    const label = formatLongDate(new Date());
+    // The configured zone, not the device's: every other "today" in the app reads AppSettings.
+    const label = formatLongDate(zonedCalendarDate(new Date(), raw.timeZone));
     // The updater returns `prev` unchanged on every tick but one a day, so this is a no-op render.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setTodayLabel((prev) => (prev === label ? prev : label));
-  }, [liveNowMs, serverData.todayLabel]);
+  }, [liveNowMs, serverData.todayLabel, raw.timeZone]);
 
   // Defaults to "all" on both server and first client render (localStorage isn't available
   // during SSR) to avoid a hydration mismatch, then syncs to the stored value right after mount.
@@ -1302,11 +1314,11 @@ export function StoreProvider({
         );
       },
       toggleTask: (id, isCompleted) => {
-        mutate((r) => ({ ...r, tasks: mapTask(r.tasks, id, (t) => toggledTask(t, isCompleted)) }), "toggleTask", [id, isCompleted]);
+        mutate((r) => ({ ...r, tasks: mapTask(r.tasks, id, (t) => toggledTask(t, isCompleted, r.timeZone)) }), "toggleTask", [id, isCompleted]);
         // A task from a note ticks its checkbox line too (the server does the same on its side).
         const row = rawRef.current.tasks.find((t) => t.id === id);
         if (row?.noteId && row.noteBlockId) {
-          const done = toggledTask(row, isCompleted).isCompleted;
+          const done = toggledTask(row, isCompleted, rawRef.current.timeZone).isCompleted;
           editNoteBody(row.noteId, (body) => setBlockChecked(body, row.noteBlockId!, done));
         }
       },
@@ -1692,7 +1704,7 @@ export function StoreProvider({
             subtasks: [],
             ...NO_REPEAT,
           };
-          return c.checked ? toggledTask(row, false) : row;
+          return c.checked ? toggledTask(row, false, rawRef.current.timeZone) : row;
         });
 
         // Ticks from the note. A repeating task rolls forward instead of completing, so its box
@@ -1701,7 +1713,7 @@ export function StoreProvider({
         for (const t of plan.toggles) {
           const row = linked.find((l) => l.id === t.taskId);
           if (!row) continue;
-          const after = toggledTask(row, t.isCompleted);
+          const after = toggledTask(row, t.isCompleted, rawRef.current.timeZone);
           toggled.set(row.id, after);
           if (after.isCompleted === t.isCompleted && row.noteBlockId) body = setBlockChecked(body, row.noteBlockId, after.isCompleted);
         }

@@ -36,7 +36,14 @@ function nthWeekdayOfMonthUTC(year: number, month: number, weekday: number, ordi
   }
   const firstDayWeekday = new Date(Date.UTC(year, month, 1)).getUTCDay();
   const firstMatch = 1 + ((weekday - firstDayWeekday + 7) % 7);
-  return new Date(Date.UTC(year, month, firstMatch + (ordinal - 1) * 7, hours, minutes));
+  const candidate = new Date(Date.UTC(year, month, firstMatch + (ordinal - 1) * 7, hours, minutes));
+  // "Fifth" in a month that only has four of that weekday would otherwise spill into the next
+  // month (Date.UTC rolls the overflow forward) — fall back to the last actual occurrence,
+  // matching what nthWeekdayMatches does for routines.
+  if (candidate.getUTCMonth() !== month) {
+    return nthWeekdayOfMonthUTC(year, month, weekday, -1, hours, minutes);
+  }
+  return candidate;
 }
 
 // The next occurrence of a repeating task's due date, given it was just completed at `due`.
@@ -72,11 +79,14 @@ export function nextOccurrence(due: Date, rule: TaskRepeatRule): Date {
 // (ordinal -1 means "the last one").
 function nthWeekdayMatches(date: Date, weekday: number, ordinal: number): boolean {
   if (date.getUTCDay() !== weekday) return false;
+  const daysLeftInMonth = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate() - date.getUTCDate();
   if (ordinal === -1) {
-    const daysLeftInMonth = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate() - date.getUTCDate();
     return daysLeftInMonth < 7;
   }
-  return Math.ceil(date.getUTCDate() / 7) === ordinal;
+  if (Math.ceil(date.getUTCDate() / 7) === ordinal) return true;
+  // "Fifth" degrades to "last" in months that only have four of this weekday — otherwise such a
+  // routine would never fire in those months (and tasks would disagree, see nthWeekdayOfMonthUTC).
+  return ordinal === 5 && daysLeftInMonth < 7;
 }
 
 // Whether a routine's recurrence pattern lands on `at`'s calendar day. `at` should be a

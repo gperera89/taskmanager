@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import type { RawState } from "@/lib/derive";
 import { nextOccurrence, resolveTaskRepeat, type TaskRepeatRule } from "@/lib/taskRecurrence";
-import { DEFAULT_TIME_ZONE, SUPPORTED_TIME_ZONES } from "@/lib/taskbookDates";
+import { DEFAULT_TIME_ZONE, SUPPORTED_TIME_ZONES, zonedNow } from "@/lib/taskbookDates";
 import {
   assignBlockIds,
   defaultNoteTaskCategory,
@@ -282,10 +282,24 @@ async function toggleTaskCompletionRow(id: string, isCompleted: boolean) {
         monthlyOrdinal: task.repeatMonthlyOrdinal,
         monthlyWeekday: task.repeatMonthlyWeekday,
       };
-      const next = nextOccurrence(task.dueDate, rule);
+      let next = nextOccurrence(task.dueDate, rule);
       // End the series once the next occurrence would fall past the chosen end date — the
       // occurrence just completed was the last one, so mark it done instead of rolling forward.
-      if (task.repeatUntil && utcCalendarDay(next) > utcCalendarDay(task.repeatUntil)) {
+      const untilDay = task.repeatUntil ? utcCalendarDay(task.repeatUntil) : null;
+      const pastEnd = () => untilDay !== null && utcCalendarDay(next) > untilDay;
+      // Completing an overdue task should settle it, not re-due it in the past: keep rolling
+      // until the occurrence lands today or later (nextOccurrence always advances, so this
+      // terminates; the guard is just belt-and-braces).
+      if (!pastEnd()) {
+        const { timeZone } = await getAppSettings();
+        const todayDay = utcCalendarDay(zonedNow(Date.now(), timeZone));
+        let guard = 0;
+        while (utcCalendarDay(next) < todayDay && guard++ < 500) {
+          next = nextOccurrence(next, rule);
+          if (pastEnd()) break;
+        }
+      }
+      if (pastEnd()) {
         return prisma.task.update({ where: { id }, data: { isCompleted: true, completedAt: new Date() } });
       }
       return prisma.task.update({ where: { id }, data: { dueDate: next, isCompleted: false, notifiedAt: null } });

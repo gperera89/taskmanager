@@ -1,5 +1,5 @@
 import { getPageSnapshot, snapshotToRaw } from "@/lib/api";
-import { formatLongDate } from "@/lib/taskbookDates";
+import { formatLongDate, zonedCalendarDate } from "@/lib/taskbookDates";
 import TaskbookApp from "@/components/taskbook/TaskbookApp";
 import { StoreProvider, type ServerCalendarData } from "@/components/taskbook/store";
 
@@ -30,7 +30,9 @@ export default async function Home() {
   const raw = snapshotToRaw(snapshot);
 
   const serverData: ServerCalendarData = {
-    todayLabel: formatLongDate(now),
+    // The configured zone, not the server's (UTC on Vercel): before 8am China time a server-local
+    // date is still yesterday. The client store re-checks this on every minute tick anyway.
+    todayLabel: formatLongDate(zonedCalendarDate(now, snapshot.timeZone)),
     // Notification heartbeat — the UI warns when the cron scheduler has stopped calling in.
     lastCronAtMs: snapshot.lastCronAt ? snapshot.lastCronAt.getTime() : null,
   };

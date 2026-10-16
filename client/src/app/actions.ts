@@ -650,7 +650,9 @@ export async function acceptSuggestion(id: string, formData: FormData): Promise<
   const category = String(formData.get("category") ?? "").trim();
   const dueDate = String(formData.get("dueDate") ?? "").trim();
   if (!category) return;
-  const task = await acceptSuggestionApi(id, { category, dueDate: dueDate || null });
+  // `undefined` (not null) when no date was picked, so acceptSuggestionApi can fall back to the
+  // suggestion's own suggestedDate — null would read as "explicitly no date" and skip it.
+  const task = await acceptSuggestionApi(id, { category, dueDate: dueDate || undefined });
   return task.id;
 }
 

@@ -1,4 +1,7 @@
 import "server-only";
+import { getAppSettings } from "@/lib/api";
+import { habitDateKey } from "@/lib/shared";
+import { zonedNow } from "@/lib/taskbookDates";
 import {
   createTaskTool,
   listCalendarEvents,
@@ -159,10 +162,12 @@ function requireApiKey(): string {
   return key;
 }
 
-function systemPrompt(): string {
-  const now = new Date();
-  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-  return `You are the assistant embedded in the user's task manager app. Today is ${today} (${WEEKDAY_NAMES[now.getDay()]}).
+function systemPrompt(timeZone: string): string {
+  // The configured zone, not the server's (UTC) — otherwise "today" is a day behind all morning.
+  const nowMs = Date.now();
+  const today = habitDateKey(new Date(nowMs), timeZone);
+  const weekday = WEEKDAY_NAMES[zonedNow(nowMs, timeZone).getUTCDay()];
+  return `You are the assistant embedded in the user's task manager app. Today is ${today} (${weekday}).
 Use the list_tasks/list_projects/list_categories tools to look up real data before answering questions or before creating/editing a task, rather than guessing — never invent task ids, project ids, or category names.
 When scheduling or rescheduling anything to a specific day or time, call list_calendar_events for that date range first and work around the events already there — the calendar is read-only, so never claim you have moved or created a calendar event.
 When the user asks a question about their tasks, call list_tasks with suitable filters and answer concisely in prose, don't dump raw JSON.
@@ -196,8 +201,9 @@ export type AssistantChatResult = { reply: string; mutated: boolean };
 // tool calls the model makes, feeds the results back, and repeats until it replies with plain
 // text (or the round cap is hit, in which case we surface whatever text it has so far).
 export async function runAssistantChat(history: ChatMessage[]): Promise<AssistantChatResult> {
+  const { timeZone } = await getAppSettings();
   const messages: OpenAIMessage[] = [
-    { role: "system", content: systemPrompt() },
+    { role: "system", content: systemPrompt(timeZone) },
     ...history.map((m) => ({ role: m.role, content: m.content })),
   ];
   let mutated = false;

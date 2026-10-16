@@ -2,6 +2,7 @@ import {
   createProject,
   createTask,
   createVoiceCaptureNotice,
+  getAppSettings,
   getCategories,
 } from "@/lib/api";
 import { parseEmailToItems, type EmailTask } from "@/lib/email";
@@ -62,11 +63,12 @@ async function handle(request: Request, ctx: { params: Promise<{ secret: string 
   }
 
   try {
-    const categories = await getCategories();
+    // Settings ride along so the parser's "today" is the configured zone's, not the server's (UTC).
+    const [categories, settings] = await Promise.all([getCategories(), getAppSettings()]);
     // Sender decides the context: mail from the work (YCIS) domain is work, everything else
     // (personal Gmail, etc.) is home. This biases both the AI's category choice and the fallback.
     const context: "work" | "home" = from.endsWith("@ycis.com") ? "work" : "home";
-    const parsed = await parseEmailToItems(subject, text, categories, context);
+    const parsed = await parseEmailToItems(subject, text, categories, context, settings.timeZone);
 
     // Task requires a non-empty category; when the AI didn't assign one, default to a category
     // matching the sender's context — first by scope, then by the literal "Work"/"Home" name.

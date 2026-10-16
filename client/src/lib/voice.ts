@@ -1,5 +1,7 @@
 import "server-only";
 import type { HabitScheduleType, RoutineFrequency, RoutineMonthlyMode } from "@prisma/client";
+import { habitDateKey } from "@/lib/shared";
+import { zonedNow } from "@/lib/taskbookDates";
 
 const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const ROUTINE_FREQUENCIES: RoutineFrequency[] = ["DAILY", "WEEKLY", "MONTHLY"];
@@ -43,10 +45,11 @@ function requireApiKey(): string {
   return key;
 }
 
-// Matches how the rest of the app defines "today" (local calendar fields, see page.tsx) so a
-// voice capture's date math lines up with the day the user is actually looking at.
-function localDateString(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+// "Today" in the app's configured timezone (the server itself runs UTC, so local getters would
+// be a day behind for half the morning). The caller reads AppSettings and passes it in.
+function zonedToday(timeZone: string): { today: string; weekday: string } {
+  const nowMs = Date.now();
+  return { today: habitDateKey(new Date(nowMs), timeZone), weekday: WEEKDAY_NAMES[zonedNow(nowMs, timeZone).getUTCDay()] };
 }
 
 // Normalizes an "H:MM"/"HH:MM" clock time to zero-padded "HH:MM", or null if malformed.
@@ -136,14 +139,14 @@ function fallbackTitle(raw: unknown, transcript: string): string {
 export async function parseCaptureFromTranscript(
   transcript: string,
   categories: string[],
-  projects: { id: string; name: string }[]
+  projects: { id: string; name: string }[],
+  timeZone: string
 ): Promise<ParsedCapture> {
   const apiKey = requireApiKey();
-  const now = new Date();
-  const today = localDateString(now);
+  const { today, weekday } = zonedToday(timeZone);
 
   const systemPrompt = `You turn a spoken voice memo into a structured item for a task manager app.
-Today is ${today} (${WEEKDAY_NAMES[now.getDay()]}).
+Today is ${today} (${weekday}).
 Existing categories: ${categories.join(", ") || "(none)"}.
 Existing projects: ${projects.map((p) => `${p.name} (id: ${p.id})`).join(", ") || "(none)"}.
 

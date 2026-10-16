@@ -8,7 +8,7 @@
 
 import { SCHOOL_HOLIDAYS } from "@/lib/schoolHolidays";
 import type { Note, Task, Project, Habit, HabitCompletion, Routine, Category, VoiceCapture, DayPlanBlock, AiSuggestion, AiNote, Countdown } from "@prisma/client";
-import { countdownYears, formatDuration, habitDateKey, habitStatus, nextCountdownOccurrenceMs, taskOrderCompare, isRoutineTickedNow, routineDueAtMs, zonedFaceMs, MS_PER_DAY, ROUTINE_SOON_WINDOW_MS } from "@/lib/shared";
+import { countdownYears, formatDuration, habitDateKey, habitPausedOn, habitStatus, nextCountdownOccurrenceMs, taskOrderCompare, isRoutineTickedNow, routineDueAtMs, zonedFaceMs, MS_PER_DAY, ROUTINE_SOON_WINDOW_MS } from "@/lib/shared";
 export { combineDueDateTime, isRoutineTickedNow } from "@/lib/shared";
 import {
   bucketForDue,
@@ -289,9 +289,13 @@ function scheduleLabel(r: Routine): string {
 
 export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): DerivedEntities {
   const now = new Date(nowMs);
-  const year = now.getFullYear();
-  const month0 = now.getMonth();
-  const todayDay = now.getDate();
+  // "Today" for task bucketing/labels is the configured zone's calendar day — matching how
+  // routines, habits and countdowns below already compute it — not the device timezone, which
+  // differs exactly when the user is travelling (the whole point of the timezone setting).
+  const bucketNow = zonedCalendarDate(now, raw.timeZone);
+  const year = bucketNow.getFullYear();
+  const month0 = bucketNow.getMonth();
+  const todayDay = bucketNow.getDate();
 
   // Tasks — grouped by due bucket. Projects/routines/habits aren't categorized work/home,
   // so the mode filter only narrows the task list (and, below, the calendar).
@@ -315,13 +319,13 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
   const grouped = new Map<DueBucket, { vm: TaskItemVM; dueMs: number | null; createdMs: number }[]>();
   for (const t of raw.tasks) {
     if (!taskMatchesMode(t.category, mode, scopeByName)) continue;
-    const vm = toTaskVM(t, projectNameById, now, notesByTask);
+    const vm = toTaskVM(t, projectNameById, bucketNow, notesByTask);
     // While a break is active the task is bucketed/sorted by its resume date, so it drops out
     // of Overdue/Today and reappears as due when the break ends (like a paused routine skips).
     const realDue = t.dueDate ? new Date(t.dueDate) : null;
     const pausedUntil = t.pausedUntil ? new Date(t.pausedUntil) : null;
-    const effectiveDue = pausedUntil && daysUntil(pausedUntil, now) > 0 ? pausedUntil : realDue;
-    const b = bucketForDue(effectiveDue, now);
+    const effectiveDue = pausedUntil && daysUntil(pausedUntil, bucketNow) > 0 ? pausedUntil : realDue;
+    const b = bucketForDue(effectiveDue, bucketNow);
     if (!grouped.has(b)) grouped.set(b, []);
     grouped.get(b)!.push({ vm, dueMs: effectiveDue ? effectiveDue.getTime() : null, createdMs: new Date(t.createdAt).getTime() });
   }
@@ -336,7 +340,7 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
   }
   const taskGroups: TaskGroupVM[] = BUCKET_ORDER.filter((b) => grouped.has(b)).map((b) => ({
     key: b,
-    label: bucketLabel(b, now, year, month0, todayDay),
+    label: bucketLabel(b, bucketNow, year, month0, todayDay),
     tasks: grouped.get(b)!.map((e) => e.vm),
   }));
   const tasksRemainingToday = (grouped.get("today") ?? []).filter((e) => !e.vm.isCompleted).length;
@@ -372,7 +376,7 @@ export function deriveEntities(raw: RawState, nowMs: number, mode: Mode): Derive
     const sorted = [...items].sort(
       (a, b) => Number(a.isCompleted) - Number(b.isCompleted) || taskOrderCompare(orderKey(a), orderKey(b))
     );
-    const tasks = sorted.map((t) => toTaskVM(t, projectNameById, now, notesByTask));
+    const tasks = sorted.map((t) => toTaskVM(t, projectNameById, bucketNow, notesByTask));
     // Group by section, preserving first-appearance order; unsectioned tasks lead. With
     // sections toggled off the card renders one flat headingless group regardless of any
     // stray section values (the disable path clears them server-side).
@@ -706,6 +710,9 @@ export function deriveCalendarView(
 ): CalendarViewVM {
   const now = new Date(nowMs);
   const today = zonedYMD(now, raw.timeZone);
+  // Local-midnight Date of the configured zone's today, for the day-diff helpers (daysUntil
+  // reads local getters) — keeps tasks/projects on the same "today" as events (zonedDaysUntil).
+  const bucketNow = new Date(today.year, today.month0, today.day);
   const dismissed = new Set(raw.dismissedEventIds);
   const scopeByName = categoryScopeMap(raw.categories);
   const visibleEvents = calendarEvents.filter((e) => eventMatchesMode(e.source, mode));
@@ -779,14 +786,14 @@ export function deriveCalendarView(
   const upcomingSources: UpcomingSource[] = [];
   for (const t of raw.tasks) {
     if (t.isCompleted || !t.dueDate || !taskMatchesMode(t.category, mode, scopeByName)) continue;
-    const diff = daysUntil(new Date(t.dueDate), now);
+    const diff = daysUntil(new Date(t.dueDate), bucketNow);
     if (diff < 0) continue;
     const d = calendarDateFromDue(new Date(t.dueDate));
     upcomingSources.push({ sortKey: d.getTime(), item: { key: `t-${t.id}`, a: relativeUpcomingLabel(diff, d), b: t.title, c: t.category, hasC: true } });
   }
   for (const p of raw.projects) {
     if (p.isCompleted || !p.dueDate) continue;
-    const diff = daysUntil(new Date(p.dueDate), now);
+    const diff = daysUntil(new Date(p.dueDate), bucketNow);
     if (diff < 0) continue;
     const d = calendarDateFromDue(new Date(p.dueDate));
     upcomingSources.push({ sortKey: d.getTime(), item: { key: `p-${p.id}`, a: relativeUpcomingLabel(diff, d), b: p.name, c: "Project", hasC: true } });
@@ -1189,6 +1196,9 @@ export function deriveMyDay(
   // --- Habits scheduled on the viewed day ---
   for (const h of raw.habits) {
     if (covered.has(`HABIT:${h.id}`)) continue;
+    // On a planned break the habit sits the day out entirely, like paused routines above —
+    // habitStatus already treats band days as neither hit nor miss.
+    if (habitPausedOn(h, dateKey)) continue;
     const doneThatDay = completionKeysByHabit.get(h.id)?.has(dateKey) ?? false;
     if (h.scheduleType === "WEEKLY_DAYS") {
       if (!h.daysOfWeek.includes(weekday)) continue;

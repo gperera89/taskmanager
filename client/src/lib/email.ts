@@ -1,5 +1,8 @@
 import "server-only";
 
+import { habitDateKey } from "@/lib/shared";
+import { zonedNow } from "@/lib/taskbookDates";
+
 const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
 // A single actionable task extracted from an email. Mirrors the shape createTask() accepts,
@@ -29,9 +32,11 @@ function requireApiKey(): string {
   return key;
 }
 
-// Matches how the rest of the app defines "today" (local calendar fields, see page.tsx).
-function localDateString(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+// "Today" in the app's configured timezone (the server itself runs UTC, so local getters would
+// be a day behind for half the morning). The caller reads AppSettings and passes it in.
+function zonedToday(timeZone: string): { today: string; weekday: string } {
+  const nowMs = Date.now();
+  return { today: habitDateKey(new Date(nowMs), timeZone), weekday: WEEKDAY_NAMES[zonedNow(nowMs, timeZone).getUTCDay()] };
 }
 
 function strOrNull(v: unknown): string | null {
@@ -96,11 +101,11 @@ export async function parseEmailToItems(
   subject: string,
   body: string,
   categories: { name: string; scope: string }[],
-  context: EmailContext
+  context: EmailContext,
+  timeZone: string
 ): Promise<ParsedEmail> {
   const apiKey = requireApiKey();
-  const now = new Date();
-  const today = localDateString(now);
+  const { today, weekday } = zonedToday(timeZone);
   const trimmedBody = body.slice(0, MAX_BODY_CHARS);
   const { mode, cleanSubject } = detectMode(subject);
   const fallbackTitle = strOrNull(cleanSubject) ?? "Untitled";
@@ -117,7 +122,7 @@ export async function parseEmailToItems(
       : "Produce one or more independent tasks. Do NOT create a project.";
 
   const systemPrompt = `You turn an email into structured work for a personal task manager.
-Today is ${today} (${WEEKDAY_NAMES[now.getDay()]}).
+Today is ${today} (${weekday}).
 This email arrived at the user's ${contextLabel} address, so treat it as ${contextLabel} context.
 Existing categories: ${categoryNames.join(", ") || "(none)"}.
 Prefer one of these ${contextLabel}-appropriate categories: ${preferred.join(", ") || "(none)"}.
