@@ -17,7 +17,7 @@ import {
   wakeDueSnoozedSuggestions,
 } from "@/lib/api";
 import { getCalendarEvents } from "@/lib/calendar";
-import { anthropicJson } from "@/lib/anthropic";
+import { openaiJson } from "@/lib/openaiJson";
 import { zonedYMD } from "@/lib/taskbookDates";
 import { pad2 } from "@/lib/taskbookDates";
 
@@ -33,7 +33,7 @@ const DAILY_SUGGESTIONS = 5;
 const HOW_FAR_AHEAD_DAYS = 14;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
-// What the model must return — enforced via structured outputs (see lib/anthropic.ts).
+// What the model must return — enforced via structured outputs (see lib/openaiJson.ts).
 const SUGGESTIONS_SCHEMA = {
   type: "object",
   properties: {
@@ -79,7 +79,7 @@ function dateKeyOf(ymd: { year: number; month0: number; day: number }): string {
 }
 
 // Generate the day's AI suggestions: read the next two weeks of calendar events, the user's active
-// projects, blocked tasks, notes and feedback history, and ask Claude for up to DAILY_SUGGESTIONS
+// projects, blocked tasks, notes and feedback history, and ask the model for up to DAILY_SUGGESTIONS
 // task ideas. The same call estimates a duration for every overdue/due-today task that has none
 // (stored as Task.aiDurationMinutes for the Tasks view's suggested-time chip).
 //
@@ -189,7 +189,7 @@ export async function generateSuggestions({ fresh = false }: { fresh?: boolean }
     exampleLines,
   ].join("\n");
 
-  const raw = await anthropicJson({ system, user, schema: SUGGESTIONS_SCHEMA as unknown as Record<string, unknown> });
+  const raw = await openaiJson({ system, user, schema: SUGGESTIONS_SCHEMA as unknown as Record<string, unknown> });
 
   // Duration estimates: only for ids we asked about, clamped and snapped to 5 minutes.
   const askedIds = new Set(context.needsDuration.map((t) => t.id));
