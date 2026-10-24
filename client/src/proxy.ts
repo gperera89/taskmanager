@@ -18,6 +18,7 @@ export const config = {
 	// api/habit-log takes a bearer secret from the Stoic journal (see api/habit-log/[id]/route.ts).
 	// api/vault-sync takes a bearer secret from the Cura Bridge Obsidian plugin (see its route).
 	// api/mcp is the MCP endpoint for external AI clients, bearer-secret authed (see api/mcp/route.ts).
+	// api/native is the Mac client's API, authed by its own shared-secret header (see api/native/auth.ts).
 	// sw.js must load without a session so the service worker can register/update on any device.
-	matcher: ["/((?!api/auth|api/cron|api/voice-capture|api/notify-action|api/email-inbound|api/habit-log|api/vault-sync|api/mcp|_next/static|_next/image|favicon.ico|icon.png|apple-icon.png|sw.js|manifest.webmanifest).*)"],
+	matcher: ["/((?!api/auth|api/cron|api/voice-capture|api/notify-action|api/email-inbound|api/habit-log|api/vault-sync|api/mcp|api/native|_next/static|_next/image|favicon.ico|icon.png|apple-icon.png|sw.js|manifest.webmanifest).*)"],
 };
